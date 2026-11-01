@@ -34,7 +34,8 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
 
   const visionResult = await eCtx.step('paired-vision-forensics', async () => {
     console.log(`[disputeForensicsTask] Running vision forensics...`);
-    const aiProvider = process.env.GEMINI_API_KEY ? "Google Gemini 1.5 Flash" : (process.env.ANTHROPIC_API_KEY ? "Anthropic Claude 3.5 Sonnet" : "Deterministic Bounded Algorithmic Engine");
+    const geminiModel = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+    const aiProvider = process.env.GEMINI_API_KEY ? `Google Gemini (${geminiModel})` : (process.env.ANTHROPIC_API_KEY ? "Anthropic Claude 3.5 Sonnet" : "Deterministic Bounded Algorithmic Engine");
     console.log(`[disputeForensicsTask] Active Multimodal AI Provider: ${aiProvider}`);
 
     // Mock EXIF check
