@@ -34,10 +34,10 @@ export default function MerchantCockpitPage() {
             </div>
             <div className="flex-1 bg-slate-800 flex items-center justify-center relative p-6">
                <div className="text-center">
-                  <div className="text-slate-400 mb-2"><code>studio.registerToolRunner('paypal_arbiter')</code></div>
+                  <div className="text-slate-400 mb-2"><code>studio.registerToolRunner(&apos;paypal_arbiter&apos;)</code></div>
                   <h2 className="text-xl font-medium text-slate-200">Multi-Agent Arbitration Cockpit Connected</h2>
                   <p className="text-slate-500 text-sm mt-2 max-w-md mx-auto">
-                    Streaming cross-filtered insights via <code>api.defineAiCommand('isolate_high_risk_disputes')</code>
+                    Streaming cross-filtered insights via <code>api.defineAiCommand(&apos;isolate_high_risk_disputes&apos;)</code>
                     and computing <code>Net_Retained_Margin</code> inline.
                   </p>
                </div>
