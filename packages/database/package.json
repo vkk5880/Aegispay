@@ -1,0 +1,20 @@
+{
+  "name": "@aegispay/database",
+  "version": "0.1.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.30.0",
+    "pg": "^8.11.0",
+    "@aegispay/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.0",
+    "drizzle-kit": "^0.20.0",
+    "typescript": "^5.7.0"
+  }
+}
