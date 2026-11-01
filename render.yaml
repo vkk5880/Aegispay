@@ -1,83 +1,87 @@
 services:
   # 1. Next.js 15 Dual-Sided Cockpit (Buyer Portal + AG Studio 3 + Bryntum + /app/judge)
   - type: web
-  name: aegispay-web-cockpit
-  runtime: node
-  plan: standard
-  buildCommand: pnpm install && pnpm --filter web-cockpit build
-  startCommand: pnpm --filter web-cockpit start
-  envVars:
-    - key: NEXT_PUBLIC_API_URL
-      fromService:
-        type: web
-        name: aegispay-api-orchestrator
-        property: host
-    - key: NEXT_PUBLIC_PAYPAL_CLIENT_ID
-      sync: false
+    name: aegispay-web-cockpit
+    runtime: node
+    plan: standard
+    buildCommand: pnpm install && pnpm --filter @aegispay/web-cockpit build
+    startCommand: pnpm --filter @aegispay/web-cockpit start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: aegispay-api-orchestrator
+          property: host
+      - key: NEXT_PUBLIC_PAYPAL_CLIENT_ID
+        sync: false
 
   # 2. Fastify Financial Orchestrator + Proxy MCP Enforcer Host
   - type: web
-  name: aegispay-api-orchestrator
-  runtime: node
-  plan: standard
-  buildCommand: pnpm install && pnpm --filter api-orchestrator build
-  startCommand: pnpm --filter api-orchestrator start
-  healthCheckPath: /api/integrations/verify
-  envVars:
-    - key: DATABASE_URL
-      fromDatabase:
-        name: aegispay-postgres
-        property: connectionString
-    - key: REDIS_URL
-      fromService:
-        type: keyvalue
-        name: aegispay-redis
-        property: connectionString
-    - key: PAYPAL_CLIENT_ID
-      sync: false
-    - key: PAYPAL_CLIENT_SECRET
-      sync: false
-    - key: PAYPAL_WEBHOOK_ID
-      sync: false
-    - key: CHANNEL3_API_KEY
-      sync: false
-    - key: ANTHROPIC_API_KEY
-      sync: false
+    name: aegispay-api-orchestrator
+    runtime: node
+    plan: standard
+    buildCommand: pnpm install && pnpm --filter @aegispay/api-orchestrator build
+    startCommand: pnpm --filter @aegispay/api-orchestrator start
+    healthCheckPath: /api/integrations/verify
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aegispay-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: aegispay-redis
+          property: connectionString
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
   # 3. Render Workflows Service (72h Price-Drop Watcher, Vision Arbiter & Synthetic Bid Matcher)
   - type: worker
-  name: aegispay-workflows
-  runtime: node
-  plan: starter
-  buildCommand: pnpm install && pnpm --filter workflows build
-  startCommand: pnpm --filter workflows start
-  envVars:
-    - key: DATABASE_URL
-      fromDatabase:
-        name: aegispay-postgres
-        property: connectionString
-    - key: REDIS_URL
-      fromService:
-        type: keyvalue
-        name: aegispay-redis
-        property: connectionString
-    - key: PAYPAL_CLIENT_ID
-      sync: false
-    - key: PAYPAL_CLIENT_SECRET
-      sync: false
-    - key: CHANNEL3_API_KEY
-      sync: false
-    - key: ANTHROPIC_API_KEY
-      sync: false
+    name: aegispay-workflows
+    runtime: node
+    plan: starter
+    buildCommand: pnpm install && pnpm --filter @aegispay/workflows build
+    startCommand: pnpm --filter @aegispay/workflows start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aegispay-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: aegispay-redis
+          property: connectionString
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
   # 4. Render Key-Value (Redis) for Atomic Lua Spend Enforcer
   - type: keyvalue
-  name: aegispay-redis
-  plan: starter
-  ipAllowList: []
+    name: aegispay-redis
+    plan: starter
+    ipAllowList: []
 
 databases:
   # 5. Render Managed PostgreSQL 16 Ledger
   - name: aegispay-postgres
-  plan: basic-1gb
-  postgresMajorVersion: "16"
+    plan: basic-1gb
+    postgresMajorVersion: "16"

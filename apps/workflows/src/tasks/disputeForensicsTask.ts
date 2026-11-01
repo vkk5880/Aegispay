@@ -34,6 +34,8 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
 
   const visionResult = await eCtx.step('paired-vision-forensics', async () => {
     console.log(`[disputeForensicsTask] Running vision forensics...`);
+    const aiProvider = process.env.GEMINI_API_KEY ? "Google Gemini 1.5 Flash" : (process.env.ANTHROPIC_API_KEY ? "Anthropic Claude 3.5 Sonnet" : "Deterministic Bounded Algorithmic Engine");
+    console.log(`[disputeForensicsTask] Active Multimodal AI Provider: ${aiProvider}`);
 
     // Mock EXIF check
     const mockImageBuffer = Buffer.from('\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C', 'binary');
@@ -121,3 +123,4 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
     });
   }
 });
+
