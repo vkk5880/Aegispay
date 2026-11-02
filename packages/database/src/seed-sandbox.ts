@@ -210,6 +210,8 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
       scheduled_review_start: i % 3 === 0 ? null : new Date(baseTime + (i * 3600000) + 24 * 3600000),
       scheduled_review_end: i % 3 === 0 ? null : new Date(baseTime + (i * 3600000) + 26 * 3600000),
       compiled_evidence_pdf_base64: null,
+      return_tracking_id: tierAction === 'TIER3_RETURN_OFFER' ? `USPS-RET-${idxHex}` : null,
+      return_label_url: tierAction === 'TIER3_RETURN_OFFER' ? `https://aegispay.dev/returns/label_${idxHex}.pdf` : null,
       updated_at: new Date(baseTime + i * 3600000),
     });
   }

@@ -85,5 +85,7 @@ export const disputeArbitrations = pgTable('dispute_arbitrations', {
   scheduled_review_start: timestamp('scheduled_review_start', { withTimezone: true }),
   scheduled_review_end: timestamp('scheduled_review_end', { withTimezone: true }),
   compiled_evidence_pdf_base64: text('compiled_evidence_pdf_base64'),
+  return_tracking_id: varchar('return_tracking_id', { length: 64 }),
+  return_label_url: text('return_label_url'),
   updated_at: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });

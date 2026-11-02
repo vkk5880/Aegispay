@@ -4,6 +4,7 @@ import { startTaskServer } from '@renderinc/sdk/workflows';
 import './tasks/priceDropWatcher.js';
 import './tasks/syntheticBidMatcher.js';
 import './tasks/disputeForensicsTask.js';
+import './tasks/reverseShippingLabelTask.js';
 
 async function main() {
   console.log('Starting AegisPay Render Workflows...');

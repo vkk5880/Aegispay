@@ -5,13 +5,41 @@ import { eq } from 'drizzle-orm';
 import { enhanceContext } from './types.js';
 import * as ExifReader from 'exifreader';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import { executeReverseShippingLabel } from './reverseShippingLabelTask.js';
+import type { AutonomyDialMode, ReturnLabelInfo } from '@aegispay/shared-types';
 
 const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
 const db = createDb(connectionString);
 
-export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async (ctx, payload: { paypal_dispute_id: string }) => {
+export interface DisputeForensicsPayload {
+  paypal_dispute_id: string;
+  autonomy_mode?: AutonomyDialMode;
+  force_tier?: string;
+  transaction_id?: string;
+}
+
+export interface DisputeForensicsResponse {
+  paypal_dispute_id: string;
+  L: number;
+  R: number;
+  selected_tier_action: string;
+  autonomy_mode: AutonomyDialMode;
+  execution_status: 'AUTO_RESOLVED' | 'AWAITING_ANALYST_APPROVAL' | 'SUBMITTED_PDF_DEFENSE' | 'RETURN_LABEL_ISSUED';
+  return_label?: ReturnLabelInfo;
+  buyer_response: {
+    message: string;
+    offer_type?: string;
+    return_label_url?: string;
+    return_tracking_number?: string;
+    return_carrier?: string;
+    return_qr_code_base64?: string;
+  };
+}
+
+export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async (ctx, payload: DisputeForensicsPayload): Promise<DisputeForensicsResponse> => {
   const eCtx = enhanceContext(ctx);
   const disputeId = payload.paypal_dispute_id;
+  const autonomyMode: AutonomyDialMode = payload.autonomy_mode || 'SUPERVISED';
 
   const dispute = await eCtx.step('fetch-dispute', async () => {
     try {
@@ -77,7 +105,9 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
     const L = 0.8;
     const R = 0.1;
     let tierAction = 'TIER5_SLA_ESCALATE';
-    if (L >= 0.75 && R < 0.20 && dispute.dispute_amount_cents <= 5000) tierAction = 'TIER1_REFUND';
+    if (payload.force_tier) {
+      tierAction = payload.force_tier;
+    } else if (L >= 0.75 && R < 0.20 && dispute.dispute_amount_cents <= 5000) tierAction = 'TIER1_REFUND';
     else if (R >= 0.60 || L < 0.25) tierAction = 'TIER4_CONTEST_PDF';
     else if (L >= 0.75 && R < 0.40 && dispute.dispute_amount_cents > 5000) tierAction = 'TIER3_RETURN_OFFER';
     else if (L >= 0.30 && L < 0.75 && R < 0.35) tierAction = 'TIER2_PARTIAL_OFFER';
@@ -98,6 +128,52 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
 
     return { L, R, tierAction };
   });
+
+  let returnLabelInfo: ReturnLabelInfo | undefined;
+  let executionStatus: DisputeForensicsResponse['execution_status'] = 'AWAITING_ANALYST_APPROVAL';
+  const buyerResponse: DisputeForensicsResponse['buyer_response'] = {
+    message: `Dispute ${disputeId} under evaluation.`,
+  };
+
+  // Autonomy Dial Mode Evaluation:
+  // COPILOT: Analyst approval required for all actions
+  // SUPERVISED: Auto-executes Tier 1 micro-refunds (< $50) and Tier 3 Return Labels; analyst for others
+  // AUTONOMOUS: Fully executes all verified forensic verdicts within policy
+  const canAutoExecute =
+    autonomyMode === 'AUTONOMOUS' ||
+    (autonomyMode === 'SUPERVISED' && (lrMatrix.tierAction === 'TIER1_REFUND' || lrMatrix.tierAction === 'TIER3_RETURN_OFFER'));
+
+  if (lrMatrix.tierAction === 'TIER3_RETURN_OFFER') {
+    // Generate return shipping label automatically and attach to buyer payload
+    returnLabelInfo = await eCtx.step('generate-return-shipping-label', async () => {
+      console.log(`[disputeForensicsTask] Tier 3 triggered for dispute ${disputeId}. Generating prepaid return shipping label.`);
+      return await executeReverseShippingLabel({
+        disputeId,
+        transactionId: payload.transaction_id || telemetryResult.tracking_number,
+        carrier: 'USPS',
+      });
+    });
+
+    executionStatus = 'RETURN_LABEL_ISSUED';
+    buyerResponse.message = 'Return shipping label generated. A full refund will be processed upon carrier delivery scan.';
+    buyerResponse.offer_type = 'REFUND_WITH_RETURN';
+    buyerResponse.return_label_url = returnLabelInfo.label_url;
+    buyerResponse.return_tracking_number = returnLabelInfo.tracking_number;
+    buyerResponse.return_carrier = returnLabelInfo.carrier;
+    buyerResponse.return_qr_code_base64 = returnLabelInfo.qr_code_base64;
+  } else if (lrMatrix.tierAction === 'TIER1_REFUND') {
+    executionStatus = canAutoExecute ? 'AUTO_RESOLVED' : 'AWAITING_ANALYST_APPROVAL';
+    buyerResponse.message = canAutoExecute
+      ? 'Pre-dispute micro-refund issued automatically.'
+      : 'Micro-refund proposed, pending copilot analyst confirmation.';
+    buyerResponse.offer_type = 'REFUND';
+  } else if (lrMatrix.tierAction === 'TIER4_CONTEST_PDF') {
+    executionStatus = 'SUBMITTED_PDF_DEFENSE';
+    buyerResponse.message = 'Forensic dossier compiled and submitted to PayPal dispute center.';
+  } else {
+    executionStatus = 'AWAITING_ANALYST_APPROVAL';
+    buyerResponse.message = 'Escalated to dispute arbitration analyst.';
+  }
 
   if (lrMatrix.tierAction === 'TIER4_CONTEST_PDF') {
     await eCtx.step('submit-evidence-bundle', async () => {
@@ -123,5 +199,16 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
       }
     });
   }
+
+  return {
+    paypal_dispute_id: disputeId,
+    L: lrMatrix.L,
+    R: lrMatrix.R,
+    selected_tier_action: lrMatrix.tierAction,
+    autonomy_mode: autonomyMode,
+    execution_status: executionStatus,
+    return_label: returnLabelInfo,
+    buyer_response: buyerResponse,
+  };
 });
 

@@ -87,8 +87,19 @@ export const DisputeArbitrationSchema = z.object({
   scheduled_review_start: z.date().nullable().optional(),
   scheduled_review_end: z.date().nullable().optional(),
   compiled_evidence_pdf_base64: z.string().nullable().optional(),
+  return_tracking_id: z.string().max(64).nullable().optional(),
+  return_label_url: z.string().nullable().optional(),
   updated_at: z.date().default(() => new Date()),
 });
+
+export const ReturnLabelInfoSchema = z.object({
+  label_url: z.string(),
+  tracking_number: z.string(),
+  carrier: z.string(),
+  qr_code_base64: z.string(),
+});
+
+export const AutonomyDialModeSchema = z.enum(['COPILOT', 'SUPERVISED', 'AUTONOMOUS']);
 
 export const DisputeAnalysisResultSchema = z.object({
   identity_match_score: z.number().min(0).max(1),
@@ -118,6 +129,8 @@ export type SyntheticIntentVoucher = z.infer<typeof SyntheticIntentVoucherSchema
 export type EscrowOrder = z.infer<typeof EscrowOrderSchema>;
 export type PurchaseUnitHold = z.infer<typeof PurchaseUnitHoldSchema>;
 export type DisputeArbitration = z.infer<typeof DisputeArbitrationSchema>;
+export type ReturnLabelInfo = z.infer<typeof ReturnLabelInfoSchema>;
+export type AutonomyDialMode = z.infer<typeof AutonomyDialModeSchema>;
 export type DisputeAnalysisResult = z.infer<typeof DisputeAnalysisResultSchema>;
 export type Channel3Item = z.infer<typeof Channel3ItemSchema>;
 export type PayPalOrderIntent = z.infer<typeof PayPalOrderIntentSchema>;
