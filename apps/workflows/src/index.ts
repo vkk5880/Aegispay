@@ -7,6 +7,12 @@ import './tasks/disputeForensicsTask.js';
 
 async function main() {
   console.log('Starting AegisPay Render Workflows...');
+  
+  if (!process.env.RENDER_SDK_SOCKET_PATH) {
+    console.log('[Workflows] Standalone simulation mode: RENDER_SDK_SOCKET_PATH not present in free container. Tasks available via API orchestrator.');
+    return;
+  }
+
   try {
     await startTaskServer();
     console.log('Task server started successfully.');
