@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CartSolver } from './services/cart-solver.js';
-import { Channel3ProductDetail } from './services/channel3.client.js';
+import { Channel3ProductDetail, Channel3Client } from './services/channel3.client.js';
+import { TaxEstimatorService } from './services/tax-estimator.js';
 import { DisputeMatrixService } from './services/dispute-matrix.js';
 import { SyntheticIntentEngine } from './services/synthetic-intent.js';
 import { PayPalApimaticClient } from './services/paypal-apimatic.js';
+import { AtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 import { buildApp } from './index.js';
 
 test('CartSolver: minimizes net expenditure across multi-merchant offers with rebate', () => {
@@ -265,6 +267,7 @@ test('HTTP Routes: Fastify endpoints respond accurately', async () => {
   });
   assert.equal(authCheckoutRes.statusCode, 200);
   assert.equal(authCheckoutRes.json().status, 'AUTHORIZED');
+  assert.equal(authCheckoutRes.json().stock_reservation_status, 'HELD_2PC');
 
   // ACP Manifest discovery
   const acpManifestRes = await app.inject({
@@ -351,4 +354,157 @@ test('HTTP Routes: Fastify endpoints respond accurately', async () => {
   assert.equal(acpHoldAuthRes.statusCode, 200);
   assert.equal(acpHoldAuthRes.json().status, 'SUCCESS');
   assert.equal(acpHoldAuthRes.json().action, 'confirm_payment_hold');
+});
+
+test('TaxEstimatorService: resolves postal tax rates in basis points and computes jurisdictional tax', () => {
+  const estimator = new TaxEstimatorService();
+
+  // California 94103 -> CA 863 bps (8.63%)
+  const caTax = estimator.calculateTax(10000, '94103');
+  assert.equal(caTax.state_code, 'CA');
+  assert.equal(caTax.tax_rate_bps, 863);
+  assert.equal(caTax.tax_cents, 863);
+
+  // Oregon 97201 -> OR 0 bps (0%)
+  const orTax = estimator.calculateTax(10000, '97201');
+  assert.equal(orTax.state_code, 'OR');
+  assert.equal(orTax.tax_rate_bps, 0);
+  assert.equal(orTax.tax_cents, 0);
+
+  // Default fallback for unknown or empty zip
+  const defTax = estimator.calculateTax(10000);
+  assert.equal(defTax.state_code, 'US_DEFAULT');
+  assert.equal(defTax.tax_rate_bps, 700);
+  assert.equal(defTax.tax_cents, 700);
+});
+
+test('CartSolver with zip tax: incorporates estimated tax into merchant groups & PayPal purchase units', () => {
+  const solver = new CartSolver();
+  const mockProducts: Channel3ProductDetail[] = [
+    {
+      product_id: 'prod_tax_1',
+      title: 'Taxable Monitor',
+      description: '4K Display',
+      category_id: 'xoN',
+      offers: [
+        {
+          id: 'off_tax_1',
+          product_id: 'prod_tax_1',
+          domain: 'displays-direct.com',
+          price: 50000, // $500.00
+          compare_at_price: 55000,
+          max_commission_rate: 0.10, // 10%
+          shipping_fee_cents: 1500,
+          shipping_waiver_threshold_cents: 40000, // shipping waived
+          merchant_anomaly_score: 0.0,
+        },
+      ],
+      images: [{ url: 'http://img.com/mon', cleaned_url: 'http://img.com/mon-clean' }],
+    },
+  ];
+
+  // Run with Texas zip 78701 (825 bps = 8.25%)
+  const result = solver.solve(
+    mockProducts,
+    [{ product_id: 'prod_tax_1', quantity: 1 }],
+    { zipCode: '78701' }
+  );
+
+  assert.equal(result.zip_code, '78701');
+  assert.ok(result.total_tax_cents > 0);
+  // Subtotal $500.00 * 8.25% = $41.25 -> 4125 cents
+  assert.equal(result.total_tax_cents, 4125);
+
+  const pu = result.paypal_purchase_units[0];
+  assert.ok(pu.amount.breakdown.tax_total);
+  assert.equal(pu.amount.breakdown.tax_total.value, '41.25');
+});
+
+test('Channel3Client verifyAndHoldStock: executes 2PC pre-flight check and provides fallback re-optimization', async () => {
+  const ch3 = new Channel3Client();
+
+  // Test successful 2PC reservation with existing items
+  const holdRes = await ch3.verifyAndHoldStock(['ch3_prod_9921', 'ch3_prod_9922']);
+  assert.equal(holdRes.all_held, true);
+  assert.ok(holdRes.reservation_id.startsWith('res_2pc_'));
+  assert.equal(holdRes.verified_items.length, 2);
+  assert.equal(holdRes.verified_items[0].status, 'RESERVED_2PC');
+
+  // Test stock failure when SKU is out of stock / unknown
+  const mixedCatalog: Channel3ProductDetail[] = [
+    {
+      product_id: 'p_instock',
+      title: 'In Stock Item',
+      description: 'Available',
+      category_id: 'xoN',
+      offers: [
+        {
+          id: 'o_in',
+          product_id: 'p_instock',
+          domain: 'shop.com',
+          price: 2000,
+          compare_at_price: 2500,
+          max_commission_rate: 0.05,
+          stock_status: 'IN_STOCK',
+        },
+      ],
+      images: [{ url: 'http://img.com/1', cleaned_url: 'http://img.com/1-clean' }],
+    },
+    {
+      product_id: 'p_outstock',
+      title: 'Sold Out Item',
+      description: 'Unavailable',
+      category_id: 'xoN',
+      offers: [
+        {
+          id: 'o_out',
+          product_id: 'p_outstock',
+          domain: 'shop.com',
+          price: 5000,
+          compare_at_price: 6000,
+          max_commission_rate: 0.05,
+          stock_status: 'OUT_OF_STOCK',
+        },
+      ],
+      images: [{ url: 'http://img.com/2', cleaned_url: 'http://img.com/2-clean' }],
+    },
+  ];
+
+  const failedHoldRes = await ch3.verifyAndHoldStock(
+    ['p_instock', 'p_outstock'],
+    { catalog: mixedCatalog, zipCode: '94103' }
+  );
+
+  assert.equal(failedHoldRes.all_held, false);
+  assert.deepEqual(failedHoldRes.failed_items, ['p_outstock']);
+  // Fallback re-optimization should automatically solve basket with remaining in-stock items
+  assert.ok(failedHoldRes.fallback_reoptimization);
+  assert.equal(failedHoldRes.fallback_reoptimization.assigned_merchants.length, 1);
+  assert.equal(failedHoldRes.fallback_reoptimization.assigned_merchants[0].items[0].product_id, 'p_instock');
+});
+
+test('AtomicSpendEnforcer: uses Redis cluster hash tags {vch_...} for keys', async () => {
+  const enforcer = new AtomicSpendEnforcer();
+  let capturedKeys: string[] = [];
+
+  const mockRedis: any = {
+    script: async () => 'mock_sha',
+    evalsha: async (_sha: string, keyCount: number, ...args: any[]) => {
+      capturedKeys = args.slice(0, keyCount);
+      return [1, '1000'];
+    },
+  };
+
+  await enforcer.reserveBudget(mockRedis, {
+    mandate_id: 'vch_alpha123',
+    merchant_domain: 'test-merchant.com',
+    requested_cents: 1000,
+    current_unix_ms: Date.now(),
+    category_id: 'xoN',
+    merchant_anomaly_score: 50,
+  });
+
+  assert.equal(capturedKeys.length, 2);
+  assert.equal(capturedKeys[0], 'aegis:{vch_alpha123}:mandate');
+  assert.equal(capturedKeys[1], 'aegis:{vch_alpha123}:exposure:test-merchant.com');
 });

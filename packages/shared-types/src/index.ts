@@ -65,6 +65,9 @@ export const PurchaseUnitHoldSchema = z.object({
   honor_period_expires_at: z.date(),
   auth_valid_until: z.date(),
   hold_status: z.enum(['WATCHING_PRICE']).default('WATCHING_PRICE'),
+  tax_cents: z.number().int().nonnegative().default(0),
+  zip_code: z.string().max(10).nullable().optional(),
+  stock_reservation_status: z.string().max(32).default('CONFIRMED'),
 });
 
 export const DisputeArbitrationSchema = z.object({

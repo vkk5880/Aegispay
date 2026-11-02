@@ -155,6 +155,10 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
     const targetDropCents = Math.round(grossAuthCents * (1 - (0.05 + rand() * 0.15)));
     const finalCapturedCents = i % 2 === 0 ? targetDropCents : null;
 
+    const sampleZipCodes = ['94103', '10001', '78701', '98101', '33101'];
+    const assignedZip = pickOne(sampleZipCodes);
+    const taxCents = Math.round(grossAuthCents * 0.0825);
+
     holdRows.push({
       id: holdUuid,
       escrow_order_id: orderUuid,
@@ -172,6 +176,9 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
       honor_period_expires_at: new Date(baseTime + (i * 3600000) + 72 * 3600000), // +72h
       auth_valid_until: new Date(baseTime + (i * 3600000) + 29 * 86400000), // +29 days
       hold_status: finalCapturedCents ? 'CAPTURED_PRICE_DROP' : 'WATCHING_PRICE',
+      tax_cents: taxCents,
+      zip_code: assignedZip,
+      stock_reservation_status: 'HELD_2PC',
     });
 
     // 5. Dispute Arbitrations

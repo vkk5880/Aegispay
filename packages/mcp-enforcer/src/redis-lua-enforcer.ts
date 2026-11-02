@@ -1,8 +1,8 @@
 import type { Redis } from 'ioredis';
 
 const LUA_SCRIPT = `
--- KEYS[1]: "aegis:mandate:" .. mandate_id
--- KEYS[2]: "aegis:merchant_exposure:" .. mandate_id .. ":" .. merchant_domain
+-- KEYS[1]: "aegis:{vch_" .. mandate_id .. "}:mandate"
+-- KEYS[2]: "aegis:{vch_" .. mandate_id .. "}:exposure:" .. merchant_domain
 -- ARGV[1]: requested_cents
 -- ARGV[2]: current_unix_ms
 -- ARGV[3]: category_id
@@ -72,9 +72,11 @@ export class AtomicSpendEnforcer {
   private scriptSha: string | null = null;
 
   async reserveBudget(redisClient: Redis, params: ReservationParams): Promise<ReservationResult> {
+    // Format Redis hash tag {vch_...} to guarantee both keys map to the same Redis cluster slot
+    const tag = params.mandate_id.startsWith('vch_') ? params.mandate_id : `vch_${params.mandate_id}`;
     const keys = [
-      `aegis:mandate:${params.mandate_id}`,
-      `aegis:merchant_exposure:${params.mandate_id}:${params.merchant_domain}`
+      `aegis:{${tag}}:mandate`,
+      `aegis:{${tag}}:exposure:${params.merchant_domain}`
     ];
     const argv = [
       params.requested_cents.toString(),

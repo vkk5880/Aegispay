@@ -10,6 +10,7 @@ const KnapsackRequestSchema = z.object({
   category_ids: z.array(z.string()).optional(),
   hex_color: z.string().optional(),
   image_url: z.string().url().optional(),
+  zip_code: z.string().max(10).optional(),
   requirements: z.array(
     z.object({
       product_id: z.string(),
@@ -21,6 +22,7 @@ const KnapsackRequestSchema = z.object({
 
 const AuthorizeRequestSchema = z.object({
   mandate_id: z.string().max(32),
+  zip_code: z.string().max(10).optional(),
   purchase_units: z.array(
     z.object({
       reference_id: z.string(),
@@ -32,6 +34,7 @@ const AuthorizeRequestSchema = z.object({
         breakdown: z.object({
           item_total: z.object({ currency_code: z.string(), value: stringOrNumber() }).optional(),
           shipping: z.object({ currency_code: z.string(), value: stringOrNumber() }).optional(),
+          tax_total: z.object({ currency_code: z.string(), value: stringOrNumber() }).optional(),
           discount: z.object({ currency_code: z.string(), value: stringOrNumber() }).optional(),
         }).optional(),
       }),
@@ -73,7 +76,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
 
-    const { query, category_ids, hex_color, image_url, requirements, budget_cap_cents } = parseResult.data;
+    const { query, category_ids, hex_color, image_url, requirements, budget_cap_cents, zip_code } = parseResult.data;
 
     // Search or lookup Channel3 catalog
     const searchRes = await defaultChannel3Client.search({
@@ -96,6 +99,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       const optimization = defaultCartSolver.solve(products, reqs, {
         budgetCapCents: budget_cap_cents,
+        zipCode: zip_code,
       });
 
       return reply.send({
@@ -109,7 +113,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * POST /api/buyer/authorize
-   * Multi-purchase unit PayPal v2 Order with intent: "AUTHORIZE" + server read-back verification
+   * Two-Phase Commit (2PC) inventory pre-check + Multi-purchase unit PayPal v2 Order with intent: "AUTHORIZE"
    */
   fastify.post('/api/buyer/authorize', async (request, reply) => {
     const parseResult = AuthorizeRequestSchema.safeParse(request.body);
@@ -117,8 +121,39 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
 
-    const { mandate_id, purchase_units } = parseResult.data;
+    const { mandate_id, purchase_units, zip_code } = parseResult.data;
 
+    // Step 1: 2PC Pre-Flight Stock Verification across all items
+    const stockItemsToVerify: Array<{ product_id: string; quantity: number }> = [];
+    for (const pu of purchase_units) {
+      if (pu.items) {
+        for (const item of pu.items) {
+          if (item.sku) {
+            stockItemsToVerify.push({
+              product_id: item.sku,
+              quantity: parseInt(item.quantity, 10) || 1,
+            });
+          }
+        }
+      }
+    }
+
+    if (stockItemsToVerify.length > 0) {
+      const stockReservation = await defaultChannel3Client.verifyAndHoldStock(stockItemsToVerify, {
+        zipCode: zip_code,
+      });
+
+      if (!stockReservation.all_held) {
+        return reply.status(409).send({
+          error: 'STOCK_VERIFICATION_FAILED',
+          message: 'One or more items in the basket are out of stock or failed 2PC hold verification.',
+          stock_reservation: stockReservation,
+          fallback_reoptimization: stockReservation.fallback_reoptimization,
+        });
+      }
+    }
+
+    // Step 2: Authorize Order via PayPal Orders v2
     try {
       const createdOrder = await defaultPayPalClient.createMultiPurchaseUnitOrder({
         intent: 'AUTHORIZE',
@@ -134,6 +169,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         status: 'AUTHORIZED',
         mandate_id,
         paypal_order_id: orderId,
+        stock_reservation_status: 'HELD_2PC',
         readback_verified: true,
         order: verifiedOrder,
       });

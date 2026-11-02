@@ -1,3 +1,4 @@
+import { defaultTaxEstimator } from './tax-estimator.js';
 import { Channel3Offer, Channel3ProductDetail } from './channel3.client.js';
 
 export interface RequiredShoppingItem {
@@ -28,6 +29,8 @@ export interface MerchantCartGroup {
   shipping_fee_cents: number;
   shipping_waived: boolean;
   merchant_anomaly_penalty_cents: number;
+  tax_cents: number;
+  tax_rate_bps: number;
   net_merchant_cents: number;
 }
 
@@ -37,11 +40,13 @@ export interface KnapsackOptimizationResult {
   total_commission_rebate_cents: number;
   total_shipping_cents: number;
   total_shipping_saved_cents: number;
+  total_tax_cents: number;
   net_buyer_expenditure_cents: number;
   savings_percentage: number;
   is_within_budget: boolean;
   budget_cap_cents?: number;
   overage_percentage?: number;
+  zip_code?: string;
   paypal_purchase_units: Array<{
     reference_id: string;
     custom_id: string;
@@ -53,6 +58,7 @@ export interface KnapsackOptimizationResult {
       breakdown: {
         item_total: { currency_code: string; value: string };
         shipping: { currency_code: string; value: string };
+        tax_total: { currency_code: string; value: string };
         discount: { currency_code: string; value: string };
       };
     };
@@ -70,6 +76,7 @@ export interface KnapsackOptions {
   alpha?: number; // Commission rebate multiplier, default 0.75 as per Section 4.2
   lambdaAnomaly?: number; // Weight penalty for merchant anomaly, default 5000 cents ($50 penalty for 1.0 anomaly)
   budgetCapCents?: number;
+  zipCode?: string;
 }
 
 export class CartSolver {
@@ -204,6 +211,8 @@ export class CartSolver {
           shipping_fee_cents: choice.offer.shipping_fee_cents ?? 1000,
           shipping_waived: false,
           merchant_anomaly_penalty_cents: Math.round((choice.offer.merchant_anomaly_score ?? 0) * lambda),
+          tax_cents: 0,
+          tax_rate_bps: 0,
           net_merchant_cents: 0,
         });
       }
@@ -231,6 +240,7 @@ export class CartSolver {
     let totalRebate = 0;
     let totalShipping = 0;
     let totalShippingSaved = 0;
+    let totalTax = 0;
 
     const assignedMerchants: MerchantCartGroup[] = [];
     for (const group of merchantGroups.values()) {
@@ -240,14 +250,21 @@ export class CartSolver {
       } else {
         totalShipping += group.shipping_fee_cents;
       }
-      group.net_merchant_cents = group.subtotal_cents - group.commission_rebate_cents + group.shipping_fee_cents;
+
+      // Calculate jurisdictional postal sales tax for this merchant's taxable subtotal
+      const taxRes = defaultTaxEstimator.calculateTax(group.subtotal_cents, options?.zipCode);
+      group.tax_cents = taxRes.tax_cents;
+      group.tax_rate_bps = taxRes.tax_rate_bps;
+      totalTax += group.tax_cents;
+
+      group.net_merchant_cents = group.subtotal_cents - group.commission_rebate_cents + group.shipping_fee_cents + group.tax_cents;
 
       grossSubtotal += group.subtotal_cents;
       totalRebate += group.commission_rebate_cents;
       assignedMerchants.push(group);
     }
 
-    const netBuyerExpenditure = grossSubtotal - totalRebate + totalShipping;
+    const netBuyerExpenditure = grossSubtotal - totalRebate + totalShipping + totalTax;
     const retailTotal = assignedMerchants.reduce((acc, g) =>
       acc + g.items.reduce((iAcc, item) => iAcc + item.unit_compare_price_cents * item.quantity, 0),
       0
@@ -270,6 +287,7 @@ export class CartSolver {
     const paypalPurchaseUnits = assignedMerchants.map((merchant, idx) => {
       const itemTotalVal = (merchant.subtotal_cents / 100).toFixed(2);
       const shippingVal = (merchant.shipping_fee_cents / 100).toFixed(2);
+      const taxVal = (merchant.tax_cents / 100).toFixed(2);
       const discountVal = (merchant.commission_rebate_cents / 100).toFixed(2);
       const totalVal = (merchant.net_merchant_cents / 100).toFixed(2);
       const invoiceSuffix = Math.random().toString(36).substring(2, 7);
@@ -285,6 +303,7 @@ export class CartSolver {
           breakdown: {
             item_total: { currency_code: 'USD', value: itemTotalVal },
             shipping: { currency_code: 'USD', value: shippingVal },
+            tax_total: { currency_code: 'USD', value: taxVal },
             discount: { currency_code: 'USD', value: discountVal },
           },
         },
@@ -307,11 +326,13 @@ export class CartSolver {
       total_commission_rebate_cents: totalRebate,
       total_shipping_cents: totalShipping,
       total_shipping_saved_cents: totalShippingSaved,
+      total_tax_cents: totalTax,
       net_buyer_expenditure_cents: netBuyerExpenditure,
       savings_percentage: savingsPercentage,
       is_within_budget: isWithinBudget,
       budget_cap_cents: budgetCap,
       overage_percentage: overagePercentage,
+      zip_code: options?.zipCode,
       paypal_purchase_units: paypalPurchaseUnits,
     };
   }

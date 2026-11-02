@@ -170,6 +170,7 @@ export class PayPalApimaticClient {
         breakdown?: {
           item_total?: { currency_code: string; value: string };
           shipping?: { currency_code: string; value: string };
+          tax_total?: { currency_code: string; value: string };
           discount?: { currency_code: string; value: string };
         };
       };
@@ -211,6 +212,10 @@ export class PayPalApimaticClient {
             shipping: pu.amount.breakdown.shipping ? {
               currencyCode: pu.amount.breakdown.shipping.currency_code,
               value: pu.amount.breakdown.shipping.value,
+            } : undefined,
+            taxTotal: pu.amount.breakdown.tax_total ? {
+              currencyCode: pu.amount.breakdown.tax_total.currency_code,
+              value: pu.amount.breakdown.tax_total.value,
             } : undefined,
             discount: pu.amount.breakdown.discount ? {
               currencyCode: pu.amount.breakdown.discount.currency_code,

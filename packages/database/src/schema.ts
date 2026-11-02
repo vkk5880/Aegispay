@@ -63,6 +63,9 @@ export const purchaseUnitHolds = pgTable('purchase_unit_holds', {
   honor_period_expires_at: timestamp('honor_period_expires_at', { withTimezone: true }).notNull(),
   auth_valid_until: timestamp('auth_valid_until', { withTimezone: true }).notNull(),
   hold_status: varchar('hold_status', { length: 32 }).notNull().default('WATCHING_PRICE'),
+  tax_cents: integer('tax_cents').notNull().default(0),
+  zip_code: varchar('zip_code', { length: 10 }),
+  stock_reservation_status: varchar('stock_reservation_status', { length: 32 }).notNull().default('CONFIRMED'),
 });
 
 export const disputeArbitrations = pgTable('dispute_arbitrations', {
