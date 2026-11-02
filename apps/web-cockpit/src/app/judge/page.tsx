@@ -110,16 +110,23 @@ export default function JudgeChaosPortal() {
         {/* Banner */}
         <div className="p-6 rounded-2xl bg-gradient-to-r from-amber-50 via-white to-rose-50 dark:from-amber-950/30 dark:via-[#0e1628] dark:to-rose-950/30 border border-amber-200 dark:border-amber-500/30 shadow-sm dark:shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-              Autonomous Commerce Chaos & Sandbox Verification
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                Hackathon Video Chaos Simulator & Verification
+              </h1>
               <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/40">
-                Section 7.2 Plan.md
+                Section 10.8 Plan.md
               </span>
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-              Pre-authenticated, zero-friction verification triggers executing the full algorithmic and cryptographic pipeline:
-              Knapsack optimization, 72h price-drop capture, Synthetic Intent Vault token clearing, Redis Lua guardrails, and
-              live PayPal Sandbox dispute auto-adjudication.
+              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-500/20 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-500/40">
+                3-MINUTE DEMO SEQUENCE
+              </span>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-400 max-w-3xl">
+              Strictly structured to follow the hackathon 3-minute video presentation formula:
+              <strong className="text-rose-600 dark:text-rose-400"> (1) Adversarial Prompt Injection Block</strong>,
+              <strong className="text-purple-600 dark:text-purple-400"> (2) Synthetic Intent Vault Haggle</strong>,
+              <strong className="text-emerald-600 dark:text-emerald-400"> (3) Damaged Return Dispute Forensics</strong>, and
+              <strong className="text-cyan-600 dark:text-cyan-400"> (4) Knapsack 72h Escrow Price Drop</strong> with live PayPal read-backs.
             </p>
           </div>
 
@@ -135,63 +142,27 @@ export default function JudgeChaosPortal() {
           </div>
         </div>
 
-        {/* 4 One-Click Chaos Triggers */}
+        {/* 4 Chaos Triggers strictly aligned to 3-Minute Video Sequence */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Button 1: Knapsack + 72h Price Drop */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border border-cyan-200 dark:border-cyan-500/30 hover:border-cyan-400 dark:hover:border-cyan-500/60 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md">
-            <div className="space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-cyan-100 dark:bg-cyan-500/20 border border-cyan-300 dark:border-cyan-500/40 flex items-center justify-center text-cyan-700 dark:text-cyan-400">
-                <Layers className="w-4 h-4" />
-              </div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-cyan-200">Knapsack + 72h Price-Drop</h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Executes multi-merchant ILP basket, places PayPal v2 Authorize hold, triggers Channel3 15% price-drop poll, and executes final lower-price capture.
-              </p>
+          {/* Action 1: Adversarial Prompt Injection Block (0:00 - 0:45) */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-rose-300 dark:border-rose-500/40 hover:border-rose-500 dark:hover:border-rose-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 rounded text-[9px] font-mono font-bold">
+              0:00 - 0:45
             </div>
-            <button
-              onClick={() => triggerChaos('TRIGGER_KNAPSACK_PRICE_DROP', 'Trigger Knapsack + 72h Price-Drop Capture')}
-              disabled={loadingAction !== null}
-              className="w-full py-2.5 px-3 bg-cyan-600 hover:bg-cyan-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-cyan-500/20"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              {loadingAction === 'TRIGGER_KNAPSACK_PRICE_DROP' ? 'Executing...' : 'Trigger Knapsack + 72h Drop'}
-            </button>
-          </div>
-
-          {/* Button 2: Synthetic Intent Bid */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border border-purple-200 dark:border-purple-500/30 hover:border-purple-400 dark:hover:border-purple-500/60 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md">
-            <div className="space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-500/20 border border-purple-300 dark:border-purple-500/40 flex items-center justify-center text-purple-700 dark:text-purple-400">
-                <Activity className="w-4 h-4" />
-              </div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-purple-200">Synthetic Intent Bid</h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Mints Vault v3 setup-token & Ed25519 voucher ($450 bid on $490 basket, 8.89% overage), matches autonomous merchant floor, and captures instantly.
-              </p>
-            </div>
-            <button
-              onClick={() => triggerChaos('TRIGGER_SYNTHETIC_BID', 'Trigger Synthetic Intent Bid ($450 on $490 Bundle)')}
-              disabled={loadingAction !== null}
-              className="w-full py-2.5 px-3 bg-purple-600 hover:bg-purple-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-purple-500/20"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              {loadingAction === 'TRIGGER_SYNTHETIC_BID' ? 'Broadcasting...' : 'Trigger Synthetic Bid ($450)'}
-            </button>
-          </div>
-
-          {/* Button 3: Redis Lua Prompt-Injection Attack */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border border-rose-200 dark:border-rose-500/30 hover:border-rose-400 dark:hover:border-rose-500/60 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md">
             <div className="space-y-2">
               <div className="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-500/20 border border-rose-300 dark:border-rose-500/40 flex items-center justify-center text-rose-700 dark:text-rose-400">
                 <ShieldAlert className="w-4 h-4" />
               </div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-rose-200">Redis Lua Prompt-Injection</h3>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-rose-600 dark:text-rose-400">ACT 1</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-rose-200">Adversarial Prompt Injection</h3>
+              </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Fires adversarial $5,000 spend attempt exceeding the buyer mandate budget cap; demonstrates atomic &lt;1ms rejection before hitting PayPal API.
+                Adversarial AI attempts $5,000 spend over $500 cap. Demonstrates instant <strong>&lt; 1ms Redis Lua atomic block</strong> with 0 PayPal API calls.
               </p>
             </div>
             <button
-              onClick={() => triggerChaos('TRIGGER_REDIS_LUA_ATTACK', 'Trigger Redis Lua Prompt-Injection Attack ($5,000)')}
+              onClick={() => triggerChaos('TRIGGER_REDIS_LUA_ATTACK', 'Act 1: Simulate Prompt Injection Attack ($5,000)')}
               disabled={loadingAction !== null}
               className="w-full py-2.5 px-3 bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-rose-500/20"
             >
@@ -200,24 +171,84 @@ export default function JudgeChaosPortal() {
             </button>
           </div>
 
-          {/* Button 4: Inject Live Sandbox Dispute & Auto-Adjudicate */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border border-emerald-200 dark:border-emerald-500/30 hover:border-emerald-400 dark:hover:border-emerald-500/60 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md">
+          {/* Action 2: Synthetic Intent Haggle & Vault Auth (0:45 - 1:30) */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-purple-300 dark:border-purple-500/40 hover:border-purple-500 dark:hover:border-purple-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/30 rounded text-[9px] font-mono font-bold">
+              0:45 - 1:30
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-500/20 border border-purple-300 dark:border-purple-500/40 flex items-center justify-center text-purple-700 dark:text-purple-400">
+                <Activity className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-purple-600 dark:text-purple-400">ACT 2</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-purple-200">Synthetic Intent Haggle</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Mints PayPal Vault v3 setup-token & Ed25519 voucher ($450 on $490 bundle), clears merchant reserve floor, and auto-captures.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_SYNTHETIC_BID', 'Act 2: Trigger Synthetic Intent Haggle ($450 on $490 Bundle)')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-purple-600 hover:bg-purple-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-purple-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_SYNTHETIC_BID' ? 'Broadcasting...' : 'Trigger Synthetic Bid ($450)'}
+            </button>
+          </div>
+
+          {/* Action 3: Damaged Return Dispute & Vision Forensics (1:30 - 2:15) */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-emerald-300 dark:border-emerald-500/40 hover:border-emerald-500 dark:hover:border-emerald-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 rounded text-[9px] font-mono font-bold">
+              1:30 - 2:15
+            </div>
             <div className="space-y-2">
               <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-300 dark:border-emerald-500/40 flex items-center justify-center text-emerald-700 dark:text-emerald-400">
                 <Server className="w-4 h-4" />
               </div>
-              <h3 className="font-bold text-sm text-slate-900 dark:text-emerald-200">Sandbox Dispute Adjudicate</h3>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">ACT 3</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-emerald-200">Damaged Return Dispute</h3>
+              </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Simulates /require-evidence on PayPal dispute, triggers vision forensics + in-memory pdf-lib evidence upload, and calls /adjudicate in Seller Favor.
+                Runs EXIF forensics, multi-modal vision diff, uploads in-memory pdf-lib evidence bundle to PayPal Disputes v1, and auto-adjudicates.
               </p>
             </div>
             <button
-              onClick={() => triggerChaos('INJECT_SANDBOX_DISPUTE', 'Inject Live Sandbox Dispute & Auto-Adjudicate')}
+              onClick={() => triggerChaos('INJECT_SANDBOX_DISPUTE', 'Act 3: Inject Damaged Return Dispute & Auto-Adjudicate')}
               disabled={loadingAction !== null}
               className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-500/20"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               {loadingAction === 'INJECT_SANDBOX_DISPUTE' ? 'Adjudicating...' : 'Auto-Adjudicate Dispute'}
+            </button>
+          </div>
+
+          {/* Action 4: Knapsack Multi-Vendor + 72h Price Drop (2:15 - 3:00) */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-cyan-300 dark:border-cyan-500/40 hover:border-cyan-500 dark:hover:border-cyan-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/30 rounded text-[9px] font-mono font-bold">
+              2:15 - 3:00
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-cyan-100 dark:bg-cyan-500/20 border border-cyan-300 dark:border-cyan-500/40 flex items-center justify-center text-cyan-700 dark:text-cyan-400">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-cyan-600 dark:text-cyan-400">ACT 4</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-cyan-200">Knapsack + 72h Price-Drop</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Channel3 ILP knapsack splits order across vendors, authorizes PayPal v2 hold, triggers 15% price drop, and captures savings.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_KNAPSACK_PRICE_DROP', 'Act 4: Trigger Knapsack + 72h Price-Drop Capture')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-cyan-600 hover:bg-cyan-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-cyan-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_KNAPSACK_PRICE_DROP' ? 'Executing...' : 'Trigger Knapsack + 72h Drop'}
             </button>
           </div>
         </div>
