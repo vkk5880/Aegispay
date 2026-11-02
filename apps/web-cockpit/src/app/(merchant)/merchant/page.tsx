@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { AutonomyDialWidget } from '@/components/ag-studio/AutonomyDialWidget';
 import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceComparatorWidget';
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
 import { DisputeSlaScheduler } from '@/components/bryntum/DisputeSlaScheduler';
@@ -43,6 +44,9 @@ export default function MerchantCockpitPage() {
           </span>
         </div>
       </div>
+
+      {/* Merchant Autonomy Dial Configuration */}
+      <AutonomyDialWidget initialMode="SUPERVISED" />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: AG Studio Canvas & Visualizers */}
