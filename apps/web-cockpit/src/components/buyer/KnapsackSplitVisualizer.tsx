@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { ShoppingBag, Truck, CheckCircle, Percent, ArrowRight, Store, AlertTriangle } from 'lucide-react';
+import { ShoppingBag, Truck, CheckCircle, Percent, ArrowRight, Store, AlertTriangle, Calendar, Clock } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
 export interface KnapsackItem {
@@ -16,6 +16,8 @@ export interface KnapsackItem {
 
 export interface KnapsackMerchantGroup {
   merchant_domain: string;
+  delivery_window?: string;
+  estimated_arrival?: string;
   subtotal_cents: number;
   commission_rebate_cents: number;
   shipping_fee_cents: number;
@@ -53,6 +55,8 @@ export function KnapsackSplitVisualizer({
     assigned_merchants: [
       {
         merchant_domain: 'audio-gear-direct.com',
+        delivery_window: '2-Day Express Consolidated',
+        estimated_arrival: 'Est. Delivery in 2 business days',
         subtotal_cents: 28000,
         commission_rebate_cents: 3150,
         shipping_fee_cents: 0,
@@ -73,6 +77,8 @@ export function KnapsackSplitVisualizer({
       },
       {
         merchant_domain: 'nordic-workspaces.io',
+        delivery_window: '3-4 Day Priority Freight',
+        estimated_arrival: 'Est. Delivery in 3-4 business days',
         subtotal_cents: 19500,
         commission_rebate_cents: 1755,
         shipping_fee_cents: 0,
@@ -113,6 +119,13 @@ export function KnapsackSplitVisualizer({
 
   const data = optimization || defaultData;
 
+  // Group by delivery window or merchant
+  const enrichedMerchants = data.assigned_merchants.map((merchant, idx) => ({
+    ...merchant,
+    delivery_window: merchant.delivery_window || (idx === 0 ? '2-Day Express Consolidated' : '3-4 Day Priority Freight'),
+    estimated_arrival: merchant.estimated_arrival || (idx === 0 ? 'Est. Delivery in 2 business days' : 'Est. Delivery in 3-4 business days'),
+  }));
+
   return (
     <div className="bg-white dark:bg-[#0b1324] border border-slate-200 dark:border-[#1e293b] rounded-2xl p-6 shadow-sm dark:shadow-2xl relative overflow-hidden backdrop-blur-md transition-colors">
       {/* Header */}
@@ -125,11 +138,11 @@ export function KnapsackSplitVisualizer({
             <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-wide flex items-center gap-2">
               Commission-Subsidized Knapsack Cart
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30">
-                ILP Solver
+                Unified Delivery Windows
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Multi-merchant optimization with 75% Channel3 rebate passback & shipping waiver thresholds
+              Multi-merchant optimization with line-item commission rebates & coordinated shipping windows
             </p>
           </div>
         </div>
@@ -149,74 +162,94 @@ export function KnapsackSplitVisualizer({
         </div>
       </div>
 
-      {/* Multi-Merchant Split Cards */}
-      <div className="mt-6 space-y-4">
-        {data.assigned_merchants.map((merchant, idx) => {
+      {/* Multi-Merchant Split Cards Grouped by Unified Delivery Window */}
+      <div className="mt-6 space-y-5">
+        {enrichedMerchants.map((merchant, idx) => {
           const threshold = merchant.waiver_threshold_cents || 25000;
           const progressPct = Math.min(100, Math.round((merchant.subtotal_cents / threshold) * 100));
 
           return (
             <div
               key={merchant.merchant_domain}
-              className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-[#1e293b] rounded-xl p-4 transition-all hover:border-slate-300 dark:hover:border-slate-700 shadow-xs"
+              className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-[#1e293b] rounded-xl p-5 transition-all hover:border-slate-300 dark:hover:border-slate-700 shadow-xs"
             >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800 gap-2">
-                <div className="flex items-center gap-2">
-                  <Store className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                  <span className="font-mono text-sm font-semibold text-slate-900 dark:text-slate-200">
-                    {merchant.merchant_domain}
-                  </span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-400">
-                    Purchase Unit #{idx + 1}
+              {/* Unified Delivery Window Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3.5 border-b border-slate-200 dark:border-slate-800 gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-100 dark:bg-blue-950/60 border border-blue-300 dark:border-blue-500/40 text-blue-900 dark:text-blue-300 text-xs font-semibold">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>{merchant.delivery_window}</span>
+                  </div>
+                  <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-cyan-500" />
+                    {merchant.estimated_arrival}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-4 text-xs font-mono">
-                  <span className="text-slate-600 dark:text-slate-400">
-                    Subtotal: <strong className="text-slate-900 dark:text-slate-200">{formatCents(merchant.subtotal_cents)}</strong>
+                <div className="flex items-center gap-2 text-xs font-mono">
+                  <Store className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                  <span className="font-semibold text-slate-900 dark:text-slate-200">
+                    {merchant.merchant_domain}
                   </span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                    Rebate: -{formatCents(merchant.commission_rebate_cents)}
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                    Unit #{idx + 1}
                   </span>
                 </div>
               </div>
 
-              {/* Items in Merchant Group */}
+              {/* Items in Merchant Group with Line-Item Commission Rebates */}
               <div className="divide-y divide-slate-200 dark:divide-slate-800/60 my-2">
-                {merchant.items.map((item) => (
-                  <div key={item.product_id} className="py-2.5 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700">
-                        {item.cleaned_url ? (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            src={item.cleaned_url}
-                            alt={item.title}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        ) : null}
-                      </div>
-                      <div>
-                        <div className="text-slate-900 dark:text-slate-200 font-medium truncate max-w-xs">{item.title}</div>
-                        <div className="text-[10px] text-slate-500 font-mono">
-                          Channel3 SKU: {item.product_id} • Rate: {(item.commission_rate * 100).toFixed(0)}%
-                        </div>
-                      </div>
-                    </div>
+                {merchant.items.map((item) => {
+                  const lineTotalCents = item.unit_price_cents * item.quantity;
+                  const itemRebateCents = Math.round(lineTotalCents * item.commission_rate * 0.75); // 75% passback
+                  const netItemCents = lineTotalCents - itemRebateCents;
 
-                    <div className="text-right font-mono">
-                      <div className="text-slate-900 dark:text-slate-200 font-semibold">{formatCents(item.unit_price_cents * item.quantity)}</div>
-                      {item.unit_compare_price_cents > item.unit_price_cents && (
-                        <div className="text-[10px] text-slate-400 dark:text-slate-500 line-through">
-                          {formatCents(item.unit_compare_price_cents * item.quantity)}
+                  return (
+                    <div key={item.product_id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between text-xs gap-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-slate-200 dark:bg-slate-800 flex items-center justify-center overflow-hidden border border-slate-200 dark:border-slate-700 flex-shrink-0">
+                          {item.cleaned_url ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={item.cleaned_url}
+                              alt={item.title}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : null}
                         </div>
-                      )}
+                        <div>
+                          <div className="text-slate-900 dark:text-slate-200 font-medium truncate max-w-sm">{item.title}</div>
+                          <div className="flex flex-wrap items-center gap-2 text-[10px] text-slate-500 font-mono mt-0.5">
+                            <span>SKU: {item.product_id}</span>
+                            <span>•</span>
+                            <span>Qty: {item.quantity}</span>
+                            <span>•</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-500/30">
+                              Instant Rebate: -{formatCents(itemRebateCents)} ({(item.commission_rate * 100).toFixed(0)}% rate)
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-left sm:text-right font-mono flex sm:flex-col items-center sm:items-end justify-between gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-900 dark:text-slate-200 font-bold text-sm">
+                            {formatCents(netItemCents)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 dark:text-slate-500 line-through">
+                            {formatCents(lineTotalCents)}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                          Save {formatCents(itemRebateCents)}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Tiered Shipping Threshold Progress Bar */}
@@ -262,7 +295,7 @@ export function KnapsackSplitVisualizer({
             <span className="text-slate-900 dark:text-slate-300 font-semibold">{formatCents(data.gross_subtotal_cents)}</span>
           </div>
           <div>
-            <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Commission Rebate (α=0.75)</span>
+            <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Commission Rebates</span>
             <span className="text-emerald-600 dark:text-emerald-400 font-semibold">-{formatCents(data.total_commission_rebate_cents)}</span>
           </div>
           <div>

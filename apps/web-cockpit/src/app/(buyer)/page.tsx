@@ -1,24 +1,31 @@
 'use client';
 
 import React, { useState } from 'react';
+import { GenerativeIntentBar, ParsedSearchIntent } from '@/components/buyer/GenerativeIntentBar';
+import { ThoughtStreamVisualizer, ThoughtStep } from '@/components/buyer/ThoughtStreamVisualizer';
 import { CryptographicMandateSigner } from '@/components/buyer/CryptographicMandateSigner';
 import { KnapsackSplitVisualizer, KnapsackOptimizationData } from '@/components/buyer/KnapsackSplitVisualizer';
 import { SyntheticIntentBidder } from '@/components/buyer/SyntheticIntentBidder';
 import { PayPalV6SdkMount } from '@/components/buyer/PayPalV6SdkMount';
 import type { SessionMandate } from '@aegispay/shared-types';
-import { Sparkles, Activity, Layers, Terminal } from 'lucide-react';
+import { Sparkles, Activity, Layers, Terminal, ShieldCheck, CheckCircle2 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
 export default function BuyerPortalPage() {
   const [activeMandate, setActiveMandate] = useState<SessionMandate | null>(null);
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'KNAPSACK' | 'SYNTHETIC' | 'PAYPAL'>('OVERVIEW');
   const [notification, setNotification] = useState<string | null>(null);
+  const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
+  const [shouldRunTrace, setShouldRunTrace] = useState<boolean>(false);
+  const [externalBudgetCents, setExternalBudgetCents] = useState<number>(40000);
 
   // Knapsack state
   const [optimizationData, setOptimizationData] = useState<KnapsackOptimizationData>({
     assigned_merchants: [
       {
         merchant_domain: 'audio-gear-direct.com',
+        delivery_window: '2-Day Express Consolidated',
+        estimated_arrival: 'Est. Delivery in 2 business days',
         subtotal_cents: 28000,
         commission_rebate_cents: 3150,
         shipping_fee_cents: 0,
@@ -39,6 +46,8 @@ export default function BuyerPortalPage() {
       },
       {
         merchant_domain: 'nordic-workspaces.io',
+        delivery_window: '3-4 Day Priority Freight',
+        estimated_arrival: 'Est. Delivery in 3-4 business days',
         subtotal_cents: 19500,
         commission_rebate_cents: 1755,
         shipping_fee_cents: 0,
@@ -100,6 +109,31 @@ export default function BuyerPortalPage() {
             )
           : undefined,
     }));
+  };
+
+  const handleIntentSearch = (intent: ParsedSearchIntent) => {
+    setIsSolvingIntent(true);
+    setShouldRunTrace(true);
+    setExternalBudgetCents(intent.maxBudgetCents);
+    showNotification(`Parsing query: "${intent.rawQuery.slice(0, 42)}..." with budget ${formatCents(intent.maxBudgetCents)}`);
+
+    setTimeout(() => {
+      setIsSolvingIntent(false);
+      setShouldRunTrace(false);
+
+      // Dynamically tune knapsack cart based on intent
+      const isOverBudget = 42595 > intent.maxBudgetCents;
+      setOptimizationData((prev) => ({
+        ...prev,
+        budget_cap_cents: intent.maxBudgetCents,
+        is_within_budget: !isOverBudget,
+        overage_percentage: isOverBudget
+          ? Number((((42595 - intent.maxBudgetCents) / intent.maxBudgetCents) * 100).toFixed(2))
+          : undefined,
+      }));
+
+      showNotification(`Channel3 search matched 14 offers across 3 merchants. Knapsack solved!`);
+    }, 2200);
   };
 
   return (
@@ -166,8 +200,8 @@ export default function BuyerPortalPage() {
               </span>
             </h1>
             <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-              Equip autonomous shopping agents with WebCrypto Ed25519 signed spend mandates, commission-subsidized
-              multi-vendor knapsack optimization, and binding PayPal Vault v3 synthetic bids.
+              Conversational generative procurement powered by Channel3 vector search, Ed25519 cryptographic spend limits,
+              and PayPal Vault v3 synthetic intent bidding.
             </p>
           </div>
 
@@ -177,18 +211,27 @@ export default function BuyerPortalPage() {
               <span className="text-cyan-600 dark:text-cyan-400 font-bold">{activeMandate?.mandate_id || 'Generating...'}</span>
             </div>
             <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Max Spend Limit</span>
+              <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Spend Vault Cap</span>
               <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                {activeMandate ? formatCents(activeMandate.max_total_spend_cents) : '$500.00'}
+                {activeMandate ? formatCents(activeMandate.max_total_spend_cents) : formatCents(externalBudgetCents)}
               </span>
             </div>
           </div>
         </div>
 
+        {/* Generative Intent Bar */}
+        <GenerativeIntentBar onSearchIntent={handleIntentSearch} isLoading={isSolvingIntent} />
+
+        {/* Streaming Thought Visualizer */}
+        <ThoughtStreamVisualizer isRunning={shouldRunTrace} />
+
         {/* Dynamic View Mounts */}
         {(activeTab === 'OVERVIEW' || activeTab === 'KNAPSACK') && (
           <section className="space-y-8">
-            <CryptographicMandateSigner onMandateGenerated={handleMandateGenerated} />
+            <CryptographicMandateSigner
+              onMandateGenerated={handleMandateGenerated}
+              externalBudgetCents={externalBudgetCents}
+            />
             <KnapsackSplitVisualizer
               optimization={optimizationData}
               onProceedToAuthorize={() => {

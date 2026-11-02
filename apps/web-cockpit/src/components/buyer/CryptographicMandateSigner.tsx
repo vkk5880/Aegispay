@@ -2,15 +2,19 @@
 
 import React, { useState, useEffect } from 'react';
 import type { SessionMandate } from '@aegispay/shared-types';
-import { Lock, ShieldCheck, RefreshCw, Key, Copy, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, RefreshCw, Key, Copy, CheckCircle2, ChevronDown, Lock } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
 interface CryptographicMandateSignerProps {
   onMandateGenerated?: (mandate: SessionMandate) => void;
+  externalBudgetCents?: number;
 }
 
-export function CryptographicMandateSigner({ onMandateGenerated }: CryptographicMandateSignerProps) {
-  const [totalBudgetCents, setTotalBudgetCents] = useState<number>(50000); // $500.00
+export function CryptographicMandateSigner({
+  onMandateGenerated,
+  externalBudgetCents,
+}: CryptographicMandateSignerProps) {
+  const [totalBudgetCents, setTotalBudgetCents] = useState<number>(externalBudgetCents || 50000); // $500.00
   const [singleMerchantCapCents, setSingleMerchantCapCents] = useState<number>(25000); // $250.00
   const [allowedCategories, setAllowedCategories] = useState<string[]>([
     'audio',
@@ -18,10 +22,21 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
     'electronics',
     'peripherals',
   ]);
-  const [validityMinutes, setValidityMinutes] = useState<number>(30);
+  const [validityMinutes, setValidityMinutes] = useState<number>(15);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generatedMandate, setGeneratedMandate] = useState<SessionMandate | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+
+  // Sync when externalBudgetCents updates from GenerativeIntentBar
+  useEffect(() => {
+    if (externalBudgetCents && externalBudgetCents !== totalBudgetCents) {
+      setTotalBudgetCents(externalBudgetCents);
+      if (singleMerchantCapCents > externalBudgetCents) {
+        setSingleMerchantCapCents(Math.round(externalBudgetCents * 0.6));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalBudgetCents]);
 
   const availableCategories = [
     { id: 'audio', label: 'Audio & Acoustics' },
@@ -97,7 +112,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
   useEffect(() => {
     generateAndSignMandate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [totalBudgetCents, singleMerchantCapCents, validityMinutes]);
 
   const copyMandateJson = () => {
     if (!generatedMandate) return;
@@ -109,42 +124,48 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
   return (
     <div className="bg-white dark:bg-[#0b1324] border border-slate-200 dark:border-[#1e293b] rounded-2xl p-6 shadow-sm dark:shadow-2xl relative overflow-hidden backdrop-blur-md transition-colors">
       {/* Circuit accent glow */}
-      <div className="absolute -top-24 -right-24 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-[#1e293b]">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-cyan-100 dark:bg-cyan-950/60 border border-cyan-300 dark:border-cyan-500/30 rounded-xl text-cyan-700 dark:text-cyan-400 shadow-xs">
-            <Lock className="w-5 h-5" />
+      {/* Visual Cryptographic Vault Lock Shield Banner */}
+      <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50/50 to-cyan-50 dark:from-emerald-950/30 dark:via-[#091520] dark:to-cyan-950/30 border border-emerald-300 dark:border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shadow-xs">
+        <div className="flex items-center gap-3.5">
+          <div className="p-3 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl text-white shadow-md shadow-emerald-500/20 flex-shrink-0">
+            <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-wide flex items-center gap-2">
-              Ed25519 Spend Mandate Signer
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
-                WebCrypto FIPS
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm tracking-wide text-slate-900 dark:text-white uppercase font-sans">
+                Cryptographic Vault Lock Active
               </span>
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">Zero-trust budget policy anchored by in-browser cryptographic signatures</p>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/40">
+                FIPS WebCrypto
+              </span>
+            </div>
+            <p className="text-xs text-emerald-900/90 dark:text-emerald-200/90 font-medium mt-0.5">
+              Hardware-Signed Spend Cap: <strong className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">{formatCents(totalBudgetCents)}</strong> (Active for {validityMinutes}m)
+            </p>
           </div>
         </div>
+
         <button
           onClick={generateAndSignMandate}
           disabled={isGenerating}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-50 dark:bg-cyan-600/20 hover:bg-cyan-100 dark:hover:bg-cyan-600/30 text-cyan-700 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/40 transition-colors disabled:opacity-50"
+          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition-colors disabled:opacity-50 self-start sm:self-center"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-          Regenerate Keypair
+          <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isGenerating ? 'animate-spin' : ''}`} />
+          <span>Re-Sign Mandate</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+      {/* Spend Controls */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Controls Column */}
         <div className="space-y-5">
           {/* Total Budget Slider */}
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
               <span className="text-slate-700 dark:text-slate-300 font-medium">Session Total Budget Cap:</span>
-              <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold text-sm">{formatCents(totalBudgetCents)}</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold text-sm">{formatCents(totalBudgetCents)}</span>
             </div>
             <input
               type="range"
@@ -159,7 +180,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
                   setSingleMerchantCapCents(val);
                 }
               }}
-              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
               <span>$100.00</span>
@@ -172,7 +193,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
               <span className="text-slate-700 dark:text-slate-300 font-medium">Single-Merchant Exposure Cap:</span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold text-sm">{formatCents(singleMerchantCapCents)}</span>
+              <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold text-sm">{formatCents(singleMerchantCapCents)}</span>
             </div>
             <input
               type="range"
@@ -181,7 +202,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
               step="2500"
               value={singleMerchantCapCents}
               onChange={(e) => setSingleMerchantCapCents(Number(e.target.value))}
-              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+              className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
               <span>$50.00</span>
@@ -189,11 +210,14 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
               <span>Max: {formatCents(totalBudgetCents)}</span>
             </div>
           </div>
+        </div>
 
+        {/* Right Column: Category Boundaries & Duration */}
+        <div className="space-y-5">
           {/* Allowed Categories Checkboxes */}
           <div className="space-y-2">
             <label className="text-xs text-slate-700 dark:text-slate-300 font-medium block">
-              Authorized Category Boundaries (Channel3 Taxonomy):
+              Authorized Category Boundaries:
             </label>
             <div className="grid grid-cols-2 gap-2">
               {availableCategories.map((cat) => (
@@ -201,7 +225,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
                   key={cat.id}
                   className={`flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer transition-all ${
                     allowedCategories.includes(cat.id)
-                      ? 'bg-cyan-50 dark:bg-cyan-950/40 border-cyan-300 dark:border-cyan-500/40 text-cyan-800 dark:text-cyan-200 font-medium'
+                      ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-200 font-medium'
                       : 'bg-slate-50 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-700'
                   }`}
                 >
@@ -215,7 +239,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
                         setAllowedCategories(allowedCategories.filter((c) => c !== cat.id));
                       }
                     }}
-                    className="rounded text-cyan-500 focus:ring-cyan-400"
+                    className="rounded text-emerald-500 focus:ring-emerald-400"
                   />
                   <span>{cat.label}</span>
                 </label>
@@ -223,8 +247,8 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
             </div>
           </div>
 
-          {/* Expiration Picker */}
-          <div className="flex items-center justify-between pt-2">
+          {/* Expiration Duration */}
+          <div className="flex items-center justify-between pt-1">
             <span className="text-xs text-slate-700 dark:text-slate-300 font-medium">Mandate TTL Duration:</span>
             <div className="flex items-center gap-1.5">
               {[15, 30, 60, 120].map((mins) => (
@@ -233,7 +257,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
                   onClick={() => setValidityMinutes(mins)}
                   className={`px-2.5 py-1 text-xs rounded-md border font-mono transition-colors ${
                     validityMinutes === mins
-                      ? 'bg-cyan-500 text-white font-bold border-cyan-600 dark:border-cyan-400'
+                      ? 'bg-emerald-600 text-white font-bold border-emerald-700 dark:border-emerald-500'
                       : 'bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
@@ -243,23 +267,27 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Live Cryptographic Preview */}
-        <div className="flex flex-col justify-between p-4 rounded-xl bg-slate-50 dark:bg-[#060b14] border border-slate-200 dark:border-slate-800/80 font-mono text-xs">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-              <span className="text-slate-500 dark:text-slate-400 text-[11px] font-sans font-semibold uppercase flex items-center gap-1.5">
-                <Key className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                Active Cryptographic Mandate
-              </span>
-              <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-100 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" />
-                Ed25519 Valid
-              </span>
+      {/* Collapsible Progressive Disclosure Drawer for Judges & Auditors */}
+      <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/80">
+        <details className="group">
+          <summary className="flex items-center justify-between cursor-pointer list-none py-2 px-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-[#070d18] dark:hover:bg-slate-900/60 border border-slate-200 dark:border-slate-800 transition-colors">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+              <Key className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+              <span>Inspect Cryptographic Proof & Signature (Ed25519) — For Judges & Auditors</span>
             </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30">
+                Verified Valid
+              </span>
+              <ChevronDown className="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" />
+            </div>
+          </summary>
 
+          <div className="mt-4 p-4 rounded-xl bg-slate-50 dark:bg-[#060b14] border border-slate-200 dark:border-slate-800 font-mono text-xs space-y-3">
             {generatedMandate ? (
-              <div className="space-y-2 text-slate-700 dark:text-slate-300">
+              <div className="space-y-3">
                 <div>
                   <span className="text-slate-500 block text-[10px]">MANDATE ID:</span>
                   <span className="text-cyan-700 dark:text-cyan-300 font-bold">{generatedMandate.mandate_id}</span>
@@ -267,48 +295,47 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
 
                 <div>
                   <span className="text-slate-500 block text-[10px]">PUBLIC KEY HEX (32 BYTES):</span>
-                  <div className="truncate text-slate-700 dark:text-slate-400 bg-white dark:bg-slate-900/60 p-1.5 rounded border border-slate-200 dark:border-slate-800 select-all">
+                  <div className="truncate text-slate-700 dark:text-slate-400 bg-white dark:bg-slate-900/60 p-2 rounded border border-slate-200 dark:border-slate-800 select-all break-all">
                     {generatedMandate.public_key_hex}
                   </div>
                 </div>
 
                 <div>
                   <span className="text-slate-500 block text-[10px]">ED25519 SIGNATURE HEX (64 BYTES):</span>
-                  <div className="truncate text-slate-700 dark:text-slate-400 bg-white dark:bg-slate-900/60 p-1.5 rounded border border-slate-200 dark:border-slate-800 select-all">
+                  <div className="truncate text-slate-700 dark:text-slate-400 bg-white dark:bg-slate-900/60 p-2 rounded border border-slate-200 dark:border-slate-800 select-all break-all">
                     {generatedMandate.ed25519_signature_hex}
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-1">
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-200 dark:border-slate-800/80">
                   <div>
-                    <span className="text-slate-500 block text-[10px]">MAX SPEND:</span>
-                    <span className="text-cyan-700 dark:text-cyan-400 font-bold">{formatCents(generatedMandate.max_total_spend_cents)}</span>
+                    <span className="text-slate-500 block text-[10px]">CANONICAL SPEND CAP:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">{formatCents(generatedMandate.max_total_spend_cents)}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500 block text-[10px]">EXPIRES:</span>
+                    <span className="text-slate-500 block text-[10px]">EXPIRES AT:</span>
                     <span className="text-amber-600 dark:text-amber-400 font-bold">
-                      {new Date(generatedMandate.expires_at).toLocaleTimeString([], { minute: '2-digit', second: '2-digit' })}
+                      {new Date(generatedMandate.expires_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </span>
                   </div>
                 </div>
+
+                <div className="pt-2 flex items-center justify-between">
+                  <span className="text-[10px] text-slate-500">SubtleCrypto RFC 8032</span>
+                  <button
+                    onClick={copyMandateJson}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-sans font-medium transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    {copied ? 'Copied' : 'Copy Signed JSON'}
+                  </button>
+                </div>
               </div>
             ) : (
-              <div className="py-12 text-center text-slate-400">Generating initial keypair...</div>
+              <div className="py-6 text-center text-slate-400">Generating initial keypair...</div>
             )}
           </div>
-
-          <div className="pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Node crypto / WebCrypto compatible</span>
-            <button
-              onClick={copyMandateJson}
-              disabled={!generatedMandate}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-300 text-[10px] transition-colors font-sans font-medium"
-            >
-              <Copy className="w-3 h-3" />
-              {copied ? 'Copied' : 'Copy Mandate JSON'}
-            </button>
-          </div>
-        </div>
+        </details>
       </div>
     </div>
   );

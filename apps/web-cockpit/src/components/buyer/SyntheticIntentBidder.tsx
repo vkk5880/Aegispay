@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Gavel, ShieldAlert, Award, CheckCircle2, Zap } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Gavel, ShieldAlert, Award, CheckCircle2, Zap, Clock, ShieldCheck } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import type { SessionMandate } from '@aegispay/shared-types';
 
@@ -21,6 +21,21 @@ export function SyntheticIntentBidder({
   const [isMinting, setIsMinting] = useState<boolean>(false);
   const [bidSubmitted, setBidSubmitted] = useState<boolean>(false);
   const [bidResult, setBidResult] = useState<any>(null);
+  const [secondsRemaining, setSecondsRemaining] = useState<number>(15 * 60); // 15-minute active timer
+
+  // Active 15-minute visual countdown timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const formatTimer = (totalSeconds: number): string => {
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   const overageCents = basketTotalCents - budgetCapCents;
   const overagePercentage = Number(((overageCents / budgetCapCents) * 100).toFixed(2));
@@ -73,6 +88,22 @@ export function SyntheticIntentBidder({
     <div className="bg-white dark:bg-[#0b1324] border border-amber-300 dark:border-amber-500/30 rounded-2xl p-6 shadow-sm dark:shadow-2xl relative overflow-hidden backdrop-blur-md transition-colors">
       {/* Glow highlight */}
       <div className="absolute -top-24 -left-24 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Prominent Reassurance Status Pill */}
+      <div className="mb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-300 dark:border-emerald-500/30">
+        <div className="flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
+            Authorization Hold Only — $0 Captured Until Accepted
+          </span>
+        </div>
+
+        {/* Active 15-Minute Countdown Timer */}
+        <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-white dark:bg-[#060b14] border border-emerald-300 dark:border-emerald-500/40 text-xs font-mono font-bold text-emerald-800 dark:text-emerald-300">
+          <Clock className={`w-3.5 h-3.5 ${secondsRemaining < 120 ? 'text-rose-500 animate-pulse' : 'text-emerald-600 dark:text-emerald-400'}`} />
+          <span>Offer Window: {formatTimer(secondsRemaining)}</span>
+        </div>
+      </div>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200 dark:border-[#1e293b] gap-2">
