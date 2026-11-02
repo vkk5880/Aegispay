@@ -4,6 +4,8 @@ import { defaultChannel3Client } from '../services/channel3.client.js';
 import { defaultCartSolver } from '../services/cart-solver.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultSyntheticIntentEngine } from '../services/synthetic-intent.js';
+import { defaultCounterBidEngine } from '../services/counter-bid-engine.js';
+import { SpendMandateSchema } from '@aegispay/shared-types';
 
 const KnapsackRequestSchema = z.object({
   query: z.string().optional(),
@@ -63,6 +65,18 @@ const SyntheticBidRequestSchema = z.object({
   buyer_budget_cap_cents: z.number().int().positive(),
   buyer_bid_cents: z.number().int().positive().optional(),
   commission_rebate_rate: z.number().min(0).max(1).optional(),
+});
+
+const CounterBidRequestSchema = z.object({
+  mandate: SpendMandateSchema,
+  voucher_id: z.string(),
+  channel3_product_id: z.string(),
+  merchant_domain: z.string(),
+  retail_offer_cents: z.number().int().positive(),
+  merchant_min_floor_cents: z.number().int().positive(),
+  buyer_bid_cents: z.number().int().positive(),
+  turn: z.number().int().min(1).max(2).optional(),
+  auto_accept_buffer_cents: z.number().int().nonnegative().optional(),
 });
 
 export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
@@ -190,6 +204,23 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const evaluation = await defaultSyntheticIntentEngine.processSyntheticBid(parseResult.data);
+    return reply.send({
+      status: 'PROCESSED',
+      evaluation,
+    });
+  });
+
+  /**
+   * POST /api/buyer/counter-bid
+   * Evaluates 2-turn bounded negotiation counter-offer against Ed25519 mandate
+   */
+  fastify.post('/api/buyer/counter-bid', async (request, reply) => {
+    const parseResult = CounterBidRequestSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
+    }
+
+    const evaluation = await defaultCounterBidEngine.evaluateCounterBid(parseResult.data as any);
     return reply.send({
       status: 'PROCESSED',
       evaluation,

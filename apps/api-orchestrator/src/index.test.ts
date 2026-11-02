@@ -5,7 +5,9 @@ import { Channel3ProductDetail, Channel3Client } from './services/channel3.clien
 import { TaxEstimatorService } from './services/tax-estimator.js';
 import { DisputeMatrixService } from './services/dispute-matrix.js';
 import { SyntheticIntentEngine } from './services/synthetic-intent.js';
+import { CounterBidEngine } from './services/counter-bid-engine.js';
 import { PayPalApimaticClient } from './services/paypal-apimatic.js';
+import crypto from 'node:crypto';
 import { AtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 import { buildApp } from './index.js';
 
@@ -507,4 +509,114 @@ test('AtomicSpendEnforcer: uses Redis cluster hash tags {vch_...} for keys', asy
   assert.equal(capturedKeys.length, 2);
   assert.equal(capturedKeys[0], 'aegis:{vch_alpha123}:mandate');
   assert.equal(capturedKeys[1], 'aegis:{vch_alpha123}:exposure:test-merchant.com');
+});
+
+test('CounterBidEngine: executes 2-turn bounded negotiation, auto-accepts within buffer, and triggers 60s HITL confirmation', async () => {
+  const engine = new CounterBidEngine();
+
+  // Generate real Ed25519 keypair for valid mandate signature test
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const pubDer = publicKey.export({ format: 'der', type: 'spki' });
+  // Raw 32-byte Ed25519 key is the last 32 bytes of 44-byte SPKI DER
+  const rawPubHex = pubDer.subarray(12).toString('hex');
+
+  const mandateBase = {
+    mandate_id: 'vch_counter_test',
+    buyer_id: 'buyer_abc',
+    max_total_spend_cents: 50000, // $500.00
+    max_single_merchant_cents: 50000,
+    cumulative_spent_cents: 0,
+    currency_code: 'USD',
+    allowed_category_ids: ['xoN'],
+    public_key_hex: rawPubHex,
+    expires_at: new Date(Date.now() + 3600 * 1000),
+    status: 'ACTIVE' as const,
+  };
+
+  const messageObj = {
+    mandate_id: mandateBase.mandate_id,
+    buyer_id: mandateBase.buyer_id,
+    max_total_spend_cents: mandateBase.max_total_spend_cents,
+    max_single_merchant_cents: mandateBase.max_single_merchant_cents,
+    currency_code: mandateBase.currency_code,
+    allowed_category_ids: mandateBase.allowed_category_ids,
+    expires_at: mandateBase.expires_at.toISOString(),
+    status: mandateBase.status,
+    public_key_hex: mandateBase.public_key_hex,
+  };
+
+  const sigBuffer = crypto.sign(null, Buffer.from(JSON.stringify(messageObj), 'utf8'), privateKey);
+  const mandate = {
+    ...mandateBase,
+    ed25519_signature_hex: sigBuffer.toString('hex'),
+    created_at: new Date(),
+  };
+
+  // Scenario 1: Retail $490, Floor $455, Buyer Bid $450 (Turn 1)
+  // Floor is $455, Gap = $490 - $455 = $35. Merchant counter = 455 + round(35 * 0.4) = 455 + 14 = 469 ($469.00)
+  // Buyer bid is $450. Difference is $19.
+  // With default auto-accept buffer $15 (1500 cents), $19 > $15 -> Triggers 60s HITL prompt!
+  const hitlRes = await engine.evaluateCounterBid({
+    mandate,
+    voucher_id: 'syn_test_1',
+    channel3_product_id: 'ch3_prod_9921',
+    merchant_domain: 'tech-merchant.com',
+    retail_offer_cents: 49000,
+    merchant_min_floor_cents: 45500,
+    buyer_bid_cents: 45000,
+    turn: 1,
+  });
+
+  assert.equal(hitlRes.ed25519_mandate_verified, true);
+  assert.equal(hitlRes.status, 'HITL_CONFIRMATION_REQUIRED');
+  assert.ok(hitlRes.hitl_prompt);
+  assert.equal(hitlRes.hitl_prompt.required, true);
+  assert.equal(hitlRes.hitl_prompt.timeout_seconds, 60);
+  assert.ok(hitlRes.merchant_counter_voucher);
+  assert.equal(hitlRes.merchant_counter_voucher.merchant_counter_cents, 46900);
+
+  // Scenario 2: Turn 2 (Dutch auction concession to floor $455)
+  // Buyer bid $450, Floor $455 -> diff is $5 <= $15 auto-accept buffer -> AUTO_ACCEPTED!
+  const autoAcceptRes = await engine.evaluateCounterBid({
+    mandate,
+    voucher_id: 'syn_test_1',
+    channel3_product_id: 'ch3_prod_9921',
+    merchant_domain: 'tech-merchant.com',
+    retail_offer_cents: 49000,
+    merchant_min_floor_cents: 45500,
+    buyer_bid_cents: 45000,
+    turn: 2,
+    turn_history: hitlRes.history,
+  });
+
+  assert.equal(autoAcceptRes.status, 'AUTO_ACCEPTED');
+  assert.equal(autoAcceptRes.turn, 2);
+  assert.equal(autoAcceptRes.merchant_counter_voucher?.merchant_counter_cents, 45500);
+  assert.ok(autoAcceptRes.resulting_order_id);
+
+  // Fastify route POST /api/buyer/counter-bid
+  const app = await buildApp();
+  const routeRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/counter-bid',
+    payload: {
+      mandate: {
+        ...mandate,
+        expires_at: mandate.expires_at.toISOString(),
+        created_at: mandate.created_at.toISOString(),
+      },
+      voucher_id: 'syn_route_test',
+      channel3_product_id: 'ch3_prod_9921',
+      merchant_domain: 'tech-merchant.com',
+      retail_offer_cents: 49000,
+      merchant_min_floor_cents: 45500,
+      buyer_bid_cents: 45000,
+      turn: 1,
+    },
+  });
+
+  assert.equal(routeRes.statusCode, 200);
+  const routeBody = routeRes.json();
+  assert.equal(routeBody.status, 'PROCESSED');
+  assert.equal(routeBody.evaluation.status, 'HITL_CONFIRMATION_REQUIRED');
 });

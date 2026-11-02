@@ -10,9 +10,9 @@ export const SpendMandateSchema = z.object({
   allowed_category_ids: z.array(z.string()),
   public_key_hex: z.string().max(128),
   ed25519_signature_hex: z.string(),
-  expires_at: z.date(),
+  expires_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
   status: z.enum(['ACTIVE', 'EXHAUSTED', 'REVOKED', 'EXPIRED']).default('ACTIVE'),
-  created_at: z.date().default(() => new Date()),
+  created_at: z.union([z.date(), z.string().datetime()]).optional().transform(v => typeof v === 'string' ? new Date(v) : (v || new Date())),
 });
 
 export const SessionMandateSchema = SpendMandateSchema;
