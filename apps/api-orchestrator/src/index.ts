@@ -7,6 +7,7 @@ import { buyerProcurementRoutes } from './routes/buyer.procurement.js';
 import { merchantArbitrationRoutes } from './routes/merchant.arbitration.js';
 import { integrationsVerifyRoutes } from './routes/integrations.verify.js';
 import { acpRoutes } from './routes/acp.routes.js';
+import { hitlRoutes } from './routes/hitl.routes.js';
 import { http402Plugin } from './middleware/http402-interceptor.js';
 
 dotenv.config();
@@ -33,6 +34,7 @@ export async function buildApp() {
   await fastify.register(merchantArbitrationRoutes);
   await fastify.register(integrationsVerifyRoutes);
   await fastify.register(acpRoutes);
+  await fastify.register(hitlRoutes);
 
   // Root health route
   fastify.get('/', async () => {
@@ -85,4 +87,5 @@ export * from './services/channel3.client.js';
 export * from './services/cart-solver.js';
 export * from './services/synthetic-intent.js';
 export * from './services/dispute-matrix.js';
+export * from './services/hitl-approval.js';
 export * from './middleware/http402-interceptor.js';

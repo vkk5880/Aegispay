@@ -7,8 +7,10 @@ import { CryptographicMandateSigner } from '@/components/buyer/CryptographicMand
 import { KnapsackSplitVisualizer, KnapsackOptimizationData } from '@/components/buyer/KnapsackSplitVisualizer';
 import { SyntheticIntentBidder } from '@/components/buyer/SyntheticIntentBidder';
 import { PayPalV6SdkMount } from '@/components/buyer/PayPalV6SdkMount';
+import { HitlApprovalModal, HitlPushApprovalRequest } from '@/components/buyer/HitlApprovalModal';
+import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransmuter';
 import type { SessionMandate } from '@aegispay/shared-types';
-import { Sparkles, Activity, Layers, Terminal, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Activity, Layers, Terminal, ShieldCheck, CheckCircle2, UserCheck, AlertOctagon } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
 export default function BuyerPortalPage() {
@@ -18,6 +20,11 @@ export default function BuyerPortalPage() {
   const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
   const [shouldRunTrace, setShouldRunTrace] = useState<boolean>(false);
   const [externalBudgetCents, setExternalBudgetCents] = useState<number>(40000);
+
+  // HITL Push Approval Modal & Error Transmuter State
+  const [hitlRequest, setHitlRequest] = useState<HitlPushApprovalRequest | null>(null);
+  const [isHitlOpen, setIsHitlOpen] = useState<boolean>(false);
+  const [activeError, setActiveError] = useState<string | null>(null);
 
   // Knapsack state
   const [optimizationData, setOptimizationData] = useState<KnapsackOptimizationData>({
@@ -173,7 +180,41 @@ export default function BuyerPortalPage() {
           </div>
 
           <div className="flex items-center gap-2 font-mono text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <button
+              onClick={() => {
+                setHitlRequest({
+                  id: `hitl_demo_${Date.now()}`,
+                  type: 'MERCHANT_COUNTER_OFFER',
+                  mandate_id: activeMandate?.mandate_id || 'vch_sample_9a2f',
+                  title: 'Merchant Counter-Offer Received',
+                  message: 'Merchant countered at $465.00 ($15 above bid). Accept counter before timer expires?',
+                  original_amount_cents: 45000,
+                  requested_amount_cents: 46500,
+                  delta_cents: 1500,
+                  merchant_domain: 'audio-gear-direct.com',
+                  timeout_seconds: 60,
+                });
+                setIsHitlOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold hover:bg-amber-500/25 transition-all text-[11px]"
+              title="Test real-time Human-in-the-Loop push approval modal"
+            >
+              <UserCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Simulate 60s HITL Push</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveError('ERR_EXCEEDS_TOTAL_MANDATE_BUDGET: Requested $520.00 exceeds current total mandate budget $500.00');
+              }}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold hover:bg-rose-500/25 transition-all text-[11px]"
+              title="Simulate Redis Lua mandate error"
+            >
+              <AlertOctagon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+              <span>Simulate Error</span>
+            </button>
+
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-1" />
             <span className="text-emerald-700 dark:text-emerald-400 font-medium">
               Atomic Spend Enforcer Connected
             </span>
@@ -218,6 +259,34 @@ export default function BuyerPortalPage() {
             </div>
           </div>
         </div>
+
+        {/* Friendly Error Transmuter Banner */}
+        {activeError && (
+          <FriendlyErrorTransmuter
+            error={activeError}
+            onDismiss={() => setActiveError(null)}
+            onAction={(actionId) => {
+              if (actionId === 'INCREASE_CAP') {
+                const newCap = (activeMandate?.max_total_spend_cents || 50000) + 5000;
+                setExternalBudgetCents(newCap);
+                if (activeMandate) {
+                  setActiveMandate({ ...activeMandate, max_total_spend_cents: newCap });
+                }
+                showNotification(`Mandate cap increased to ${formatCents(newCap)}! Error resolved.`);
+                setActiveError(null);
+              } else if (actionId === 'FIND_CHEAPER_ALTERNATIVE') {
+                showNotification('Agent searching Channel3 for sub-$50 alternative SKU...');
+                setActiveError(null);
+              } else if (actionId === 'RENEW_MANDATE') {
+                showNotification('Mandate renewed for +24 hours with new Ed25519 signature.');
+                setActiveError(null);
+              } else {
+                showNotification(`Action executed: ${actionId}`);
+                setActiveError(null);
+              }
+            }}
+          />
+        )}
 
         {/* Generative Intent Bar */}
         <GenerativeIntentBar onSearchIntent={handleIntentSearch} isLoading={isSolvingIntent} />
@@ -287,6 +356,24 @@ export default function BuyerPortalPage() {
           />
         )}
       </main>
+
+      {/* Real-time HITL Push Approval Modal */}
+      <HitlApprovalModal
+        request={hitlRequest}
+        isOpen={isHitlOpen}
+        onApprove={(id) => {
+          setIsHitlOpen(false);
+          showNotification(`HITL Approved: Counter-offer accepted! Cleared via PayPal Vault.`);
+        }}
+        onDecline={(id) => {
+          setIsHitlOpen(false);
+          showNotification(`HITL Declined: Merchant counter-offer rejected. Zero funds authorized.`);
+        }}
+        onTimeout={(id) => {
+          setIsHitlOpen(false);
+          showNotification(`HITL Expired: 60s timer elapsed. Autonomous safety block enforced.`);
+        }}
+      />
 
       {/* Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-800 py-6 bg-slate-100 dark:bg-[#080d19]/80 text-center text-xs text-slate-600 dark:text-slate-400 font-mono transition-colors">

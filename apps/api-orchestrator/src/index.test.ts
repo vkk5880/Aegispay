@@ -620,3 +620,107 @@ test('CounterBidEngine: executes 2-turn bounded negotiation, auto-accepts within
   assert.equal(routeBody.status, 'PROCESSED');
   assert.equal(routeBody.evaluation.status, 'HITL_CONFIRMATION_REQUIRED');
 });
+
+test('HitlApprovalRegistry: registers 60s requests, broadcasts via SSE, and resolves human decisions', async () => {
+  const { HitlApprovalRegistry } = await import('./services/hitl-approval.js');
+  const registry = new HitlApprovalRegistry();
+
+  const events: any[] = [];
+  const unsubscribe = registry.subscribe((ev) => events.push(ev));
+
+  // Request approval asynchronously with 2-second timeout for testing
+  const approvalPromise = registry.requestApproval({
+    type: 'MERCHANT_COUNTER_OFFER',
+    mandate_id: 'vch_test_hitl',
+    title: 'Merchant Counter-Offer Received',
+    message: 'Merchant countered at $465.00 ($15 above bid). Accept counter before timer expires?',
+    original_amount_cents: 45000,
+    requested_amount_cents: 46500,
+    delta_cents: 1500,
+    timeout_seconds: 2,
+  });
+
+  const pending = registry.getPendingRequests();
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].status, 'PENDING');
+  assert.equal(pending[0].delta_cents, 1500);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, 'request:created');
+
+  // Human approves the request
+  const resolved = registry.resolveDecision(pending[0].id, true, {
+    reason: 'Price within acceptable margin',
+    action_token: 'hitl_acc_test',
+  });
+
+  const result = await approvalPromise;
+  assert.equal(result.status, 'APPROVED');
+  assert.equal(result.decision_payload?.approved, true);
+  assert.equal(result.decision_payload?.reason, 'Price within acceptable margin');
+
+  assert.equal(events.length, 2);
+  assert.equal(events[1].type, 'request:resolved');
+
+  unsubscribe();
+
+  // Test automatic expiry on timeout
+  const timeoutRegistry = new HitlApprovalRegistry();
+  const expiredReq = await timeoutRegistry.requestApproval({
+    type: 'CAP_OVERAGE_EXCEPTION',
+    message: 'Overage test',
+    timeout_seconds: 1, // 1 second
+  });
+
+  assert.equal(expiredReq.status, 'EXPIRED');
+  assert.equal(expiredReq.decision_payload?.approved, false);
+});
+
+test('HTTP Routes: /api/hitl/pending and /api/hitl/respond manage approval lifecycle', async () => {
+  const app = await buildApp();
+
+  // 1. Post a new approval request via API
+  const createRes = await app.inject({
+    method: 'POST',
+    url: '/api/hitl/requests',
+    payload: {
+      type: 'MERCHANT_COUNTER_OFFER',
+      mandate_id: 'vch_api_test',
+      title: 'Counter Offer',
+      message: 'Merchant countered at $465.00 ($15 above bid).',
+      original_amount_cents: 45000,
+      requested_amount_cents: 46500,
+      timeout_seconds: 60,
+    },
+  });
+
+  assert.equal(createRes.statusCode, 201);
+  const createdBody = createRes.json();
+  assert.equal(createdBody.status, 'QUEUED');
+  assert.ok(createdBody.request.id);
+
+  // 2. Query pending approvals
+  const listRes = await app.inject({
+    method: 'GET',
+    url: '/api/hitl/pending',
+  });
+  assert.equal(listRes.statusCode, 200);
+  const listBody = listRes.json();
+  assert.ok(listBody.pending.some((r: any) => r.id === createdBody.request.id));
+
+  // 3. Submit human decision
+  const respondRes = await app.inject({
+    method: 'POST',
+    url: '/api/hitl/respond',
+    payload: {
+      id: createdBody.request.id,
+      decision: 'APPROVE',
+      reason: 'Human approved counter via web cockpit',
+    },
+  });
+
+  assert.equal(respondRes.statusCode, 200);
+  const respondBody = respondRes.json();
+  assert.equal(respondBody.status, 'SUCCESS');
+  assert.equal(respondBody.result.status, 'APPROVED');
+  assert.equal(respondBody.result.decision_payload.approved, true);
+});
