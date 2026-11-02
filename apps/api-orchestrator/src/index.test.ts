@@ -227,4 +227,128 @@ test('HTTP Routes: Fastify endpoints respond accurately', async () => {
   });
   assert.equal(webhookRes.statusCode, 200);
   assert.equal(webhookRes.json().status, 'PROCESSED');
+
+  // HTTP 402 Gateway Interceptor: unauthenticated call without X-Spend-Mandate-Id or X-Synthetic-Voucher-Id
+  const unauthCheckoutRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/authorize',
+    payload: {
+      mandate_id: 'mandate_123',
+      purchase_units: [],
+    },
+  });
+  assert.equal(unauthCheckoutRes.statusCode, 402);
+  assert.ok(unauthCheckoutRes.headers['x-payment-contract-id']);
+  assert.ok(unauthCheckoutRes.headers['x-paypal-vault-setup-url']);
+  assert.ok(unauthCheckoutRes.headers['x-aegis-spend-policy']);
+  const challengeBody = unauthCheckoutRes.json();
+  assert.equal(challengeBody.error, 'PAYMENT_REQUIRED');
+  assert.equal(challengeBody.status, 402);
+  assert.equal(challengeBody.challenge.type, 'https://aegispay.dev/protocols/http402');
+
+  // HTTP 402 Gateway Interceptor: authenticated call with X-Spend-Mandate-Id header passes interceptor
+  const authCheckoutRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/authorize',
+    headers: {
+      'x-spend-mandate-id': 'mandate_123',
+    },
+    payload: {
+      mandate_id: 'mandate_123',
+      purchase_units: [
+        {
+          reference_id: 'pu_test',
+          amount: { currency_code: 'USD', value: '50.00' },
+        },
+      ],
+    },
+  });
+  assert.equal(authCheckoutRes.statusCode, 200);
+  assert.equal(authCheckoutRes.json().status, 'AUTHORIZED');
+
+  // ACP Manifest discovery
+  const acpManifestRes = await app.inject({
+    method: 'GET',
+    url: '/.well-known/acp.json',
+  });
+  assert.equal(acpManifestRes.statusCode, 200);
+  const manifest = acpManifestRes.json();
+  assert.equal(manifest.protocol, 'OPENAI_ACP_v1');
+  assert.equal(manifest.name_for_model, 'aegispay_agentic_commerce');
+  assert.ok(manifest.actions.some((a: any) => a.name === 'discover_products'));
+  assert.ok(manifest.actions.some((a: any) => a.name === 'request_purchase_quote'));
+  assert.ok(manifest.actions.some((a: any) => a.name === 'confirm_payment_hold'));
+
+  // ACP Action execution: discover_products
+  const acpDiscoverRes = await app.inject({
+    method: 'POST',
+    url: '/api/acp/actions',
+    payload: {
+      action: 'discover_products',
+      parameters: {
+        query: 'mechanical keyboard',
+      },
+    },
+  });
+  assert.equal(acpDiscoverRes.statusCode, 200);
+  assert.equal(acpDiscoverRes.json().status, 'SUCCESS');
+  assert.equal(acpDiscoverRes.json().action, 'discover_products');
+
+  // ACP Action execution: request_purchase_quote
+  const acpQuoteRes = await app.inject({
+    method: 'POST',
+    url: '/api/acp/actions',
+    payload: {
+      action: 'request_purchase_quote',
+      parameters: {
+        mandate_id: 'vch_test_999',
+        channel3_product_id: 'ch3_prod_9921',
+        merchant_domain: 'techmerchant.com',
+        retail_offer_cents: 44000,
+        buyer_bid_cents: 40000,
+      },
+    },
+  });
+  assert.equal(acpQuoteRes.statusCode, 200);
+  assert.equal(acpQuoteRes.json().status, 'SUCCESS');
+  assert.equal(acpQuoteRes.json().action, 'request_purchase_quote');
+
+  // ACP Action execution: confirm_payment_hold without auth header returns 402
+  const acpHoldUnauthRes = await app.inject({
+    method: 'POST',
+    url: '/api/acp/actions',
+    payload: {
+      action: 'confirm_payment_hold',
+      parameters: {
+        merchant_domain: 'techmerchant.com',
+        requested_cents: 10000,
+        category_id: 'cat_electronics',
+        items: [{ product_id: 'p1', price_cents: 10000, quantity: 1 }],
+      },
+    },
+  });
+  assert.equal(acpHoldUnauthRes.statusCode, 402);
+  assert.equal(acpHoldUnauthRes.json().error, 'PAYMENT_REQUIRED');
+
+  // ACP Action execution: confirm_payment_hold with header succeeds
+  const acpHoldAuthRes = await app.inject({
+    method: 'POST',
+    url: '/api/acp/actions',
+    headers: {
+      'x-spend-mandate-id': 'mandate_123',
+    },
+    payload: {
+      action: 'confirm_payment_hold',
+      parameters: {
+        mandate_id: 'mandate_123',
+        merchant_domain: 'techmerchant.com',
+        requested_cents: 10000,
+        category_id: 'cat_electronics',
+        items: [{ product_id: 'p1', price_cents: 10000, quantity: 1 }],
+      },
+    },
+  });
+  assert.equal(acpHoldAuthRes.statusCode, 200);
+  assert.equal(acpHoldAuthRes.json().status, 'SUCCESS');
+  assert.equal(acpHoldAuthRes.json().action, 'confirm_payment_hold');
 });
