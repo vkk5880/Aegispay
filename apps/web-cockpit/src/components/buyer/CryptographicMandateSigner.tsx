@@ -59,7 +59,9 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
         buyer_id: 'usr_sandbox_buyer_01',
         max_total_spend_cents: totalBudgetCents,
         max_single_merchant_cents: singleMerchantCapCents,
-        allowed_categories: allowedCategories,
+        cumulative_spent_cents: 0,
+        currency_code: 'USD',
+        allowed_category_ids: allowedCategories,
         public_key_hex: publicKeyHex,
       };
 
@@ -76,8 +78,8 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
       const mandate: SessionMandate = {
         ...messageObj,
         expires_at: expiresAt,
-        cumulative_spent_cents: 0,
         ed25519_signature_hex: signatureHex,
+        status: 'ACTIVE',
         created_at: new Date(),
       };
 
@@ -94,6 +96,7 @@ export function CryptographicMandateSigner({ onMandateGenerated }: Cryptographic
 
   useEffect(() => {
     generateAndSignMandate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const copyMandateJson = () => {
