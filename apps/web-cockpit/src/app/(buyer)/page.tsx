@@ -9,17 +9,35 @@ import { SyntheticIntentBidder } from '@/components/buyer/SyntheticIntentBidder'
 import { PayPalV6SdkMount } from '@/components/buyer/PayPalV6SdkMount';
 import { HitlApprovalModal, HitlPushApprovalRequest } from '@/components/buyer/HitlApprovalModal';
 import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransmuter';
-import type { SessionMandate } from '@aegispay/shared-types';
-import { Sparkles, Activity, Layers, Terminal, ShieldCheck, CheckCircle2, UserCheck, AlertOctagon } from 'lucide-react';
+import { ConversationalAgentChat } from '@/components/buyer/ConversationalAgentChat';
+import { SpendAllowanceHeader } from '@/components/buyer/SpendAllowanceHeader';
+import { UserSettingsDrawer, UserSettings, DEFAULT_USER_SETTINGS } from '@/components/buyer/UserSettingsDrawer';
+import type { SessionMandate, ProductCardData } from '@aegispay/shared-types';
+import {
+  Sparkles,
+  Activity,
+  Layers,
+  Terminal,
+  ShieldCheck,
+  CheckCircle2,
+  UserCheck,
+  AlertOctagon,
+  MessageSquare,
+} from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
 export default function BuyerPortalPage() {
   const [activeMandate, setActiveMandate] = useState<SessionMandate | null>(null);
-  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'KNAPSACK' | 'SYNTHETIC' | 'PAYPAL'>('OVERVIEW');
+  const [activeTab, setActiveTab] = useState<'CHAT' | 'OVERVIEW' | 'KNAPSACK' | 'SYNTHETIC' | 'PAYPAL'>('CHAT');
   const [notification, setNotification] = useState<string | null>(null);
   const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
   const [shouldRunTrace, setShouldRunTrace] = useState<boolean>(false);
-  const [externalBudgetCents, setExternalBudgetCents] = useState<number>(40000);
+  const [externalBudgetCents, setExternalBudgetCents] = useState<number>(50000);
+  const [spentCents, setSpentCents] = useState<number>(8500);
+
+  // User Settings State & Drawer
+  const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   // HITL Push Approval Modal & Error Transmuter State
   const [hitlRequest, setHitlRequest] = useState<HitlPushApprovalRequest | null>(null);
@@ -143,6 +161,12 @@ export default function BuyerPortalPage() {
     }, 2200);
   };
 
+  const handleSelectProductForBuy = (product: ProductCardData) => {
+    showNotification(`Pre-purchase reservation hold initiated for ${product.title}`);
+    setSpentCents((prev) => prev + (product.price_cents - product.commission_rebate_cents));
+    setActiveTab('KNAPSACK');
+  };
+
   return (
     <div className="flex-1 flex flex-col transition-colors">
       {/* Sub Navigation Bar for Buyer Views */}
@@ -154,7 +178,8 @@ export default function BuyerPortalPage() {
             </span>
             <div className="flex items-center gap-1 bg-white dark:bg-[#050912] p-1 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
               {[
-                { id: 'OVERVIEW', label: 'Full Dashboard', icon: Layers },
+                { id: 'CHAT', label: 'AI Shopping Concierge', icon: MessageSquare },
+                { id: 'OVERVIEW', label: 'Dashboard & Proofs', icon: Layers },
                 { id: 'KNAPSACK', label: 'Knapsack Optimizer', icon: Sparkles },
                 { id: 'SYNTHETIC', label: 'Synthetic Intent', icon: Activity },
                 { id: 'PAYPAL', label: 'PayPal SDK Mount', icon: Terminal },
@@ -231,34 +256,17 @@ export default function BuyerPortalPage() {
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Banner Section */}
-        <div className="p-6 rounded-2xl bg-gradient-to-r from-cyan-50 via-white to-blue-50 dark:from-blue-950/40 dark:via-[#0b1426] dark:to-cyan-950/40 border border-cyan-200 dark:border-cyan-500/20 shadow-sm dark:shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-              Buyer Agent Autonomous Procurement
-              <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30">
-                Layer 4
-              </span>
-            </h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-              Conversational generative procurement powered by Channel3 vector search, Ed25519 cryptographic spend limits,
-              and PayPal Vault v3 synthetic intent bidding.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 font-mono text-xs">
-            <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Active Mandate ID</span>
-              <span className="text-cyan-600 dark:text-cyan-400 font-bold">{activeMandate?.mandate_id || 'Generating...'}</span>
-            </div>
-            <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Spend Vault Cap</span>
-              <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                {activeMandate ? formatCents(activeMandate.max_total_spend_cents) : formatCents(externalBudgetCents)}
-              </span>
-            </div>
-          </div>
-        </div>
+        {/* Persistent Spend Allowance Header Bar */}
+        <SpendAllowanceHeader
+          maxBudgetCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+          spentCents={spentCents}
+          isConfigured={!!activeMandate}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          onConnectPayPal={() => {
+            setActiveTab('OVERVIEW');
+            showNotification('Authorize your Ed25519 mandate to lock in your PayPal Vault allowance');
+          }}
+        />
 
         {/* Friendly Error Transmuter Banner */}
         {activeError && (
@@ -288,19 +296,90 @@ export default function BuyerPortalPage() {
           />
         )}
 
-        {/* Generative Intent Bar */}
-        <GenerativeIntentBar onSearchIntent={handleIntentSearch} isLoading={isSolvingIntent} />
+        {/* Tab 1: AI Shopping Concierge Chat */}
+        {activeTab === 'CHAT' && (
+          <section className="space-y-6">
+            <ConversationalAgentChat
+              budgetCapCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+              zipCode={userSettings.zipCode}
+              onSelectProductForBuy={handleSelectProductForBuy}
+              onSelectProductForDetails={(p) => {
+                showNotification(`Loading specifications and warranty for ${p.title}`);
+              }}
+              onSelectProductForCompare={(p) => {
+                showNotification(`Generating comparison matrix for ${p.title}`);
+              }}
+            />
+          </section>
+        )}
 
-        {/* Streaming Thought Visualizer */}
-        <ThoughtStreamVisualizer isRunning={shouldRunTrace} />
-
-        {/* Dynamic View Mounts */}
-        {(activeTab === 'OVERVIEW' || activeTab === 'KNAPSACK') && (
+        {/* Tab 2: Generative Intent & Overview Dashboard */}
+        {activeTab === 'OVERVIEW' && (
           <section className="space-y-8">
+            {/* Banner Section */}
+            <div className="p-6 rounded-2xl bg-gradient-to-r from-cyan-50 via-white to-blue-50 dark:from-blue-950/40 dark:via-[#0b1426] dark:to-cyan-950/40 border border-cyan-200 dark:border-cyan-500/20 shadow-sm dark:shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                  Buyer Agent Autonomous Procurement
+                  <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30">
+                    Section 11.3
+                  </span>
+                </h1>
+                <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
+                  Conversational generative procurement powered by Channel3 vector search, Ed25519 cryptographic spend limits,
+                  and PayPal Vault v3 synthetic intent bidding.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3 font-mono text-xs">
+                <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                  <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Active Mandate ID</span>
+                  <span className="text-cyan-600 dark:text-cyan-400 font-bold">{activeMandate?.mandate_id || 'Unconfigured'}</span>
+                </div>
+                <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
+                  <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Spend Vault Cap</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
+                    {activeMandate ? formatCents(activeMandate.max_total_spend_cents) : formatCents(externalBudgetCents)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Generative Intent Bar */}
+            <GenerativeIntentBar onSearchIntent={handleIntentSearch} isLoading={isSolvingIntent} />
+
+            {/* Streaming Thought Visualizer */}
+            <ThoughtStreamVisualizer isRunning={shouldRunTrace} />
+
+            {/* Cryptographic Proofs & Signer */}
             <CryptographicMandateSigner
               onMandateGenerated={handleMandateGenerated}
               externalBudgetCents={externalBudgetCents}
             />
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <SyntheticIntentBidder
+                mandate={activeMandate}
+                basketTotalCents={49000}
+                budgetCapCents={activeMandate ? Math.min(activeMandate.max_total_spend_cents, 45000) : 45000}
+                onBidAccepted={(res) => {
+                  showNotification(`Synthetic bid cleared! PayPal Order: ${res.resulting_paypal_order_id}`);
+                }}
+              />
+              <PayPalV6SdkMount
+                orderAmountCents={optimizationData.net_buyer_expenditure_cents}
+                orderIntent="AUTHORIZE"
+                onAuthorizeSuccess={(orderId) => {
+                  showNotification(`Order authorized with PayPal: ${orderId}`);
+                }}
+              />
+            </div>
+          </section>
+        )}
+
+        {/* Tab 3: Knapsack Multi-Vendor Optimizer */}
+        {activeTab === 'KNAPSACK' && (
+          <section className="space-y-8">
             <KnapsackSplitVisualizer
               optimization={optimizationData}
               onProceedToAuthorize={() => {
@@ -315,26 +394,7 @@ export default function BuyerPortalPage() {
           </section>
         )}
 
-        {activeTab === 'OVERVIEW' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <SyntheticIntentBidder
-              mandate={activeMandate}
-              basketTotalCents={49000}
-              budgetCapCents={activeMandate ? Math.min(activeMandate.max_total_spend_cents, 45000) : 45000}
-              onBidAccepted={(res) => {
-                showNotification(`Synthetic bid cleared! PayPal Order: ${res.resulting_paypal_order_id}`);
-              }}
-            />
-            <PayPalV6SdkMount
-              orderAmountCents={optimizationData.net_buyer_expenditure_cents}
-              orderIntent="AUTHORIZE"
-              onAuthorizeSuccess={(orderId) => {
-                showNotification(`Order authorized with PayPal: ${orderId}`);
-              }}
-            />
-          </div>
-        )}
-
+        {/* Tab 4: Synthetic Intent Negotiation */}
         {activeTab === 'SYNTHETIC' && (
           <SyntheticIntentBidder
             mandate={activeMandate}
@@ -346,6 +406,7 @@ export default function BuyerPortalPage() {
           />
         )}
 
+        {/* Tab 5: PayPal SDK Mount */}
         {activeTab === 'PAYPAL' && (
           <PayPalV6SdkMount
             orderAmountCents={optimizationData.net_buyer_expenditure_cents}
@@ -356,6 +417,18 @@ export default function BuyerPortalPage() {
           />
         )}
       </main>
+
+      {/* User Settings Drawer */}
+      <UserSettingsDrawer
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        settings={userSettings}
+        maxBudgetCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+        onSave={(newSettings) => {
+          setUserSettings(newSettings);
+          showNotification(`Settings updated: Shipping to ${newSettings.city}, ${newSettings.state} (${newSettings.zipCode})`);
+        }}
+      />
 
       {/* Real-time HITL Push Approval Modal */}
       <HitlApprovalModal
