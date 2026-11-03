@@ -1,0 +1,57 @@
+import { FastifyPluginAsync } from 'fastify';
+import { z } from 'zod';
+import {
+  ShoppingActionTypeSchema,
+  ChatResponsePayload,
+} from '@aegispay/shared-types';
+import { defaultShoppingAssistant } from '../services/shopping-assistant.js';
+
+const ChatMessageSchema = z.object({
+  message: z.string().min(1),
+  action: ShoppingActionTypeSchema.optional(),
+  product_ids: z.array(z.string()).optional(),
+  budget_cap_cents: z.number().int().positive().optional(),
+  zip_code: z.string().optional(),
+  history: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string(),
+  })).optional(),
+});
+
+export const chatRoutes: FastifyPluginAsync = async (fastify) => {
+  /**
+   * POST /api/buyer/chat
+   * Conversational AI Shopping Concierge & Product Comparison Engine
+   * Returns structured ChatResponsePayload with markdown, product cards, comparison matrix, and knapsack cart.
+   */
+  fastify.post('/api/buyer/chat', async (request, reply) => {
+    const parseResult = ChatMessageSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({
+        error: 'INVALID_REQUEST',
+        details: parseResult.error.format(),
+      });
+    }
+
+    try {
+      const response: ChatResponsePayload = await defaultShoppingAssistant.processMessage(parseResult.data);
+      return reply.send({
+        status: 'SUCCESS',
+        ...response,
+      });
+    } catch (err: any) {
+      fastify.log.error(err);
+      return reply.status(500).send({
+        error: 'SHOPPING_CONCIERGE_FAILED',
+        message: err.message || 'An error occurred while processing the shopping assistant request.',
+        action: parseResult.data.action || 'DISCOVER',
+        markdown: '⚠️ I encountered an unexpected error while retrieving product recommendations. Please try searching with a different term.',
+        follow_up_suggestions: [
+          'Search for wireless headphones',
+          'Search for charging stands',
+          'Explore top deals',
+        ],
+      });
+    }
+  });
+};

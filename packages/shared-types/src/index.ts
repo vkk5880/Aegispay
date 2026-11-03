@@ -123,6 +123,60 @@ export const Channel3ItemSchema = z.object({
 
 export const PayPalOrderIntentSchema = z.enum(['AUTHORIZE', 'CAPTURE']);
 
+export const ShoppingActionTypeSchema = z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']);
+
+export const ProductCardDataSchema = z.object({
+  product_id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  category_id: z.string(),
+  price_cents: z.number().int().nonnegative(),
+  compare_at_price_cents: z.number().int().nonnegative(),
+  commission_rebate_cents: z.number().int().nonnegative().default(0),
+  commission_rate: z.number().min(0).max(1).default(0),
+  rating: z.number().min(0).max(5).default(4.8),
+  review_count: z.number().int().nonnegative().default(120),
+  shipping_fee_cents: z.number().int().nonnegative().default(0),
+  free_shipping: z.boolean().default(false),
+  merchant_domain: z.string(),
+  merchant_credibility_score: z.number().min(0).max(100).default(95),
+  stock_status: z.enum(['IN_STOCK', 'OUT_OF_STOCK']).default('IN_STOCK'),
+  delivery_window: z.string().default('2-3 Business Days'),
+  image_url: z.string().url(),
+  cleaned_image_url: z.string().url(),
+  specs: z.record(z.string(), z.string()).optional(),
+  images: z.array(z.object({
+    url: z.string(),
+    cleaned_url: z.string(),
+  })).optional(),
+});
+
+export const ComparisonMatrixRowSchema = z.object({
+  attribute: z.string(),
+  values: z.record(z.string(), z.string()), // map productId -> display value
+  highlighted_product_id: z.string().optional(),
+});
+
+export const ComparisonMatrixSchema = z.object({
+  product_ids: z.array(z.string()),
+  products: z.array(ProductCardDataSchema),
+  rows: z.array(ComparisonMatrixRowSchema),
+  winner_product_id: z.string().optional(),
+  rationale: z.string().optional(),
+});
+
+export const ChatResponsePayloadSchema = z.object({
+  action: ShoppingActionTypeSchema,
+  markdown: z.string(),
+  products: z.array(ProductCardDataSchema).optional(),
+  comparison: ComparisonMatrixSchema.optional(),
+  product_detail: ProductCardDataSchema.optional(),
+  cart: z.any().optional(), // KnapsackOptimizationResult
+  stock_reservation: z.any().optional(), // TwoPhaseStockReservationResult
+  follow_up_suggestions: z.array(z.string()).optional(),
+  thought_trace: z.array(z.string()).optional(),
+});
+
 export type SpendMandate = z.infer<typeof SpendMandateSchema>;
 export type SessionMandate = z.infer<typeof SessionMandateSchema>;
 export type SyntheticIntentVoucher = z.infer<typeof SyntheticIntentVoucherSchema>;
@@ -134,3 +188,8 @@ export type AutonomyDialMode = z.infer<typeof AutonomyDialModeSchema>;
 export type DisputeAnalysisResult = z.infer<typeof DisputeAnalysisResultSchema>;
 export type Channel3Item = z.infer<typeof Channel3ItemSchema>;
 export type PayPalOrderIntent = z.infer<typeof PayPalOrderIntentSchema>;
+export type ShoppingActionType = z.infer<typeof ShoppingActionTypeSchema>;
+export type ProductCardData = z.infer<typeof ProductCardDataSchema>;
+export type ComparisonMatrixRow = z.infer<typeof ComparisonMatrixRowSchema>;
+export type ComparisonMatrix = z.infer<typeof ComparisonMatrixSchema>;
+export type ChatResponsePayload = z.infer<typeof ChatResponsePayloadSchema>;

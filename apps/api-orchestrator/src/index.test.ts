@@ -825,3 +825,117 @@ test('Task 16: Vault onboarding routes /api/buyer/vault/setup and /api/buyer/vau
   assert.ok(confirmBody.vault.paypal_payment_token_id);
   assert.equal(confirmBody.vault.status, 'VAULTED');
 });
+
+test('Task 17: ShoppingAssistantService parses intent and executes DISCOVER, COMPARE, DETAILS, BUY', async () => {
+  const { ShoppingAssistantService } = await import('./services/shopping-assistant.js');
+  const assistant = new ShoppingAssistantService();
+
+  // Test 1: Intent parsing
+  assert.equal(assistant.parseIntent('Show me noise cancelling headphones'), 'DISCOVER');
+  assert.equal(assistant.parseIntent('Compare Sony WH-1000XM5 vs Anker charging stand'), 'COMPARE');
+  assert.equal(assistant.parseIntent('What are the specs and details of Sony headphones?'), 'DETAILS');
+  assert.equal(assistant.parseIntent('Buy Sony WH-1000XM5 for me now'), 'BUY');
+
+  // Test 2: DISCOVER action
+  const discoverRes = await assistant.processMessage({
+    message: 'Find headphones',
+  });
+  assert.equal(discoverRes.action, 'DISCOVER');
+  assert.ok(discoverRes.products);
+  assert.ok(discoverRes.products.length > 0);
+  assert.ok(discoverRes.markdown.includes('Sony WH-1000XM5'));
+  assert.ok(discoverRes.thought_trace?.some(t => t.includes('PAYPAL-HACKATHON-2026')));
+
+  const firstProd = discoverRes.products[0];
+  assert.ok(firstProd.product_id);
+  assert.ok(firstProd.price_cents > 0);
+  assert.ok(firstProd.commission_rebate_cents > 0);
+  assert.ok(firstProd.merchant_credibility_score >= 50);
+
+  // Test 3: COMPARE action
+  const compareRes = await assistant.processMessage({
+    message: 'Compare Sony WH-1000XM5 vs Anker 3-in-1 Cube',
+    product_ids: ['ch3_prod_9921', 'ch3_prod_9922'],
+  });
+  assert.equal(compareRes.action, 'COMPARE');
+  assert.ok(compareRes.comparison);
+  assert.equal(compareRes.comparison.products.length, 2);
+  assert.ok(compareRes.comparison.rows.length >= 5);
+  assert.ok(compareRes.comparison.winner_product_id);
+  assert.ok(compareRes.markdown.includes('Side-by-Side Product Comparison Matrix'));
+
+  // Test 4: DETAILS action
+  const detailsRes = await assistant.processMessage({
+    message: 'Give me specs for Sony WH-1000XM5',
+    product_ids: ['ch3_prod_9921'],
+  });
+  assert.equal(detailsRes.action, 'DETAILS');
+  assert.ok(detailsRes.product_detail);
+  assert.equal(detailsRes.product_detail.product_id, 'ch3_prod_9921');
+  assert.ok(detailsRes.product_detail.specs);
+  assert.ok(detailsRes.product_detail.cleaned_image_url);
+  assert.ok(detailsRes.markdown.includes('Key Specifications & Credentials'));
+
+  // Test 5: BUY action (2PC pre-check + knapsack cart)
+  const buyRes = await assistant.processMessage({
+    message: 'Buy this now',
+    product_ids: ['ch3_prod_9921'],
+    zip_code: '94016',
+  });
+  assert.equal(buyRes.action, 'BUY');
+  assert.ok(buyRes.stock_reservation);
+  assert.equal(buyRes.stock_reservation.all_held, true);
+  assert.ok(buyRes.stock_reservation.reservation_id.startsWith('res_2pc_'));
+  assert.ok(buyRes.cart);
+  assert.ok(buyRes.cart.net_buyer_expenditure_cents > 0);
+  assert.ok(buyRes.cart.assigned_merchants.length > 0);
+  assert.ok(buyRes.markdown.includes('Two-Phase Commit (2PC) Stock Reservation'));
+});
+
+test('Task 17: HTTP Route POST /api/buyer/chat processes conversational shopping requests', async () => {
+  const app = await buildApp();
+
+  // Test discover via POST /api/buyer/chat
+  const chatRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    payload: {
+      message: 'Can you show me top noise cancelling headphones?',
+    },
+  });
+
+  assert.equal(chatRes.statusCode, 200);
+  const chatBody = chatRes.json();
+  assert.equal(chatBody.status, 'SUCCESS');
+  assert.equal(chatBody.action, 'DISCOVER');
+  assert.ok(chatBody.products.length > 0);
+  assert.ok(chatBody.markdown);
+
+  // Test compare via POST /api/buyer/chat
+  const compareRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    payload: {
+      message: 'Compare these items side by side',
+      action: 'COMPARE',
+      product_ids: ['ch3_prod_9921', 'ch3_prod_9922'],
+    },
+  });
+
+  assert.equal(compareRes.statusCode, 200);
+  const compareBody = compareRes.json();
+  assert.equal(compareBody.status, 'SUCCESS');
+  assert.equal(compareBody.action, 'COMPARE');
+  assert.ok(compareBody.comparison);
+  assert.equal(compareBody.comparison.products.length, 2);
+
+  // Test validation error handling
+  const invalidRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    payload: {
+      message: '',
+    },
+  });
+  assert.equal(invalidRes.statusCode, 400);
+});
