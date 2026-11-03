@@ -258,12 +258,18 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
     try {
       // @ts-ignore
       const results = await db.select().from(disputeArbitrations).where(eq(disputeArbitrations.paypal_dispute_id, disputeId));
+      if (!results[0] && process.env.NODE_ENV === 'production') {
+        throw new Error(`Production database error: dispute record not found for id ${disputeId}`);
+      }
       return results[0] || {
         paypal_dispute_id: disputeId,
         purchase_unit_id: 'mock_pu_id',
         dispute_amount_cents: 10000
       };
-    } catch (e) {
+    } catch (e: any) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Production database failure in disputeForensicsTask: ${e.message}`);
+      }
       console.warn("DB not available, using mock dispute");
       return {
         paypal_dispute_id: disputeId,
