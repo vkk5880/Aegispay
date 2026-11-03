@@ -5,6 +5,8 @@ import { defaultCartSolver } from '../services/cart-solver.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultSyntheticIntentEngine } from '../services/synthetic-intent.js';
 import { defaultCounterBidEngine } from '../services/counter-bid-engine.js';
+import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
+import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 import { SpendMandateSchema } from '@aegispay/shared-types';
 
 const KnapsackRequestSchema = z.object({
@@ -79,7 +81,75 @@ const CounterBidRequestSchema = z.object({
   auto_accept_buffer_cents: z.number().int().nonnegative().optional(),
 });
 
+const VaultSetupSchema = z.object({
+  customer_id: z.string().optional(),
+  mandate_id: z.string().optional(),
+  return_url: z.string().url().optional(),
+  cancel_url: z.string().url().optional(),
+});
+
+const VaultConfirmSchema = z.object({
+  setup_token_id: z.string(),
+  customer_id: z.string().optional(),
+  mandate_id: z.string().optional(),
+});
+
 export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
+  /**
+   * POST /api/buyer/vault/setup
+   * Creates one-time Vault v3 setup session for off-session agent purchasing
+   */
+  fastify.post('/api/buyer/vault/setup', async (request, reply) => {
+    const parseResult = VaultSetupSchema.safeParse(request.body || {});
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
+    }
+
+    try {
+      const session = await defaultVaultOnboardingService.createVaultSetupSession({
+        customerId: parseResult.data.customer_id,
+        mandateId: parseResult.data.mandate_id,
+        returnUrl: parseResult.data.return_url,
+        cancelUrl: parseResult.data.cancel_url,
+      });
+
+      return reply.send({
+        status: 'SUCCESS',
+        session,
+      });
+    } catch (err: any) {
+      fastify.log.error(err);
+      return reply.status(500).send({ error: 'VAULT_SETUP_FAILED', message: err.message });
+    }
+  });
+
+  /**
+   * POST /api/buyer/vault/confirm
+   * Converts Vault v3 setup-token to durable paypal_payment_token_id
+   */
+  fastify.post('/api/buyer/vault/confirm', async (request, reply) => {
+    const parseResult = VaultConfirmSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
+    }
+
+    try {
+      const confirmed = await defaultVaultOnboardingService.confirmVaultPaymentToken({
+        setupTokenId: parseResult.data.setup_token_id,
+        customerId: parseResult.data.customer_id,
+        mandateId: parseResult.data.mandate_id,
+      });
+
+      return reply.send({
+        status: 'SUCCESS',
+        vault: confirmed,
+      });
+    } catch (err: any) {
+      fastify.log.error(err);
+      return reply.status(500).send({ error: 'VAULT_CONFIRM_FAILED', message: err.message });
+    }
+  });
+
   /**
    * POST /api/buyer/knapsack
    * Solves multi-vendor basket minimizing net buyer expenditure
@@ -137,6 +207,12 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
 
     const { mandate_id, purchase_units, zip_code } = parseResult.data;
 
+    // Calculate total requested cents across purchase units for compensating rollback if failure occurs
+    const totalRequestedCents = purchase_units.reduce((acc, pu) => {
+      const val = parseFloat(pu.amount.value) || 0;
+      return acc + Math.round(val * 100);
+    }, 0);
+
     // Step 1: 2PC Pre-Flight Stock Verification across all items
     const stockItemsToVerify: Array<{ product_id: string; quantity: number }> = [];
     for (const pu of purchase_units) {
@@ -158,11 +234,14 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       });
 
       if (!stockReservation.all_held) {
+        // Compensating rollback if stock verification fails
+        await defaultAtomicSpendEnforcer.rollbackReservation(mandate_id, totalRequestedCents);
         return reply.status(409).send({
           error: 'STOCK_VERIFICATION_FAILED',
           message: 'One or more items in the basket are out of stock or failed 2PC hold verification.',
           stock_reservation: stockReservation,
           fallback_reoptimization: stockReservation.fallback_reoptimization,
+          rollback_executed: true,
         });
       }
     }
@@ -189,7 +268,21 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       });
     } catch (err: any) {
       fastify.log.error(err);
-      return reply.status(500).send({ error: 'AUTHORIZATION_FAILED', message: err.message });
+      // Execute compensating rollback for PayPal Orders v2 failures and card declines (INSTRUMENT_DECLINED)
+      try {
+        await defaultAtomicSpendEnforcer.rollbackReservation(mandate_id, totalRequestedCents);
+      } catch (rollbackErr) {
+        fastify.log.warn({ rollbackErr }, 'Failed executing compensating rollback during authorization failure');
+      }
+
+      const isInstrumentDeclined = err?.message?.includes('INSTRUMENT_DECLINED') || err?.name === 'INSTRUMENT_DECLINED';
+
+      return reply.status(500).send({
+        error: isInstrumentDeclined ? 'INSTRUMENT_DECLINED' : 'AUTHORIZATION_FAILED',
+        message: err.message,
+        compensating_rollback: true,
+        restored_cents: totalRequestedCents,
+      });
     }
   });
 
@@ -203,11 +296,25 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
 
-    const evaluation = await defaultSyntheticIntentEngine.processSyntheticBid(parseResult.data);
-    return reply.send({
-      status: 'PROCESSED',
-      evaluation,
-    });
+    try {
+      const evaluation = await defaultSyntheticIntentEngine.processSyntheticBid(parseResult.data);
+      return reply.send({
+        status: 'PROCESSED',
+        evaluation,
+      });
+    } catch (err: any) {
+      fastify.log.error(err);
+      await defaultAtomicSpendEnforcer.rollbackReservation(
+        parseResult.data.mandate_id,
+        parseResult.data.buyer_bid_cents || parseResult.data.buyer_budget_cap_cents,
+        parseResult.data.merchant_domain
+      );
+      return reply.status(500).send({
+        error: 'SYNTHETIC_BID_FAILED',
+        message: err.message,
+        compensating_rollback: true,
+      });
+    }
   });
 
   /**
@@ -220,10 +327,24 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
 
-    const evaluation = await defaultCounterBidEngine.evaluateCounterBid(parseResult.data as any);
-    return reply.send({
-      status: 'PROCESSED',
-      evaluation,
-    });
+    try {
+      const evaluation = await defaultCounterBidEngine.evaluateCounterBid(parseResult.data as any);
+      return reply.send({
+        status: 'PROCESSED',
+        evaluation,
+      });
+    } catch (err: any) {
+      fastify.log.error(err);
+      await defaultAtomicSpendEnforcer.rollbackReservation(
+        parseResult.data.mandate.mandate_id,
+        parseResult.data.buyer_bid_cents,
+        parseResult.data.merchant_domain
+      );
+      return reply.status(500).send({
+        error: 'COUNTER_BID_FAILED',
+        message: err.message,
+        compensating_rollback: true,
+      });
+    }
   });
 };

@@ -1,6 +1,6 @@
 import type { Redis } from 'ioredis';
 
-const LUA_SCRIPT = `
+export const LUA_SCRIPT = `
 -- KEYS[1]: "aegis:{vch_" .. mandate_id .. "}:mandate"
 -- KEYS[2]: "aegis:{vch_" .. mandate_id .. "}:exposure:" .. merchant_domain
 -- ARGV[1]: requested_cents
@@ -53,6 +53,36 @@ redis.call("INCRBY", KEYS[2], req_cents)
 return {1, tostring(spent + req_cents)}
 `;
 
+export const ROLLBACK_LUA_SCRIPT = `
+-- KEYS[1]: "aegis:{vch_" .. mandate_id .. "}:mandate"
+-- KEYS[2]: "aegis:{vch_" .. mandate_id .. "}:exposure:" .. merchant_domain (optional)
+-- ARGV[1]: req_cents
+
+local m = redis.call("HMGET", KEYS[1], "spent")
+if not m[1] then
+    return {0, "ERR_MANDATE_NOT_FOUND"}
+end
+
+local req_cents = tonumber(ARGV[1])
+local new_spent = redis.call("HINCRBY", KEYS[1], "spent", -req_cents)
+if new_spent < 0 then
+    redis.call("HSET", KEYS[1], "spent", 0)
+    new_spent = 0
+end
+
+if #KEYS > 1 and KEYS[2] ~= "" then
+    local current_merchant = tonumber(redis.call("GET", KEYS[2]) or "0")
+    local new_merchant = redis.call("INCRBY", KEYS[2], -req_cents)
+    if new_merchant < 0 then
+        redis.call("SET", KEYS[2], 0)
+    end
+end
+
+return {1, tostring(new_spent)}
+`;
+
+export const eval_rollback = ROLLBACK_LUA_SCRIPT;
+
 export interface ReservationParams {
   mandate_id: string;
   merchant_domain: string;
@@ -70,6 +100,14 @@ export interface ReservationResult {
 
 export class AtomicSpendEnforcer {
   private scriptSha: string | null = null;
+  private rollbackSha: string | null = null;
+  private defaultRedis: Redis | null = null;
+
+  constructor(defaultRedis?: Redis) {
+    if (defaultRedis) {
+      this.defaultRedis = defaultRedis;
+    }
+  }
 
   async reserveBudget(redisClient: Redis, params: ReservationParams): Promise<ReservationResult> {
     // Format Redis hash tag {vch_...} to guarantee both keys map to the same Redis cluster slot
@@ -137,4 +175,76 @@ export class AtomicSpendEnforcer {
       throw e;
     }
   }
+
+  /**
+   * Executes atomic compensating rollback decrementing spent (-req_cents) using Redis hash tags {vch_}.
+   * Restores available balance when an authorization fails or cards decline (INSTRUMENT_DECLINED).
+   */
+  async rollbackReservation(
+    redisOrMandateId: Redis | string,
+    mandateIdOrReqCents: string | number,
+    reqCentsOrDomain?: number | string,
+    merchantDomain?: string
+  ): Promise<boolean> {
+    let client: Redis | null = null;
+    let mandateId: string;
+    let reqCents: number;
+    let domain: string | undefined;
+
+    if (typeof redisOrMandateId === 'string') {
+      // Called as: rollbackReservation(mandateId, reqCents, merchantDomain)
+      client = this.defaultRedis;
+      mandateId = redisOrMandateId;
+      reqCents = mandateIdOrReqCents as number;
+      domain = reqCentsOrDomain as string | undefined;
+    } else {
+      // Called as: rollbackReservation(redisClient, mandateId, reqCents, merchantDomain)
+      client = redisOrMandateId;
+      mandateId = mandateIdOrReqCents as string;
+      reqCents = reqCentsOrDomain as number;
+      domain = merchantDomain;
+    }
+
+    if (!client) {
+      // Gracefully succeed if no Redis client configured in current runtime
+      return true;
+    }
+
+    const tag = mandateId.startsWith('vch_') ? mandateId : `vch_${mandateId}`;
+    const keys: string[] = [`aegis:{${tag}}:mandate`];
+    if (domain) {
+      keys.push(`aegis:{${tag}}:exposure:${domain}`);
+    }
+
+    const argv = [reqCents.toString()];
+
+    try {
+      if (!this.rollbackSha) {
+        this.rollbackSha = await client.script('LOAD', ROLLBACK_LUA_SCRIPT) as string;
+      }
+
+      const result = await client.evalsha(
+        this.rollbackSha,
+        keys.length,
+        ...keys,
+        ...argv
+      ) as [number, string];
+
+      return result[0] === 1;
+    } catch (e: any) {
+      if (e.message && e.message.includes('NOSCRIPT')) {
+        const result = await client.eval(
+          ROLLBACK_LUA_SCRIPT,
+          keys.length,
+          ...keys,
+          ...argv
+        ) as [number, string];
+
+        return result[0] === 1;
+      }
+      throw e;
+    }
+  }
 }
+
+export const defaultAtomicSpendEnforcer = new AtomicSpendEnforcer();

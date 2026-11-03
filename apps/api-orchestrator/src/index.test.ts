@@ -724,3 +724,104 @@ test('HTTP Routes: /api/hitl/pending and /api/hitl/respond manage approval lifec
   assert.equal(respondBody.result.status, 'APPROVED');
   assert.equal(respondBody.result.decision_payload.approved, true);
 });
+
+test('Task 16: AtomicSpendEnforcer rollbackReservation decrements spent and exposure via hash tags', async () => {
+  const enforcer = new AtomicSpendEnforcer();
+  let capturedKeys: string[] = [];
+  let capturedArgv: string[] = [];
+
+  const mockRedis: any = {
+    script: async () => 'mock_rollback_sha',
+    evalsha: async (_sha: string, keyCount: number, ...args: any[]) => {
+      capturedKeys = args.slice(0, keyCount);
+      capturedArgv = args.slice(keyCount);
+      return [1, '0']; // 100% balance restored
+    },
+  };
+
+  const success = await enforcer.rollbackReservation(mockRedis, 'vch_rollback_123', 5000, 'merchant-a.com');
+  assert.equal(success, true);
+  assert.equal(capturedKeys.length, 2);
+  assert.equal(capturedKeys[0], 'aegis:{vch_rollback_123}:mandate');
+  assert.equal(capturedKeys[1], 'aegis:{vch_rollback_123}:exposure:merchant-a.com');
+  assert.equal(capturedArgv[0], '5000');
+});
+
+test('Task 16: CartSolver decouples affiliate settlement authorizing full retail merchant price', () => {
+  const solver = new CartSolver({ alpha: 0.75 });
+  const mockProducts: Channel3ProductDetail[] = [
+    {
+      product_id: 'prod_decouple',
+      title: 'Decoupled Product',
+      description: 'Test decoupled product',
+      category_id: 'c1',
+      offers: [
+        {
+          id: 'o_decouple',
+          product_id: 'prod_decouple',
+          domain: 'decoupled-merchant.com',
+          price: 20000, // $200.00 retail
+          compare_at_price: 25000,
+          max_commission_rate: 0.10, // 10% * 0.75 = $15.00 rebate
+          shipping_fee_cents: 1000, // $10.00
+          shipping_waiver_threshold_cents: 50000,
+        },
+      ],
+      images: [{ url: 'https://img.test', cleaned_url: 'https://img.test/clean' }],
+      dimensions: { weight: 100 },
+    },
+  ];
+
+  const result = solver.solve(mockProducts, [{ product_id: 'prod_decouple', quantity: 1 }]);
+  assert.equal(result.assigned_merchants.length, 1);
+  const merchant = result.assigned_merchants[0];
+
+  // Full retail authorization: subtotal $200 + shipping $10 + tax = $210 (without tax)
+  assert.equal(merchant.merchant_retail_authorized_cents, merchant.subtotal_cents + merchant.shipping_fee_cents + merchant.tax_cents);
+  assert.equal(merchant.platform_subsidy_cents, 1500); // $15 rebate
+  assert.equal(result.total_platform_subsidy_credit_cents, 1500);
+
+  const pu = result.paypal_purchase_units[0];
+  // PayPal purchase unit amount value reflects full merchant retail authorized amount
+  assert.equal(pu.amount.value, (merchant.merchant_retail_authorized_cents / 100).toFixed(2));
+  assert.ok(pu.platform_subsidy_credit);
+  assert.equal(pu.platform_subsidy_credit.settlement_decoupled, true);
+  assert.equal(pu.platform_subsidy_credit.commission_rebate_cents, 1500);
+});
+
+test('Task 16: Vault onboarding routes /api/buyer/vault/setup and /api/buyer/vault/confirm', async () => {
+  const app = await buildApp();
+
+  // Test setup route
+  const setupRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/vault/setup',
+    payload: {
+      customer_id: 'cust_vault_test_1',
+      mandate_id: 'vch_vault_test_1',
+    },
+  });
+
+  assert.equal(setupRes.statusCode, 200);
+  const setupBody = setupRes.json();
+  assert.equal(setupBody.status, 'SUCCESS');
+  assert.ok(setupBody.session.setup_token_id);
+  assert.ok(setupBody.session.approve_url);
+
+  // Test confirm route
+  const confirmRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/vault/confirm',
+    payload: {
+      setup_token_id: setupBody.session.setup_token_id,
+      customer_id: 'cust_vault_test_1',
+      mandate_id: 'vch_vault_test_1',
+    },
+  });
+
+  assert.equal(confirmRes.statusCode, 200);
+  const confirmBody = confirmRes.json();
+  assert.equal(confirmBody.status, 'SUCCESS');
+  assert.ok(confirmBody.vault.paypal_payment_token_id);
+  assert.equal(confirmBody.vault.status, 'VAULTED');
+});

@@ -32,6 +32,8 @@ export interface MerchantCartGroup {
   tax_cents: number;
   tax_rate_bps: number;
   net_merchant_cents: number;
+  merchant_retail_authorized_cents: number; // Full retail amount authorized to merchant
+  platform_subsidy_cents: number; // Affiliate commission rebate tracked as instant platform credit
 }
 
 export interface KnapsackOptimizationResult {
@@ -42,6 +44,8 @@ export interface KnapsackOptimizationResult {
   total_shipping_saved_cents: number;
   total_tax_cents: number;
   net_buyer_expenditure_cents: number;
+  total_merchant_authorized_cents: number;
+  total_platform_subsidy_credit_cents: number;
   savings_percentage: number;
   is_within_budget: boolean;
   budget_cap_cents?: number;
@@ -59,8 +63,14 @@ export interface KnapsackOptimizationResult {
         item_total: { currency_code: string; value: string };
         shipping: { currency_code: string; value: string };
         tax_total: { currency_code: string; value: string };
-        discount: { currency_code: string; value: string };
+        discount?: { currency_code: string; value: string };
       };
+    };
+    platform_subsidy_credit?: {
+      currency_code: string;
+      value: string;
+      commission_rebate_cents: number;
+      settlement_decoupled: boolean;
     };
     items: Array<{
       name: string;
@@ -214,6 +224,8 @@ export class CartSolver {
           tax_cents: 0,
           tax_rate_bps: 0,
           net_merchant_cents: 0,
+          merchant_retail_authorized_cents: 0,
+          platform_subsidy_cents: 0,
         });
       }
 
@@ -241,6 +253,7 @@ export class CartSolver {
     let totalShipping = 0;
     let totalShippingSaved = 0;
     let totalTax = 0;
+    let totalMerchantAuthorized = 0;
 
     const assignedMerchants: MerchantCartGroup[] = [];
     for (const group of merchantGroups.values()) {
@@ -257,10 +270,18 @@ export class CartSolver {
       group.tax_rate_bps = taxRes.tax_rate_bps;
       totalTax += group.tax_cents;
 
-      group.net_merchant_cents = group.subtotal_cents - group.commission_rebate_cents + group.shipping_fee_cents + group.tax_cents;
+      // Section 11.1 Decouple Affiliate Settlement:
+      // Authorize full retail merchant retail price on PayPal multi-purchase units
+      // (subtotal + shipping + tax), so sellers are never underpaid before affiliate payouts.
+      group.merchant_retail_authorized_cents = group.subtotal_cents + group.shipping_fee_cents + group.tax_cents;
+      // Track commission rebate separately as an instant platform subsidy ledger credit
+      group.platform_subsidy_cents = group.commission_rebate_cents;
+      // Net buyer expenditure for this merchant group
+      group.net_merchant_cents = group.merchant_retail_authorized_cents - group.platform_subsidy_cents;
 
       grossSubtotal += group.subtotal_cents;
       totalRebate += group.commission_rebate_cents;
+      totalMerchantAuthorized += group.merchant_retail_authorized_cents;
       assignedMerchants.push(group);
     }
 
@@ -283,13 +304,14 @@ export class CartSolver {
       }
     }
 
-    // Map winning split into a single PayPal Orders v2 Multi-Purchase-Unit payload
+    // Map winning split into PayPal Orders v2 Multi-Purchase-Unit payload:
+    // Full retail merchant amounts authorized so sellers receive 100% full merchant retail price
     const paypalPurchaseUnits = assignedMerchants.map((merchant, idx) => {
       const itemTotalVal = (merchant.subtotal_cents / 100).toFixed(2);
       const shippingVal = (merchant.shipping_fee_cents / 100).toFixed(2);
       const taxVal = (merchant.tax_cents / 100).toFixed(2);
-      const discountVal = (merchant.commission_rebate_cents / 100).toFixed(2);
-      const totalVal = (merchant.net_merchant_cents / 100).toFixed(2);
+      const authorizedVal = (merchant.merchant_retail_authorized_cents / 100).toFixed(2);
+      const subsidyVal = (merchant.platform_subsidy_cents / 100).toFixed(2);
       const invoiceSuffix = Math.random().toString(36).substring(2, 7);
 
       return {
@@ -299,13 +321,18 @@ export class CartSolver {
         description: `Autonomous settlement for ${merchant.items.length} items from ${merchant.merchant_domain}`,
         amount: {
           currency_code: 'USD',
-          value: totalVal,
+          value: authorizedVal,
           breakdown: {
             item_total: { currency_code: 'USD', value: itemTotalVal },
             shipping: { currency_code: 'USD', value: shippingVal },
             tax_total: { currency_code: 'USD', value: taxVal },
-            discount: { currency_code: 'USD', value: discountVal },
           },
+        },
+        platform_subsidy_credit: {
+          currency_code: 'USD',
+          value: subsidyVal,
+          commission_rebate_cents: merchant.platform_subsidy_cents,
+          settlement_decoupled: true,
         },
         items: merchant.items.map(it => ({
           name: it.title.substring(0, 127),
@@ -328,6 +355,8 @@ export class CartSolver {
       total_shipping_saved_cents: totalShippingSaved,
       total_tax_cents: totalTax,
       net_buyer_expenditure_cents: netBuyerExpenditure,
+      total_merchant_authorized_cents: totalMerchantAuthorized,
+      total_platform_subsidy_credit_cents: totalRebate,
       savings_percentage: savingsPercentage,
       is_within_budget: isWithinBudget,
       budget_cap_cents: budgetCap,
