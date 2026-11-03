@@ -158,7 +158,7 @@ export class CounterBidEngine {
       (((request.retail_offer_cents - merchantCounterCents) / request.retail_offer_cents) * 100).toFixed(2)
     );
 
-    const counterVoucherId = `cvch_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const counterVoucherId = `cvch_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
     const counterVoucher: CounterVoucher = {
       counter_voucher_id: counterVoucherId,
       merchant_domain: request.merchant_domain,

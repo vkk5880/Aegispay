@@ -334,7 +334,7 @@ export class Channel3Client {
     const productIds = Array.from(new Set(normalizedItems.map(i => i.product_id)));
     const catalog = options?.catalog || (await this.lookup(productIds));
 
-    const reservationId = `res_2pc_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const reservationId = `res_2pc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
     const verifiedItems: VerifiedStockItem[] = [];
     const failedItems: string[] = [];
 

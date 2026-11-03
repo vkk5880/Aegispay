@@ -66,7 +66,7 @@ export function CryptographicMandateSigner({
       const exportedPublicKey = await window.crypto.subtle.exportKey('raw', keyPair.publicKey);
       const publicKeyHex = buf2hex(exportedPublicKey);
 
-      const mandateId = `man_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+      const mandateId = `man_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
       const expiresAt = new Date(Date.now() + validityMinutes * 60 * 1000);
 
       const messageObj = {

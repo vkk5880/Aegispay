@@ -2,6 +2,59 @@ import crypto from 'node:crypto';
 import type { SpendMandate } from '@aegispay/shared-types';
 
 const HEX_REGEX = /^[0-9a-fA-F]+$/;
+const ASN1_SPKI_ED25519_PREFIX = Buffer.from('302a300506032b6570032100', 'hex'); // SubjectPublicKeyInfo ASN.1 prefix for Ed25519
+
+// LRU Cache for parsed crypto.KeyObject instances keyed by public_key_hex
+// Avoids repetitive ASN.1 DER parsing and key object creation overhead
+const MAX_KEY_CACHE_SIZE = 1000;
+const keyObjectLruCache = new Map<string, crypto.KeyObject>();
+
+/**
+ * Retrieves a cached KeyObject for the given public key hex, or creates, caches, and returns a new one.
+ * Uses a Map as an LRU cache (delete + set to move recently accessed entry to end).
+ */
+export function getOrCreateEd25519KeyObject(publicKeyHex: string, publicKeyBuffer: Buffer): crypto.KeyObject {
+  const normalizedHex = publicKeyHex.toLowerCase();
+  const cached = keyObjectLruCache.get(normalizedHex);
+  if (cached) {
+    // Refresh LRU ordering
+    keyObjectLruCache.delete(normalizedHex);
+    keyObjectLruCache.set(normalizedHex, cached);
+    return cached;
+  }
+
+  // Parse Ed25519 ASN.1 DER SPKI structure
+  const keyObject = crypto.createPublicKey({
+    key: Buffer.concat([ASN1_SPKI_ED25519_PREFIX, publicKeyBuffer]),
+    format: 'der',
+    type: 'spki',
+  });
+
+  // Evict oldest entry if capacity reached
+  if (keyObjectLruCache.size >= MAX_KEY_CACHE_SIZE) {
+    const oldestKey = keyObjectLruCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      keyObjectLruCache.delete(oldestKey);
+    }
+  }
+
+  keyObjectLruCache.set(normalizedHex, keyObject);
+  return keyObject;
+}
+
+/**
+ * Returns the current number of cached parsed KeyObjects.
+ */
+export function getKeyObjectCacheSize(): number {
+  return keyObjectLruCache.size;
+}
+
+/**
+ * Clears the Ed25519 KeyObject LRU cache.
+ */
+export function clearKeyObjectCache(): void {
+  keyObjectLruCache.clear();
+}
 
 export async function verifySessionMandateSignature(mandate: SpendMandate): Promise<boolean> {
   try {
@@ -42,20 +95,13 @@ export async function verifySessionMandateSignature(mandate: SpendMandate): Prom
       allowed_category_ids: mandate.allowed_category_ids,
       expires_at: expiresAt.toISOString(),
       status: mandate.status,
-      public_key_hex: mandate.public_key_hex
+      public_key_hex: mandate.public_key_hex,
     };
 
     const messageString = JSON.stringify(messageObj);
 
-    // Import raw Ed25519 public key
-    const publicKey = crypto.createPublicKey({
-      key: Buffer.concat([
-        Buffer.from('302a300506032b6570032100', 'hex'), // SubjectPublicKeyInfo ASN.1 prefix for Ed25519
-        publicKeyBuffer
-      ]),
-      format: 'der',
-      type: 'spki',
-    });
+    // Retrieve or create parsed Ed25519 public key from LRU cache
+    const publicKey = getOrCreateEd25519KeyObject(mandate.public_key_hex, publicKeyBuffer);
 
     const isVerified = crypto.verify(
       null, // algorithm is null for ed25519

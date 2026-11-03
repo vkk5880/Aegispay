@@ -48,7 +48,7 @@ export function SyntheticIntentBidder({
   const handleMintVaultBid = async () => {
     setIsMinting(true);
     try {
-      const voucherId = `syn_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`;
+      const voucherId = `syn_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
       const setupTokenId = `vault_setup_${Date.now()}`;
 
       // Merchant margin floor allows 12% discount or 80% of saved customer acquisition cost

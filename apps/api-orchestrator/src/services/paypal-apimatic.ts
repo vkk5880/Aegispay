@@ -252,7 +252,7 @@ export class PayPalApimaticClient {
     try {
       const response = await this.ordersController.createOrder({
         body: reqBody,
-        paypalRequestId: params.payPalRequestId || `aegis-req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        paypalRequestId: params.payPalRequestId || `aegis-req-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
       });
       return response.result;
     } catch (err: any) {

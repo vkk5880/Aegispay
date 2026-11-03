@@ -69,7 +69,7 @@ export class SyntheticIntentEngine {
     }) as any;
 
     const setupTokenId = setupTokenResponse?.id || `vault_setup_${Date.now()}`;
-    const voucherId = `syn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+    const voucherId = `syn_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
 
     // Evaluate autonomous merchant margin floor:
     // Saved customer acquisition cost from Channel3's commission rebate rate

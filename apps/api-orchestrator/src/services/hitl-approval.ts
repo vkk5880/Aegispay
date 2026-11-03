@@ -69,7 +69,7 @@ export class HitlApprovalRegistry {
     const timeoutSeconds = opts.timeout_seconds ?? 60;
     const now = Date.now();
     const expiresAtMs = now + timeoutSeconds * 1000;
-    const id = opts.id || `hitl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const id = opts.id || `hitl_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
 
     const req: HitlApprovalRequest = {
       id,

@@ -146,7 +146,7 @@ export async function executeUnitPartialCapture(params: {
 
   if (!process.env.PAYPAL_CLIENT_ID || process.env.PAYPAL_CLIENT_ID === 'mock_paypal_client_id' || params.authorizationId.startsWith('MOCK_')) {
     return {
-      id: `MOCK_CAPTURE_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      id: `MOCK_CAPTURE_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
       status: 'COMPLETED',
       amount: { currency_code: currencyCode, value },
       final_capture: params.isFinal ?? true,

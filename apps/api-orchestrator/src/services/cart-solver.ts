@@ -312,7 +312,7 @@ export class CartSolver {
       const taxVal = (merchant.tax_cents / 100).toFixed(2);
       const authorizedVal = (merchant.merchant_retail_authorized_cents / 100).toFixed(2);
       const subsidyVal = (merchant.platform_subsidy_cents / 100).toFixed(2);
-      const invoiceSuffix = Math.random().toString(36).substring(2, 7);
+      const invoiceSuffix = crypto.randomUUID().slice(0, 8);
 
       return {
         reference_id: `PU_${merchant.merchant_domain.replace(/[^a-zA-Z0-9]/g, '_')}_${idx + 1}`,

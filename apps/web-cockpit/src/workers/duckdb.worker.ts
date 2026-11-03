@@ -57,6 +57,70 @@ export async function fetchDisputeDossier(disputeId: string, apiBaseUrl = ''): P
   return await res.json();
 }
 
+/**
+ * Validates that an incoming query is strictly a read-only SELECT or WITH statement.
+ * Rejects non-read-only queries (e.g. INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, ATTACH, COPY).
+ */
+export function validateReadOnlySelectQuery(query: string): boolean {
+  if (!query || typeof query !== 'string') {
+    return false;
+  }
+
+  // Strip leading SQL comments (-- comment or /* comment */) and whitespace
+  const sanitized = query
+    .replace(/--.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .trim();
+
+  if (!sanitized) {
+    return false;
+  }
+
+  // Must start with SELECT or WITH (case-insensitive)
+  if (!/^(SELECT|WITH)\b/i.test(sanitized)) {
+    return false;
+  }
+
+  // Prohibit dangerous DDL and mutation statements even within compound statements or CTEs
+  const forbiddenKeywords = [
+    /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|REPLACE|ATTACH|DETACH|COPY|PRAGMA|EXPORT|LOAD|INSTALL)\b/i,
+  ];
+
+  for (const regex of forbiddenKeywords) {
+    if (regex.test(sanitized)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// Global prepared statement cache mapping normalized query string to compiled prepared statement
+const statementCache = new Map<string, duckdb.AsyncPreparedStatement>();
+
+/**
+ * Clears the prepared statement cache and closes each prepared statement.
+ */
+export async function clearStatementCache(): Promise<void> {
+  const closePromises: Promise<void>[] = [];
+  for (const stmt of statementCache.values()) {
+    try {
+      closePromises.push(stmt.close().catch(() => {}));
+    } catch {
+      // ignore close failures
+    }
+  }
+  await Promise.all(closePromises);
+  statementCache.clear();
+}
+
+/**
+ * Returns the current number of cached prepared statements.
+ */
+export function getStatementCacheSize(): number {
+  return statementCache.size;
+}
+
 export async function initDuckDbWorker() {
   const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
 
@@ -71,14 +135,32 @@ export async function initDuckDbWorker() {
   return db;
 }
 
-export async function queryAnonymizedFinancialLedger(db: duckdb.AsyncDuckDB, query: string) {
+/**
+ * Executes a read-only query against the in-memory DuckDB ledger.
+ * Validates query is read-only SELECT, reuses cached prepared statements for repeated queries,
+ * and guarantees connection cleanup in a try ... finally block to prevent connection leaks.
+ */
+export async function queryAnonymizedFinancialLedger(
+  db: duckdb.AsyncDuckDB,
+  query: string,
+  params: any[] = []
+) {
+  if (!validateReadOnlySelectQuery(query)) {
+    throw new Error('Query rejected: Only read-only SELECT queries are permitted');
+  }
+
   const conn = await db.connect();
 
-  const stmt = await conn.prepare(query);
-  const result = await stmt.query();
+  try {
+    let stmt = statementCache.get(query);
+    if (!stmt) {
+      stmt = await conn.prepare(query);
+      statementCache.set(query, stmt);
+    }
 
-  await stmt.close();
-  await conn.close();
-
-  return result.toArray();
+    const result = await stmt.query(...params);
+    return result.toArray();
+  } finally {
+    await conn.close();
+  }
 }
