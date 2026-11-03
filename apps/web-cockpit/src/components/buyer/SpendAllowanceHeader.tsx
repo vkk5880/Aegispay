@@ -17,16 +17,20 @@ interface SpendAllowanceHeaderProps {
   maxBudgetCents: number;
   spentCents: number;
   isConfigured: boolean;
+  cartItemCount?: number;
   onOpenSettings: () => void;
   onConnectPayPal: () => void;
+  onOpenCart?: () => void;
 }
 
 export function SpendAllowanceHeader({
   maxBudgetCents,
   spentCents,
   isConfigured,
+  cartItemCount = 0,
   onOpenSettings,
   onConnectPayPal,
+  onOpenCart,
 }: SpendAllowanceHeaderProps) {
   const availableCents = Math.max(0, maxBudgetCents - spentCents);
   const spentPercent = Math.min(100, Math.round((spentCents / (maxBudgetCents || 1)) * 100));
@@ -124,6 +128,24 @@ export function SpendAllowanceHeader({
                 />
               </div>
             </div>
+
+            {/* Cart Trigger */}
+            {onOpenCart && (
+              <button
+                type="button"
+                onClick={onOpenCart}
+                className="relative p-2 sm:px-3 sm:py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="View Explainable Multi-Vendor Cart"
+              >
+                <Sparkles className="w-4 h-4 text-cyan-500" />
+                <span className="hidden sm:inline">Cart</span>
+                {cartItemCount > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-cyan-600 text-white font-mono text-[10px] font-bold">
+                    {cartItemCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Settings Drawer Button */}
             <button

@@ -12,6 +12,7 @@ import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransm
 import { ConversationalAgentChat } from '@/components/buyer/ConversationalAgentChat';
 import { SpendAllowanceHeader } from '@/components/buyer/SpendAllowanceHeader';
 import { UserSettingsDrawer, UserSettings, DEFAULT_USER_SETTINGS } from '@/components/buyer/UserSettingsDrawer';
+import { UnifiedCartDrawer } from '@/components/buyer/UnifiedCartDrawer';
 import type { SessionMandate, ProductCardData } from '@aegispay/shared-types';
 import {
   Sparkles,
@@ -19,30 +20,25 @@ import {
   Layers,
   Terminal,
   ShieldCheck,
-  CheckCircle2,
-  UserCheck,
-  AlertOctagon,
+  ShoppingBag,
   MessageSquare,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
 export default function BuyerPortalPage() {
   const [activeMandate, setActiveMandate] = useState<SessionMandate | null>(null);
-  const [activeTab, setActiveTab] = useState<'CHAT' | 'OVERVIEW' | 'KNAPSACK' | 'SYNTHETIC' | 'PAYPAL'>('CHAT');
   const [notification, setNotification] = useState<string | null>(null);
   const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
   const [shouldRunTrace, setShouldRunTrace] = useState<boolean>(false);
   const [externalBudgetCents, setExternalBudgetCents] = useState<number>(50000);
   const [spentCents, setSpentCents] = useState<number>(8500);
 
+  // Cart Drawer state
+  const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
+
   // User Settings State & Drawer
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-
-  // HITL Push Approval Modal & Error Transmuter State
-  const [hitlRequest, setHitlRequest] = useState<HitlPushApprovalRequest | null>(null);
-  const [isHitlOpen, setIsHitlOpen] = useState<boolean>(false);
-  const [activeError, setActiveError] = useState<string | null>(null);
 
   // Knapsack state
   const [optimizationData, setOptimizationData] = useState<KnapsackOptimizationData>({
@@ -164,84 +160,41 @@ export default function BuyerPortalPage() {
   const handleSelectProductForBuy = (product: ProductCardData) => {
     showNotification(`Pre-purchase reservation hold initiated for ${product.title}`);
     setSpentCents((prev) => prev + (product.price_cents - product.commission_rebate_cents));
-    setActiveTab('KNAPSACK');
+    setIsCartOpen(true);
   };
+
+  const cartItemCount = optimizationData.assigned_merchants.reduce(
+    (acc, m) => acc + m.items.reduce((iAcc, item) => iAcc + item.quantity, 0),
+    0
+  );
 
   return (
     <div className="flex-1 flex flex-col transition-colors">
-      {/* Sub Navigation Bar for Buyer Views */}
+      {/* Consumer Protection Status Bar */}
       <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-[#070d18]/70 backdrop-blur-md">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Procurement Views:
+          <div className="flex items-center gap-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+              AegisPay Autonomous Consumer Portal
             </span>
-            <div className="flex items-center gap-1 bg-white dark:bg-[#050912] p-1 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              {[
-                { id: 'CHAT', label: 'AI Shopping Concierge', icon: MessageSquare },
-                { id: 'OVERVIEW', label: 'Dashboard & Proofs', icon: Layers },
-                { id: 'KNAPSACK', label: 'Knapsack Optimizer', icon: Sparkles },
-                { id: 'SYNTHETIC', label: 'Synthetic Intent', icon: Activity },
-                { id: 'PAYPAL', label: 'PayPal SDK Mount', icon: Terminal },
-              ].map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id as any)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      isActive
-                        ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40 shadow-xs font-bold'
-                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/40'
-                    }`}
-                  >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{tab.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <span className="text-slate-300 dark:text-slate-700">|</span>
+            <span className="text-xs text-slate-600 dark:text-slate-400">
+              One-Time Vault v3 Onboarded • Decoupled Platform Rebates
+            </span>
           </div>
 
-          <div className="flex items-center gap-2 font-mono text-xs">
+          <div className="flex items-center gap-3 font-mono text-xs">
             <button
-              onClick={() => {
-                setHitlRequest({
-                  id: `hitl_demo_${Date.now()}`,
-                  type: 'MERCHANT_COUNTER_OFFER',
-                  mandate_id: activeMandate?.mandate_id || 'vch_sample_9a2f',
-                  title: 'Merchant Counter-Offer Received',
-                  message: 'Merchant countered at $465.00 ($15 above bid). Accept counter before timer expires?',
-                  original_amount_cents: 45000,
-                  requested_amount_cents: 46500,
-                  delta_cents: 1500,
-                  merchant_domain: 'audio-gear-direct.com',
-                  timeout_seconds: 60,
-                });
-                setIsHitlOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-700 dark:text-amber-300 font-bold hover:bg-amber-500/25 transition-all text-[11px]"
-              title="Test real-time Human-in-the-Loop push approval modal"
+              onClick={() => setIsCartOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 font-bold hover:bg-cyan-500/25 transition-all cursor-pointer"
             >
-              <UserCheck className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              <span>Simulate 60s HITL Push</span>
+              <ShoppingBag className="w-3.5 h-3.5 text-cyan-500" />
+              <span>Multi-Vendor Cart ({cartItemCount})</span>
             </button>
-
-            <button
-              onClick={() => {
-                setActiveError('ERR_EXCEEDS_TOTAL_MANDATE_BUDGET: Requested $520.00 exceeds current total mandate budget $500.00');
-              }}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/15 border border-rose-500/40 text-rose-700 dark:text-rose-300 font-bold hover:bg-rose-500/25 transition-all text-[11px]"
-              title="Simulate Redis Lua mandate error"
-            >
-              <AlertOctagon className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
-              <span>Simulate Error</span>
-            </button>
-
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-1" />
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-              Atomic Spend Enforcer Connected
+              Atomic Spend Enforcer Active
             </span>
           </div>
         </div>
@@ -261,161 +214,54 @@ export default function BuyerPortalPage() {
           maxBudgetCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
           spentCents={spentCents}
           isConfigured={!!activeMandate}
+          cartItemCount={cartItemCount}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          onOpenCart={() => setIsCartOpen(true)}
           onConnectPayPal={() => {
-            setActiveTab('OVERVIEW');
-            showNotification('Authorize your Ed25519 mandate to lock in your PayPal Vault allowance');
+            showNotification('Connecting to Vault v3 pre-authorization...');
           }}
         />
 
-        {/* Friendly Error Transmuter Banner */}
-        {activeError && (
-          <FriendlyErrorTransmuter
-            error={activeError}
-            onDismiss={() => setActiveError(null)}
-            onAction={(actionId) => {
-              if (actionId === 'INCREASE_CAP') {
-                const newCap = (activeMandate?.max_total_spend_cents || 50000) + 5000;
-                setExternalBudgetCents(newCap);
-                if (activeMandate) {
-                  setActiveMandate({ ...activeMandate, max_total_spend_cents: newCap });
-                }
-                showNotification(`Mandate cap increased to ${formatCents(newCap)}! Error resolved.`);
-                setActiveError(null);
-              } else if (actionId === 'FIND_CHEAPER_ALTERNATIVE') {
-                showNotification('Agent searching Channel3 for sub-$50 alternative SKU...');
-                setActiveError(null);
-              } else if (actionId === 'RENEW_MANDATE') {
-                showNotification('Mandate renewed for +24 hours with new Ed25519 signature.');
-                setActiveError(null);
-              } else {
-                showNotification(`Action executed: ${actionId}`);
-                setActiveError(null);
-              }
+        {/* Main Consumer Shopping Concierge Chat */}
+        <section className="space-y-6">
+          <ConversationalAgentChat
+            budgetCapCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+            zipCode={userSettings.zipCode}
+            onOpenCart={() => setIsCartOpen(true)}
+            onPurchaseConfirmed={(result) => {
+              setSpentCents((prev) => prev + result.authorizedCents);
+              showNotification(`1-Click Vaulted Order ${result.orderId} Authorized!`);
+            }}
+            onSelectProductForBuy={handleSelectProductForBuy}
+            onSelectProductForDetails={(p) => {
+              showNotification(`Loaded technical specifications for ${p.title}`);
+            }}
+            onSelectProductForCompare={(p) => {
+              showNotification(`Generated side-by-side comparison matrix for ${p.title}`);
             }}
           />
-        )}
+        </section>
 
-        {/* Tab 1: AI Shopping Concierge Chat */}
-        {activeTab === 'CHAT' && (
-          <section className="space-y-6">
-            <ConversationalAgentChat
-              budgetCapCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
-              zipCode={userSettings.zipCode}
-              onSelectProductForBuy={handleSelectProductForBuy}
-              onSelectProductForDetails={(p) => {
-                showNotification(`Loading specifications and warranty for ${p.title}`);
-              }}
-              onSelectProductForCompare={(p) => {
-                showNotification(`Generating comparison matrix for ${p.title}`);
-              }}
-            />
-          </section>
-        )}
-
-        {/* Tab 2: Generative Intent & Overview Dashboard */}
-        {activeTab === 'OVERVIEW' && (
-          <section className="space-y-8">
-            {/* Banner Section */}
-            <div className="p-6 rounded-2xl bg-gradient-to-r from-cyan-50 via-white to-blue-50 dark:from-blue-950/40 dark:via-[#0b1426] dark:to-cyan-950/40 border border-cyan-200 dark:border-cyan-500/20 shadow-sm dark:shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1">
-                <h1 className="text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-                  Buyer Agent Autonomous Procurement
-                  <span className="text-xs font-mono font-medium px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-400 border border-cyan-500/30">
-                    Section 11.3
-                  </span>
-                </h1>
-                <p className="text-sm text-slate-600 dark:text-slate-400 max-w-2xl">
-                  Conversational generative procurement powered by Channel3 vector search, Ed25519 cryptographic spend limits,
-                  and PayPal Vault v3 synthetic intent bidding.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 font-mono text-xs">
-                <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-                  <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Active Mandate ID</span>
-                  <span className="text-cyan-600 dark:text-cyan-400 font-bold">{activeMandate?.mandate_id || 'Unconfigured'}</span>
-                </div>
-                <div className="bg-white dark:bg-[#080d19] px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs">
-                  <span className="text-slate-500 block text-[10px] font-sans font-medium uppercase">Spend Vault Cap</span>
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">
-                    {activeMandate ? formatCents(activeMandate.max_total_spend_cents) : formatCents(externalBudgetCents)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Generative Intent Bar */}
-            <GenerativeIntentBar onSearchIntent={handleIntentSearch} isLoading={isSolvingIntent} />
-
-            {/* Streaming Thought Visualizer */}
-            <ThoughtStreamVisualizer isRunning={shouldRunTrace} />
-
-            {/* Cryptographic Proofs & Signer */}
-            <CryptographicMandateSigner
-              onMandateGenerated={handleMandateGenerated}
-              externalBudgetCents={externalBudgetCents}
-            />
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <SyntheticIntentBidder
-                mandate={activeMandate}
-                basketTotalCents={49000}
-                budgetCapCents={activeMandate ? Math.min(activeMandate.max_total_spend_cents, 45000) : 45000}
-                onBidAccepted={(res) => {
-                  showNotification(`Synthetic bid cleared! PayPal Order: ${res.resulting_paypal_order_id}`);
-                }}
-              />
-              <PayPalV6SdkMount
-                orderAmountCents={optimizationData.net_buyer_expenditure_cents}
-                orderIntent="AUTHORIZE"
-                onAuthorizeSuccess={(orderId) => {
-                  showNotification(`Order authorized with PayPal: ${orderId}`);
-                }}
+        {/* Cryptographic Mandate & Proof Drawer (Collapsible) */}
+        <div className="pt-2">
+          <details className="group border border-slate-200 dark:border-slate-800 rounded-2xl bg-white/70 dark:bg-[#070e1c]/70 p-4 transition-colors">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between list-none">
+              <span className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                <span>▾ Inspect Cryptographic Proofs & Hardware Spend Signer (Ed25519) — For Auditors</span>
+              </span>
+              <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
+                {activeMandate?.mandate_id || 'Active Hardware Key'}
+              </span>
+            </summary>
+            <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
+              <CryptographicMandateSigner
+                onMandateGenerated={handleMandateGenerated}
+                externalBudgetCents={externalBudgetCents}
               />
             </div>
-          </section>
-        )}
-
-        {/* Tab 3: Knapsack Multi-Vendor Optimizer */}
-        {activeTab === 'KNAPSACK' && (
-          <section className="space-y-8">
-            <KnapsackSplitVisualizer
-              optimization={optimizationData}
-              onProceedToAuthorize={() => {
-                setActiveTab('PAYPAL');
-                showNotification('Proceeding to PayPal JS SDK v6 authorization hold');
-              }}
-              onTriggerSyntheticBid={() => {
-                setActiveTab('SYNTHETIC');
-                showNotification('Basket exceeds cap: Launching Synthetic Intent Bidder');
-              }}
-            />
-          </section>
-        )}
-
-        {/* Tab 4: Synthetic Intent Negotiation */}
-        {activeTab === 'SYNTHETIC' && (
-          <SyntheticIntentBidder
-            mandate={activeMandate}
-            basketTotalCents={49000}
-            budgetCapCents={activeMandate ? Math.min(activeMandate.max_total_spend_cents, 45000) : 45000}
-            onBidAccepted={(res) => {
-              showNotification(`Synthetic bid accepted! Order ID: ${res.resulting_paypal_order_id}`);
-            }}
-          />
-        )}
-
-        {/* Tab 5: PayPal SDK Mount */}
-        {activeTab === 'PAYPAL' && (
-          <PayPalV6SdkMount
-            orderAmountCents={optimizationData.net_buyer_expenditure_cents}
-            orderIntent="AUTHORIZE"
-            onAuthorizeSuccess={(orderId) => {
-              showNotification(`Order successfully authorized with PayPal: ${orderId}`);
-            }}
-          />
-        )}
+          </details>
+        </div>
       </main>
 
       {/* User Settings Drawer */}
@@ -430,21 +276,15 @@ export default function BuyerPortalPage() {
         }}
       />
 
-      {/* Real-time HITL Push Approval Modal */}
-      <HitlApprovalModal
-        request={hitlRequest}
-        isOpen={isHitlOpen}
-        onApprove={(id) => {
-          setIsHitlOpen(false);
-          showNotification(`HITL Approved: Counter-offer accepted! Cleared via PayPal Vault.`);
-        }}
-        onDecline={(id) => {
-          setIsHitlOpen(false);
-          showNotification(`HITL Declined: Merchant counter-offer rejected. Zero funds authorized.`);
-        }}
-        onTimeout={(id) => {
-          setIsHitlOpen(false);
-          showNotification(`HITL Expired: 60s timer elapsed. Autonomous safety block enforced.`);
+      {/* Explainable Multi-Vendor Cart Drawer */}
+      <UnifiedCartDrawer
+        isOpen={isCartOpen}
+        onClose={() => setIsCartOpen(false)}
+        cart={optimizationData}
+        zipCode={userSettings.zipCode}
+        onProceedToCheckout={() => {
+          setIsCartOpen(false);
+          showNotification('1-Click PayPal Vault v3 Authorization initialized!');
         }}
       />
 

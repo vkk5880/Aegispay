@@ -38,14 +38,20 @@ export interface ChatMessage {
   products?: ProductCardData[];
   comparison?: ComparisonMatrix;
   product_detail?: ProductCardData;
+  cart?: any;
+  stock_reservation?: any;
   thought_trace?: string[];
   follow_up_suggestions?: string[];
 }
+
+import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
 
 interface ConversationalAgentChatProps {
   onSelectProductForDetails?: (product: ProductCardData) => void;
   onSelectProductForCompare?: (product: ProductCardData) => void;
   onSelectProductForBuy?: (product: ProductCardData) => void;
+  onOpenCart?: () => void;
+  onPurchaseConfirmed?: (result: { orderId: string; authorizedCents: number }) => void;
   budgetCapCents?: number;
   zipCode?: string;
 }
@@ -54,6 +60,8 @@ export function ConversationalAgentChat({
   onSelectProductForDetails,
   onSelectProductForCompare,
   onSelectProductForBuy,
+  onOpenCart,
+  onPurchaseConfirmed,
   budgetCapCents = 50000,
   zipCode = '94016',
 }: ConversationalAgentChatProps) {
@@ -125,6 +133,8 @@ export function ConversationalAgentChat({
         products: data.products,
         comparison: data.comparison,
         product_detail: data.product_detail,
+        cart: data.cart,
+        stock_reservation: data.stock_reservation,
         thought_trace: data.thought_trace,
         follow_up_suggestions: data.follow_up_suggestions,
       };
@@ -276,6 +286,34 @@ export function ConversationalAgentChat({
                   <ComparisonMatrixCard
                     matrix={msg.comparison}
                     onAction={(act, prod) => handleActionClick(act, prod)}
+                  />
+                </div>
+              )}
+
+              {/* Pre-Purchase Confirmation Card for BUY actions */}
+              {msg.cart && (
+                <div className="w-full pt-2">
+                  <PurchaseConfirmationCard
+                    cart={msg.cart}
+                    zipCode={zipCode}
+                    onViewFullCart={onOpenCart}
+                    onConfirmPurchase={(result) => {
+                      if (onPurchaseConfirmed) {
+                        onPurchaseConfirmed({
+                          orderId: result.orderId,
+                          authorizedCents: result.authorizedCents,
+                        });
+                      }
+                      setMessages((prev) => [
+                        ...prev,
+                        {
+                          id: `conf-${Date.now()}`,
+                          role: 'assistant',
+                          content: `🎉 **Purchase Successfully Confirmed!**\n\nYour order \`${result.orderId}\` has been authorized via your vaulted PayPal payment token. AegisPay is actively monitoring prices for the next 72 hours under automated escrow protection.`,
+                          timestamp: new Date(),
+                        },
+                      ]);
+                    }}
                   />
                 </div>
               )}
