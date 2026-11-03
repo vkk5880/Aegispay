@@ -1,7 +1,7 @@
 import { task } from '@renderinc/sdk/workflows';
 import { createDb, purchaseUnitHolds, escrowOrders } from '@aegispay/database';
 // @ts-ignore
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { enhanceContext } from './types.js';
 import { Client, Environment, PaymentsController } from '@paypal/paypal-server-sdk';
 
@@ -210,28 +210,33 @@ export const priceDropWatcherTask = task(
 
     const unitHolds = await eCtx.step('fetch-pu-holds', async () => {
       try {
-        const results = [];
-        for (const uId of targetUnitIds) {
+        // Batch query all purchase unit holds using inArray to eliminate sequential N+1 query round trips
+        // @ts-ignore
+        const rows: any[] = await db
+          .select()
+          .from(purchaseUnitHolds)
           // @ts-ignore
-          const rows = await db.select().from(purchaseUnitHolds).where(eq(purchaseUnitHolds.id, uId));
-          if (rows[0]) {
-            results.push(rows[0]);
-          } else {
-            results.push({
-              id: uId,
-              escrow_order_id: payload.escrow_order_id || 'mock_escrow',
-              invoice_id: `INV-${uId}`,
-              paypal_authorization_id: `MOCK_AUTH_${uId}`,
-              paypal_tracking_number: null,
-              channel3_product_id: payload.channel3_product_id || 'mock_prod',
-              merchant_domain: 'mock_domain.com',
-              authorized_cents: 10000,
-              target_price_drop_cents: 9500,
-              hold_status: 'WATCHING_PRICE',
-            });
+          .where(inArray(purchaseUnitHolds.id, targetUnitIds));
+
+        const rowMap = new Map<string, any>(rows.map((r) => [r.id, r]));
+
+        return targetUnitIds.map((uId, idx) => {
+          if (rowMap.has(uId)) {
+            return rowMap.get(uId);
           }
-        }
-        return results;
+          return {
+            id: uId,
+            escrow_order_id: payload.escrow_order_id || 'mock_escrow',
+            invoice_id: `INV-${uId}`,
+            paypal_authorization_id: `MOCK_AUTH_${uId}`,
+            paypal_tracking_number: null,
+            channel3_product_id: payload.channel3_product_id || `mock_prod_${idx}`,
+            merchant_domain: idx % 2 === 0 ? 'mock_domain.com' : 'merchant_secondary.com',
+            authorized_cents: 10000,
+            target_price_drop_cents: 9500,
+            hold_status: 'WATCHING_PRICE',
+          };
+        });
       } catch (e) {
         console.warn('DB not available, using mock unit holds', e);
         return targetUnitIds.map((uId, idx) => ({
