@@ -20,7 +20,12 @@ export const AuthorizeEscrowOrderSchema = z.object({
     price_cents: z.number().int().positive(),
     quantity: z.number().int().positive()
   }))
-});
+}).refine(
+  data => data.requested_cents === data.items.reduce((sum, item) => sum + item.price_cents * item.quantity, 0),
+  {
+    message: 'requested_cents must strictly equal the sum of (price_cents * quantity) across all items'
+  }
+);
 
 // 3. broadcast_synthetic_intent_voucher
 export const BroadcastSyntheticIntentSchema = z.object({

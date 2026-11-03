@@ -12,22 +12,24 @@ export interface MerchantContext {
  */
 export function calculateMerchantAnomalyScore(context: MerchantContext): number {
   let score = 0;
+  const disputeRate = Math.max(0, context.disputeRate || 0);
+  const averageDiscountVariance = Math.max(0, context.averageDiscountVariance || 0);
 
   // Base penalty for extremely high dispute rates (e.g., > 10%)
-  if (context.disputeRate > 0.1) {
-    score += context.disputeRate * 5000;
+  if (disputeRate > 0.1) {
+    score += disputeRate * 5000;
   } else {
-    score += context.disputeRate * 1000;
+    score += disputeRate * 1000;
   }
 
   // Penalty for suspicious markdowns (e.g., > 85% discount)
-  if (context.averageDiscountVariance > 0.85) {
-    score += (context.averageDiscountVariance - 0.85) * 2000;
+  if (averageDiscountVariance > 0.85) {
+    score += (averageDiscountVariance - 0.85) * 2000;
   }
 
   // Simple heuristic for suspicious domains (e.g., very long strings or random chars)
   // In a real system, this would be a more sophisticated model or list
-  if (context.domain.length > 30 || /\\d{5,}/.test(context.domain)) {
+  if (context.domain.length > 30 || /\d{5,}/.test(context.domain)) {
     score += 150;
   }
 

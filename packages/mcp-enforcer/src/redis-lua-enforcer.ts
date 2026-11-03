@@ -8,25 +8,29 @@ export const LUA_SCRIPT = `
 -- ARGV[3]: category_id
 -- ARGV[4]: merchant_anomaly_score (scaled 0..1000)
 
+local req_cents = tonumber(ARGV[1])
+if not req_cents or req_cents <= 0 then
+    return {0, "ERR_INVALID_SPEND_AMOUNT"}
+end
+
 local m = redis.call("HMGET", KEYS[1], "max_total", "max_single_merchant", "spent", "expires_ms", "status", "allowed_cats")
 if not m[1] then
     return {0, "ERR_MANDATE_NOT_FOUND"}
 end
 
-local max_total = tonumber(m[1])
-local max_merchant = tonumber(m[2])
-local spent = tonumber(m[3])
-local expires_ms = tonumber(m[4])
+local max_total = tonumber(m[1] or "0")
+local max_merchant = tonumber(m[2] or "0")
+local spent = tonumber(m[3] or "0")
+local expires_ms = tonumber(m[4] or "0")
 local status = m[5]
-local allowed_cats = m[6]
+local allowed_cats = m[6] or ""
 
-local req_cents = tonumber(ARGV[1])
-local now_ms = tonumber(ARGV[2])
-local cat_id = ARGV[3]
-local anomaly_score = tonumber(ARGV[4])
+local now_ms = tonumber(ARGV[2] or "0")
+local cat_id = ARGV[3] or ""
+local anomaly_score = tonumber(ARGV[4] or "0")
 
 if status ~= "ACTIVE" then
-    return {0, "ERR_MANDATE_STATUS_" .. status}
+    return {0, "ERR_MANDATE_STATUS_" .. (status or "UNKNOWN")}
 end
 if now_ms > expires_ms then
     redis.call("HSET", KEYS[1], "status", "EXPIRED")
@@ -35,8 +39,12 @@ end
 if anomaly_score > 300 then
     return {0, "ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED"}
 end
-if string.find(allowed_cats, cat_id, 1, true) == nil and allowed_cats ~= "*" then
-    return {0, "ERR_CATEGORY_NOT_AUTHORIZED:" .. cat_id}
+if allowed_cats ~= "*" then
+    local bounded_cats = "," .. allowed_cats .. ","
+    local bounded_target = "," .. cat_id .. ","
+    if string.find(bounded_cats, bounded_target, 1, true) == nil then
+        return {0, "ERR_CATEGORY_NOT_AUTHORIZED:" .. cat_id}
+    end
 end
 
 local current_merchant_spent = tonumber(redis.call("GET", KEYS[2]) or "0")
@@ -50,6 +58,13 @@ end
 -- Atomic Reservation
 redis.call("HINCRBY", KEYS[1], "spent", req_cents)
 redis.call("INCRBY", KEYS[2], req_cents)
+
+-- Merchant Exposure TTL matching KEYS[1]
+local ttl = redis.call("TTL", KEYS[1])
+if ttl and ttl > 0 then
+    redis.call("EXPIRE", KEYS[2], ttl)
+end
+
 return {1, tostring(spent + req_cents)}
 `;
 
@@ -110,6 +125,13 @@ export class AtomicSpendEnforcer {
   }
 
   async reserveBudget(redisClient: Redis, params: ReservationParams): Promise<ReservationResult> {
+    if (params.requested_cents <= 0) {
+      return {
+        success: false,
+        error_code: 'ERR_INVALID_SPEND_AMOUNT'
+      };
+    }
+
     // Format Redis hash tag {vch_...} to guarantee both keys map to the same Redis cluster slot
     const tag = params.mandate_id.startsWith('vch_') ? params.mandate_id : `vch_${params.mandate_id}`;
     const keys = [
