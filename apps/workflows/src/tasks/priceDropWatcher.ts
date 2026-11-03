@@ -10,13 +10,24 @@ const db = createDb(connectionString);
 
 class MockChannel3Client {
   async lookup(productIds: string[]) {
-    return productIds.map((pid) => ({
-      product_id: pid,
-      offers: [
-        { domain: 'mock_domain.com', price: 9000, stock_status: 'IN_STOCK' },
-        { domain: 'competitor.com', price: 12000, stock_status: 'IN_STOCK' },
-      ],
-    }));
+    return productIds.map((pid) => {
+      if (pid === 'prod_competitor_undercut') {
+        return {
+          product_id: pid,
+          offers: [
+            { domain: 'mock_domain.com', price: 10000, stock_status: 'IN_STOCK' },
+            { domain: 'competitor.com', price: 8000, stock_status: 'IN_STOCK' },
+          ],
+        };
+      }
+      return {
+        product_id: pid,
+        offers: [
+          { domain: 'mock_domain.com', price: 9000, stock_status: 'IN_STOCK' },
+          { domain: 'competitor.com', price: 12000, stock_status: 'IN_STOCK' },
+        ],
+      };
+    });
   }
 }
 
@@ -41,6 +52,7 @@ export interface PriceDropWatcherPayload {
   purchase_unit_ids?: string[];
   escrow_order_id?: string;
   channel3_product_id?: string;
+  shipment_tracking_override?: Record<string, 'SHIPPED' | 'IN_TRANSIT' | 'DELIVERED' | 'NOT_SHIPPED'>;
 }
 
 export interface UnitResolution {
@@ -50,6 +62,74 @@ export interface UnitResolution {
   authorization_id?: string;
   capture_id?: string;
   reason?: string;
+  shipment_status?: string;
+}
+
+/**
+ * Queries PayPal Shipment Tracking v1 for a given tracking number / transaction ID.
+ * Returns the tracking status (e.g. SHIPPED, IN_TRANSIT, DELIVERED, NOT_SHIPPED).
+ */
+export async function queryPayPalShipmentTracking(params: {
+  trackingNumber?: string;
+  transactionId?: string;
+}): Promise<{ status: 'SHIPPED' | 'IN_TRANSIT' | 'DELIVERED' | 'NOT_SHIPPED' | 'UNKNOWN'; carrier?: string }> {
+  const { trackingNumber, transactionId } = params;
+
+  if (!trackingNumber && !transactionId) {
+    return { status: 'NOT_SHIPPED' };
+  }
+
+  const clientId = process.env.PAYPAL_CLIENT_ID;
+  const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
+  const baseUrl = process.env.PAYPAL_ENVIRONMENT === 'production'
+    ? 'https://api-m.paypal.com'
+    : 'https://api-m.sandbox.paypal.com';
+
+  if (!clientId || clientId === 'mock_paypal_client_id' || clientId === 'your_paypal_client_id_here' || (trackingNumber && trackingNumber.startsWith('MOCK_'))) {
+    if (trackingNumber && (trackingNumber.includes('SHIPPED') || trackingNumber.startsWith('9400') || trackingNumber.startsWith('TRK-SHIPPED'))) {
+      return { status: 'SHIPPED', carrier: 'USPS' };
+    }
+    if (trackingNumber && (trackingNumber.includes('TRANSIT') || trackingNumber.startsWith('TRK-TRANSIT'))) {
+      return { status: 'IN_TRANSIT', carrier: 'USPS' };
+    }
+    return { status: 'NOT_SHIPPED' };
+  }
+
+  try {
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const tokenRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: 'grant_type=client_credentials',
+    });
+
+    if (!tokenRes.ok) throw new Error(`OAuth failed: ${tokenRes.status}`);
+    const tokenData = await tokenRes.json() as { access_token: string };
+
+    const trackerId = trackingNumber || transactionId;
+    const res = await fetch(`${baseUrl}/v1/shipping/trackers/${trackerId}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      console.warn(`[queryPayPalShipmentTracking] Tracker fetch returned ${res.status}, falling back to NOT_SHIPPED.`);
+      return { status: 'NOT_SHIPPED' };
+    }
+
+    const data = await res.json() as { status?: string; carrier?: string };
+    const status = (data.status as any) || 'NOT_SHIPPED';
+    return { status, carrier: data.carrier };
+  } catch (err: any) {
+    console.warn(`[queryPayPalShipmentTracking] Error checking tracking, fallback simulation:`, err.message);
+    return { status: 'NOT_SHIPPED' };
+  }
 }
 
 /**
@@ -142,6 +222,7 @@ export const priceDropWatcherTask = task(
               escrow_order_id: payload.escrow_order_id || 'mock_escrow',
               invoice_id: `INV-${uId}`,
               paypal_authorization_id: `MOCK_AUTH_${uId}`,
+              paypal_tracking_number: null,
               channel3_product_id: payload.channel3_product_id || 'mock_prod',
               merchant_domain: 'mock_domain.com',
               authorized_cents: 10000,
@@ -158,7 +239,8 @@ export const priceDropWatcherTask = task(
           escrow_order_id: payload.escrow_order_id || 'mock_escrow',
           invoice_id: `INV-${uId}`,
           paypal_authorization_id: `MOCK_AUTH_${uId}`,
-          channel3_product_id: `mock_prod_${idx}`,
+          paypal_tracking_number: null,
+          channel3_product_id: payload.channel3_product_id || `mock_prod_${idx}`,
           merchant_domain: idx % 2 === 0 ? 'mock_domain.com' : 'merchant_secondary.com',
           authorized_cents: 10000,
           target_price_drop_cents: 9500,
@@ -171,6 +253,19 @@ export const priceDropWatcherTask = task(
 
     // Process each purchase unit hold independently to prevent monolithic order collapse
     for (const puHold of unitHolds) {
+      // Step: Check PayPal Shipment Tracking v1 prior to any competitor reroute or adjustment
+      const trackingInfo = await eCtx.step(`check-shipment-tracking-${puHold.id}`, async () => {
+        if (payload.shipment_tracking_override && payload.shipment_tracking_override[puHold.id]) {
+          return { status: payload.shipment_tracking_override[puHold.id] };
+        }
+        return await queryPayPalShipmentTracking({
+          trackingNumber: puHold.paypal_tracking_number || undefined,
+          transactionId: puHold.invoice_id || undefined,
+        });
+      });
+
+      const isShipmentLocked = trackingInfo.status === 'SHIPPED' || trackingInfo.status === 'IN_TRANSIT';
+
       const lookupResult = await eCtx.step(`poll-channel3-lookup-${puHold.id}`, async () => {
         const results = await channel3.lookup([puHold.channel3_product_id]);
         return (
@@ -192,7 +287,7 @@ export const priceDropWatcherTask = task(
         competitorOffers.length > 0 ? Math.min(...competitorOffers.map((o: any) => o.price)) : Infinity;
 
       // Condition 1: Unit item cancelled or out of stock -> Void this individual unit via PayPal API without collapsing sister units
-      if (isOutOfStock) {
+      if (isOutOfStock && !isShipmentLocked) {
         const voidRes = await eCtx.step('partial-unit-void', async () => {
           console.log(`[priceDropWatcher] Unit ${puHold.id} out of stock. Voiding authorization independently without collapsing order.`);
           const authId = puHold.paypal_authorization_id || `MOCK_AUTH_${puHold.id}`;
@@ -216,12 +311,75 @@ export const priceDropWatcherTask = task(
           action: 'VOIDED',
           authorization_id: puHold.paypal_authorization_id ?? undefined,
           reason: 'OUT_OF_STOCK_INDEPENDENT_VOID',
+          shipment_status: trackingInfo.status,
         });
         continue;
       }
 
-      // Condition 2: Competitor undercut below switching threshold -> Void this individual unit for re-routing
+      // Condition 2: Competitor undercut below switching threshold
+      // Section 11.5 / Plan: Prior to competitor void/reroute, query PayPal Shipment Tracking v1.
+      // If tracking status is SHIPPED or IN_TRANSIT, lock the order and restrict adjustments to same-merchant partial captures.
       if (competitorLowestPrice < puHold.authorized_cents - 1000) {
+        if (isShipmentLocked) {
+          console.log(
+            `[priceDropWatcher] Competitor undercut detected for unit ${puHold.id}, but shipment status is ${trackingInfo.status}. Order is locked; preventing competitor reroute/void.`
+          );
+
+          // Restrict adjustments strictly to same-merchant partial captures if same merchant also lowered price
+          if (currentLowestPrice < puHold.authorized_cents) {
+            const captureRes = await eCtx.step(`same-merchant-partial-capture-${puHold.id}`, async () => {
+              console.log(
+                `[priceDropWatcher] Capturing same-merchant price drop for shipped unit ${puHold.id}: $${(currentLowestPrice / 100).toFixed(2)}`
+              );
+              const authId = puHold.paypal_authorization_id || `MOCK_AUTH_${puHold.id}`;
+              const res = (await executeUnitPartialCapture({
+                authorizationId: authId,
+                amountCents: currentLowestPrice,
+                isFinal: true,
+              })) as any;
+
+              const captureId = res?.id || `MOCK_CAPTURE_${puHold.id}`;
+              try {
+                // @ts-ignore
+                await db
+                  .update(purchaseUnitHolds)
+                  .set({
+                    hold_status: 'CAPTURED_PRICE_DROP',
+                    final_captured_cents: currentLowestPrice,
+                    paypal_capture_id: captureId,
+                  })
+                  // @ts-ignore
+                  .where(eq(purchaseUnitHolds.id, puHold.id));
+              } catch (e) {
+                console.warn('DB update failed for locked unit capture (mocking)', e);
+              }
+              return { captureId, res };
+            });
+
+            resolutions.push({
+              unit_id: puHold.id,
+              action: 'PARTIAL_CAPTURED',
+              amount_cents: currentLowestPrice,
+              authorization_id: puHold.paypal_authorization_id ?? undefined,
+              capture_id: captureRes.captureId,
+              reason: 'SHIPMENT_LOCKED_SAME_MERCHANT_PARTIAL_CAPTURE',
+              shipment_status: trackingInfo.status,
+            });
+            continue;
+          }
+
+          // Shipped, no same-merchant price drop -> retain hold, blocking competitor reroute
+          resolutions.push({
+            unit_id: puHold.id,
+            action: 'RETAINED_HOLD',
+            amount_cents: puHold.authorized_cents,
+            reason: 'SHIPMENT_LOCKED_COMPETITOR_REROUTE_RESTRICTED',
+            shipment_status: trackingInfo.status,
+          });
+          continue;
+        }
+
+        // Unshipped: proceed with independent void for competitor re-routing
         await eCtx.step('partial-unit-void', async () => {
           console.log(`[priceDropWatcher] Unit ${puHold.id} competitor undercut ($${(competitorLowestPrice / 100).toFixed(2)} vs $${(puHold.authorized_cents / 100).toFixed(2)}). Voiding authorization independently.`);
           const authId = puHold.paypal_authorization_id || `MOCK_AUTH_${puHold.id}`;
@@ -245,6 +403,7 @@ export const priceDropWatcherTask = task(
           action: 'VOIDED',
           authorization_id: puHold.paypal_authorization_id ?? undefined,
           reason: 'COMPETITOR_UNDERCUT_INDEPENDENT_VOID',
+          shipment_status: trackingInfo.status,
         });
         continue;
       }
@@ -286,6 +445,7 @@ export const priceDropWatcherTask = task(
           authorization_id: puHold.paypal_authorization_id ?? undefined,
           capture_id: captureRes.captureId,
           reason: 'DISCOUNTED_PRICE_DROP_CAPTURED',
+          shipment_status: trackingInfo.status,
         });
         continue;
       }
@@ -296,6 +456,7 @@ export const priceDropWatcherTask = task(
         action: 'RETAINED_HOLD',
         amount_cents: puHold.authorized_cents,
         reason: 'WITHIN_HONOR_PERIOD',
+        shipment_status: trackingInfo.status,
       });
     }
 
