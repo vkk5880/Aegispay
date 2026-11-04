@@ -8,6 +8,14 @@ import {
 import { AtomicSpendEnforcer, LUA_SCRIPT } from './redis-lua-enforcer.js';
 import { calculateMerchantAnomalyScore, isMerchantAllowed } from './merchant-anomaly-gate.js';
 import { verifySessionMandateSignature } from './ed25519-verifier.js';
+import {
+  AuditChain,
+  defaultAuditChain,
+  GENESIS_HASH,
+  canonicalJson,
+  canonicalHash,
+  CanonicalisationError,
+} from './audit-chain.js';
 import type { SpendMandate } from '@aegispay/shared-types';
 
 function createValidMandateAndKeypair() {
@@ -299,4 +307,74 @@ test('Custodian Gate - Stage 4: Single-Threaded Redis Lua reserveBudget() Pre-Re
   assert.equal(evaluatedKeys[1], 'aegis:{vch_cust_abc123}:exposure:legit-store.com');
   assert.ok(result.paypal_order_id.startsWith('ord_cust_abc123_'));
   assert.ok(result.invoice_id.startsWith('inv_legit-store.com_'));
+  assert.ok(result.audit_hash);
+  assert.equal(result.audit_hash.length, 64);
 });
+
+test('Custodian Gate - Immutable Hash-Chained Evidence Ledger (chain.py & canonical.py)', async () => {
+  const chain = new AuditChain();
+
+  // 1. Genesis Hash & Sequence 1 link
+  const ev1 = chain.append({
+    request_id: 'req_001',
+    event_type: 'INTENT_RECEIVED',
+    observed: { intent_id: 'int_123', max_budget_cents: 50000 },
+    inferred: { rule: 'budget_check_passed' },
+  });
+
+  assert.equal(ev1.seq, 1);
+  assert.equal(ev1.prev_hash, GENESIS_HASH);
+  assert.equal(ev1.hash.length, 64);
+
+  // 2. Sequence 2 links to Sequence 1 hash
+  const ev2 = chain.append({
+    request_id: 'req_001',
+    event_type: 'DECISION_MADE',
+    observed: { anomaly_score: 50, merchant: 'legit.com' },
+    inferred: { disposition: 'APPROVE' },
+  });
+
+  assert.equal(ev2.seq, 2);
+  assert.equal(ev2.prev_hash, ev1.hash);
+  assert.equal(chain.verifyChain(), true);
+
+  // 3. Deterministic canonical serialization (key sorting, whitespace invariance)
+  const objA = { z_merchant: 'abc', a_cents: 1000 };
+  const objB = { a_cents: 1000, z_merchant: 'abc' };
+  assert.equal(canonicalJson(objA), canonicalJson(objB));
+  assert.equal(canonicalHash(objA), canonicalHash(objB));
+
+  // 4. Strict float rejection (prevents float drift from entering ledger)
+  assert.throws(
+    () => {
+      canonicalJson({ amount: 99.99 });
+    },
+    CanonicalisationError,
+    'Floats must be strictly rejected from canonical evidence ledger'
+  );
+
+  // 5. Tamper detection: modifying an event payload breaks chain integrity
+  const events = chain.getEvents();
+  assert.equal(events.length, 2);
+
+  // Create tampered copy of chain
+  const tamperedChain = new AuditChain();
+  (tamperedChain as any).events = [
+    { ...ev1, payload: { observed: { intent_id: 'int_123', max_budget_cents: 9999999 }, inferred: {} } },
+    ev2,
+  ];
+  assert.equal(tamperedChain.verifyChain(), false, 'Tampered payload in event 1 must fail verifyChain()');
+
+  // Tampering prev_hash breaks chain integrity
+  const brokenLinkChain = new AuditChain();
+  (brokenLinkChain as any).events = [
+    ev1,
+    { ...ev2, prev_hash: 'f'.repeat(64) },
+  ];
+  assert.equal(brokenLinkChain.verifyChain(), false, 'Broken prev_hash link must fail verifyChain()');
+
+  // 6. Global defaultAuditChain records real transactions from handleAuthorizeEscrow
+  assert.ok(defaultAuditChain.getEvents().length > 0);
+  assert.equal(defaultAuditChain.verifyChain(), true);
+});
+

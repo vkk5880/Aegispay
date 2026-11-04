@@ -9,6 +9,7 @@ import {
   detectPriceAnomaly,
   computeDealVerdict,
   defaultScoringEngine,
+  SCORING_WEIGHT_PRESETS,
 } from './scoring-engine.js';
 import { Channel3ProductDetail } from './channel3.client.js';
 
@@ -223,5 +224,54 @@ describe('Task 26: Murthyroshan Deterministic Mathematical Scoring Engine', () =
 
     assert.strictEqual(overpriced.verdict_text, 'Overpriced.');
     assert.strictEqual(overpriced.verdict_colour, '#f87171');
+  });
+
+  test('Bounded weight presets: supports DEFAULT, BUDGET_CONSCIOUS, SPEED_FIRST, REPUTATION_FIRST', () => {
+    const engine = defaultScoringEngine;
+
+    // Verify preset constants
+    assert.strictEqual(SCORING_WEIGHT_PRESETS.DEFAULT.w1_cosine, 0.35);
+    assert.strictEqual(SCORING_WEIGHT_PRESETS.BUDGET_CONSCIOUS.w2_price, 0.60);
+    assert.strictEqual(SCORING_WEIGHT_PRESETS.SPEED_FIRST.w4_shipping, 0.40);
+    assert.strictEqual(SCORING_WEIGHT_PRESETS.REPUTATION_FIRST.w3_reputation, 0.45);
+
+    // BUDGET_CONSCIOUS prioritizes price affinity
+    const budgetRes = engine.rankProducts(sampleProducts, {
+      query: 'headphones',
+      target_price_cents: 28000,
+      preset: 'BUDGET_CONSCIOUS',
+    });
+    assert.strictEqual(budgetRes[0].product_id, 'prod_bose_qc45');
+
+    // REPUTATION_FIRST prioritizes tier 1 official brand store
+    const repRes = engine.rankProducts(sampleProducts, {
+      query: 'headphones',
+      preset: 'REPUTATION_FIRST',
+    });
+    assert.strictEqual(repRes[0].product_id, 'prod_sony_xm5');
+  });
+
+  test('Badge Engine: awards Best Value, Fastest Delivery, Top Rated Merchant, and Price Leader', () => {
+    const engine = defaultScoringEngine;
+    const results = engine.rankProducts(sampleProducts, {
+      query: 'Sony WH-1000XM5 headphones',
+      target_price_cents: 35000,
+    });
+
+    const allBadges = results.flatMap(r => r.badges || []);
+    const badgeLabels = allBadges.map(b => b.label);
+
+    assert.ok(badgeLabels.includes('Price Leader'), 'Should award Price Leader badge to cheapest candidate');
+    assert.ok(badgeLabels.includes('Top Rated Merchant'), 'Should award Top Rated Merchant badge to tier 1 official merchant');
+    assert.ok(badgeLabels.includes('Best Value'), 'Should award Best Value badge');
+    assert.ok(badgeLabels.includes('Fastest Delivery'), 'Should award Fastest Delivery badge');
+
+    // Price Leader badge should be on prod_generic_cheap
+    const cheapItem = results.find(r => r.product_id === 'prod_generic_cheap');
+    assert.ok(cheapItem?.badges?.some(b => b.label === 'Price Leader'));
+
+    // Top Rated Merchant badge should be on prod_sony_xm5 (official store)
+    const sonyItem = results.find(r => r.product_id === 'prod_sony_xm5');
+    assert.ok(sonyItem?.badges?.some(b => b.label === 'Top Rated Merchant'));
   });
 });

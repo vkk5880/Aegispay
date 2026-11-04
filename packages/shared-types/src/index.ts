@@ -13,7 +13,12 @@ export const SpendMandateSchema = z.object({
   expires_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
   status: z.enum(['ACTIVE', 'EXHAUSTED', 'REVOKED', 'EXPIRED']).default('ACTIVE'),
   created_at: z.union([z.date(), z.string().datetime()]).optional().transform(v => typeof v === 'string' ? new Date(v) : (v || new Date())),
-});
+}).refine(
+  data => data.max_single_merchant_cents <= data.max_total_spend_cents,
+  {
+    message: 'max_single_merchant_cents must not exceed max_total_spend_cents',
+  }
+);
 
 export const SessionMandateSchema = SpendMandateSchema;
 
@@ -301,3 +306,177 @@ export const CustodianViolationTaxonomySchema = z.object({
 });
 
 export type CustodianViolationTaxonomy = z.infer<typeof CustodianViolationTaxonomySchema>;
+export const ViolationTaxonomySchema = CustodianViolationTaxonomySchema;
+export type ViolationTaxonomy = CustodianViolationTaxonomy;
+
+/**
+ * Custodian AP2 Policy Evaluation Verdict Schema
+ * Models multi-dimensional decision gates, basis-point alignment scores, and reason codes
+ */
+export const PolicyEvaluationVerdictSchema = z.object({
+  mandate_id: z.string(),
+  outcome: z.enum(['APPROVE', 'HOLD', 'REJECT']),
+  decision_id: z.string(),
+  total_score_bp: z.number().int().min(0).max(10000), // 0 to 10,000 basis points
+  reasons: z.array(CustodianReasonCodeSchema),
+  dimensions: z.array(z.object({
+    dimension: z.enum([
+      'PRICE_INTEGRITY',
+      'BUDGET',
+      'MERCHANT_SCOPE',
+      'CATEGORY_SCOPE',
+      'MANDATE',
+      'SUBSTITUTION',
+      'SCOPE_CREEP',
+      'SANITIZATION'
+    ]),
+    status: z.enum(['PASS', 'FAIL', 'UNCERTAIN']),
+    score_bp: z.number().int().min(0).max(10000),
+    reason_codes: z.array(CustodianReasonCodeSchema).min(1, 'Dimension must provide at least one reason code'),
+  })),
+  audit_hash: z.string().length(64).optional(),
+  evaluated_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
+}).refine(
+  (data) => {
+    // Invariant: An APPROVE outcome cannot contain any blocking violation codes
+    const blockingCodes: CustodianReasonCode[] = [
+      'LINE_ITEM_SUM_MISMATCH',
+      'BUDGET_EXCEEDED',
+      'INVALID_SPEND_AMOUNT',
+      'MERCHANT_ANOMALY_THRESHOLD_EXCEEDED',
+      'MANDATE_TOTAL_EXCEEDED',
+      'MANDATE_PER_TXN_EXCEEDED',
+      'MANDATE_EXPIRED',
+      'MANDATE_REVOKED',
+      'MANDATE_MERCHANT_NOT_ALLOWED',
+      'MANDATE_CATEGORY_NOT_ALLOWED',
+      'ED25519_SIGNATURE_VERIFICATION_FAILED',
+      'HARD_CONSTRAINT_VIOLATED',
+    ];
+    if (data.outcome === 'APPROVE') {
+      return !data.reasons.some((r) => blockingCodes.includes(r));
+    }
+    return true;
+  },
+  {
+    message: 'An APPROVE outcome cannot contain blocking violation reason codes',
+  }
+);
+
+export type PolicyEvaluationVerdict = z.infer<typeof PolicyEvaluationVerdictSchema>;
+
+/**
+ * Agentic Commerce Protocol (ACP) Interoperability Schemas
+ * RFC-compliant checkout sessions, carts, discount extensions, and payment delegates
+ */
+export const AcpDiscountExtensionSchema = z.object({
+  code: z.string().optional(),
+  title: z.string().optional(),
+  amount_cents: z.number().int().nonnegative(),
+  type: z.enum(['coupon', 'promo', 'commission_rebate', 'voucher']).default('coupon'),
+  applied_to: z.enum(['order', 'item', 'shipping']).default('order'),
+  item_id: z.string().optional(),
+});
+
+export type AcpDiscountExtension = z.infer<typeof AcpDiscountExtensionSchema>;
+
+export const AcpCartItemSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  quantity: z.number().int().positive(),
+  unit_price_cents: z.number().int().nonnegative(),
+  total_price_cents: z.number().int().nonnegative(),
+  currency: z.string().default('USD'),
+  merchant_id: z.string().optional(),
+  merchant_domain: z.string().optional(),
+  image_url: z.string().url().optional(),
+  discounts: z.array(AcpDiscountExtensionSchema).optional().default([]),
+});
+
+export type AcpCartItem = z.infer<typeof AcpCartItemSchema>;
+
+export const AcpCartPayloadSchema = z.object({
+  cart_id: z.string(),
+  items: z.array(AcpCartItemSchema).min(1, 'Cart items array must not be empty'),
+  currency: z.string().default('USD'),
+  subtotal_cents: z.number().int().nonnegative(),
+  tax_cents: z.number().int().nonnegative().default(0),
+  shipping_cents: z.number().int().nonnegative().default(0),
+  discount_cents: z.number().int().nonnegative().default(0),
+  total_cents: z.number().int().nonnegative(),
+  discounts: z.array(AcpDiscountExtensionSchema).optional().default([]),
+}).refine(
+  (cart) => {
+    const calculatedSum = cart.items.reduce((sum, it) => sum + it.total_price_cents, 0);
+    return Math.abs(cart.subtotal_cents - calculatedSum) === 0;
+  },
+  {
+    message: 'Cart subtotal_cents must equal sum of item total_price_cents',
+  }
+);
+
+export type AcpCartPayload = z.infer<typeof AcpCartPayloadSchema>;
+
+export const AcpAddressSchema = z.object({
+  name: z.string().optional(),
+  line_one: z.string(),
+  line_two: z.string().optional().default(''),
+  city: z.string(),
+  state: z.string(),
+  country: z.string().length(2).default('US'),
+  postal_code: z.string(),
+});
+
+export type AcpAddress = z.infer<typeof AcpAddressSchema>;
+
+export const AcpCheckoutSessionSchema = z.object({
+  id: z.string(),
+  status: z.enum(['created', 'in_progress', 'ready_for_payment', 'completed', 'canceled']).default('created'),
+  cart: AcpCartPayloadSchema,
+  shipping_address: AcpAddressSchema.optional(),
+  billing_address: AcpAddressSchema.optional(),
+  buyer_email: z.string().email().optional(),
+  buyer_mandate_id: z.string().optional(),
+  expires_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
+  created_at: z.union([z.date(), z.string().datetime()]).optional().transform(v => typeof v === 'string' ? new Date(v) : (v || new Date())),
+  metadata: z.record(z.string(), z.any()).optional().default({}),
+});
+
+export type AcpCheckoutSession = z.infer<typeof AcpCheckoutSessionSchema>;
+
+export const AcpPaymentHandlerRequestSchema = z.object({
+  checkout_session_id: z.string(),
+  mandate_id: z.string().optional(),
+  payment_method: z.object({
+    type: z.enum(['vault_token', 'card', 'ed25519_mandate', 'paypal_wallet']),
+    token: z.string().optional(),
+    mandate_signature: z.string().optional(),
+    public_key_hex: z.string().optional(),
+  }),
+  amount_cents: z.number().int().positive(),
+  currency: z.string().default('USD'),
+  merchant_domain: z.string(),
+  risk_signals: z.array(z.object({
+    type: z.string(),
+    score: z.number().int(),
+    action: z.enum(['blocked', 'manual_review', 'authorized']),
+  })).optional().default([]),
+  metadata: z.record(z.string(), z.string()).optional().default({}),
+});
+
+export type AcpPaymentHandlerRequest = z.infer<typeof AcpPaymentHandlerRequestSchema>;
+
+export const AcpPaymentHandlerResponseSchema = z.object({
+  payment_id: z.string(),
+  status: z.enum(['AUTHORIZED', 'CAPTURED', 'DECLINED', 'REQUIRES_ACTION']),
+  amount_cents: z.number().int().positive(),
+  currency: z.string().default('USD'),
+  transaction_reference: z.string(),
+  paypal_order_id: z.string().optional(),
+  challenge_url: z.string().url().optional(),
+  error_code: z.string().optional(),
+  created_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
+});
+
+export type AcpPaymentHandlerResponse = z.infer<typeof AcpPaymentHandlerResponseSchema>;
+

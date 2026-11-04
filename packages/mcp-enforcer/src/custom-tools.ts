@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { verifySessionMandateSignature } from './ed25519-verifier.js';
 import { calculateMerchantAnomalyScore, isMerchantAllowed } from './merchant-anomaly-gate.js';
 import { defaultAtomicSpendEnforcer, AtomicSpendEnforcer } from './redis-lua-enforcer.js';
+import { defaultAuditChain } from './audit-chain.js';
 import type { SpendMandate } from '@aegispay/shared-types';
 
 /**
@@ -129,6 +130,12 @@ export const OptimizeBasketSchema = z.object({
       message: 'Invalid public image URL: loopback, link-local metadata, or private IP addresses are rejected',
     })
     .optional(),
+  items: z.array(z.object({
+    product_id: z.string(),
+    merchant_domain: z.string(),
+    price_cents: z.number().int().positive(),
+    quantity: z.number().int().positive().default(1),
+  })).optional(),
 });
 
 // 2. authorize_conditional_escrow_order
@@ -197,6 +204,7 @@ export interface AuthorizeEscrowOrderResult {
   status: string;
   spent_cents?: number;
   merchant_anomaly_score?: number;
+  audit_hash?: string;
 }
 
 export interface BroadcastSyntheticIntentResult {
@@ -224,10 +232,29 @@ export interface ProposeDisputeSettlementResult {
 export const toolHandlers = {
   async handleOptimizeBasket(args: z.infer<typeof OptimizeBasketSchema>): Promise<OptimizeBasketResult> {
     console.error('[MCP Enforcer] Optimizing basket...', sanitizeForLogging(args));
+    if (args.items && args.items.length > 0) {
+      const merchantMap = new Map<string, any[]>();
+      let totalCents = 0;
+      for (const item of args.items) {
+        totalCents += item.price_cents * (item.quantity ?? 1);
+        const list = merchantMap.get(item.merchant_domain) || [];
+        list.push(item);
+        merchantMap.set(item.merchant_domain, list);
+      }
+      const assignments = Array.from(merchantMap.entries()).map(([merchant_domain, items]) => ({
+        merchant_domain,
+        items,
+      }));
+      return {
+        basket_total_cents: totalCents,
+        assignments,
+        net_buyer_expenditure_cents: totalCents,
+      };
+    }
     return {
       basket_total_cents: 0,
       assignments: [],
-      net_buyer_expenditure_cents: 0
+      net_buyer_expenditure_cents: 0,
     };
   },
 
@@ -279,12 +306,36 @@ export const toolHandlers = {
     }
 
     const uniqueEntropy = crypto.randomUUID().slice(0, 12);
+    const orderId = `ord_${args.mandate_id}_${uniqueEntropy}`;
+    const invoiceId = `inv_${args.merchant_domain}_${uniqueEntropy}`;
+
+    // Port immutable hash-chained audit logging from Custodian chain.py
+    const auditEvent = defaultAuditChain.append({
+      request_id: args.mandate_id,
+      event_type: 'PAYMENT_INITIATED',
+      observed: {
+        mandate_id: args.mandate_id,
+        merchant_domain: args.merchant_domain,
+        requested_cents: args.requested_cents,
+        category_id: args.category_id,
+        items_count: args.items.length,
+        merchant_anomaly_score: anomalyScore,
+      },
+      inferred: {
+        status: 'AUTHORIZED',
+        spent_cents: newSpent,
+        order_id: orderId,
+        invoice_id: invoiceId,
+      },
+    });
+
     return {
-      paypal_order_id: `ord_${args.mandate_id}_${uniqueEntropy}`,
-      invoice_id: `inv_${args.merchant_domain}_${uniqueEntropy}`,
+      paypal_order_id: orderId,
+      invoice_id: invoiceId,
       status: 'AUTHORIZED',
       spent_cents: newSpent,
       merchant_anomaly_score: anomalyScore,
+      audit_hash: auditEvent.hash,
     };
   },
 

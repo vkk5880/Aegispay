@@ -20,17 +20,42 @@ export interface ScoringWeights {
   w4_shipping: number;     // default 0.10
 }
 
-export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = {
-  w1_cosine: 0.35,
-  w2_price: 0.35,
-  w3_reputation: 0.20,
-  w4_shipping: 0.10,
+export type ScoringPreset = 'DEFAULT' | 'BUDGET_CONSCIOUS' | 'SPEED_FIRST' | 'REPUTATION_FIRST';
+
+export const SCORING_WEIGHT_PRESETS: Record<ScoringPreset, ScoringWeights> = {
+  DEFAULT: {
+    w1_cosine: 0.35,
+    w2_price: 0.35,
+    w3_reputation: 0.20,
+    w4_shipping: 0.10,
+  },
+  BUDGET_CONSCIOUS: {
+    w1_cosine: 0.20,
+    w2_price: 0.60,
+    w3_reputation: 0.15,
+    w4_shipping: 0.05,
+  },
+  SPEED_FIRST: {
+    w1_cosine: 0.25,
+    w2_price: 0.20,
+    w3_reputation: 0.15,
+    w4_shipping: 0.40,
+  },
+  REPUTATION_FIRST: {
+    w1_cosine: 0.25,
+    w2_price: 0.20,
+    w3_reputation: 0.45,
+    w4_shipping: 0.10,
+  },
 };
+
+export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = SCORING_WEIGHT_PRESETS.DEFAULT;
 
 export interface ScoringQueryContext {
   query: string;
   target_price_cents?: number;
   category_id?: string;
+  preset?: ScoringPreset;
   weights?: Partial<ScoringWeights>;
   max_shipping_days?: number; // normalization baseline, defaults to 7 days
   preferred_brands?: string[];
@@ -54,6 +79,12 @@ export interface DealVerdict {
   verdict_colour: string; // CSS-friendly hex code
 }
 
+export interface ProductBadge {
+  label: 'Best Value' | 'Fastest Delivery' | 'Top Rated Merchant' | 'Price Leader' | string;
+  color: string;
+  description?: string;
+}
+
 export interface RankedProductItem {
   product_id: string;
   title: string;
@@ -63,6 +94,7 @@ export interface RankedProductItem {
   score: number; // Final deterministic composite utility score [0.0000, 1.0000]
   deal_verdict: DealVerdict;
   score_breakdown: ScoreBreakdown;
+  badges?: ProductBadge[];
   price_anomaly: {
     is_suspicious: boolean;
     deviation_pct: number;
@@ -294,11 +326,15 @@ export class MurthyroshanScoringEngine {
       return [];
     }
 
+    const baseWeights = context.preset
+      ? SCORING_WEIGHT_PRESETS[context.preset] || DEFAULT_SCORING_WEIGHTS
+      : DEFAULT_SCORING_WEIGHTS;
+
     const weights: ScoringWeights = {
-      w1_cosine: context.weights?.w1_cosine ?? DEFAULT_SCORING_WEIGHTS.w1_cosine,
-      w2_price: context.weights?.w2_price ?? DEFAULT_SCORING_WEIGHTS.w2_price,
-      w3_reputation: context.weights?.w3_reputation ?? DEFAULT_SCORING_WEIGHTS.w3_reputation,
-      w4_shipping: context.weights?.w4_shipping ?? DEFAULT_SCORING_WEIGHTS.w4_shipping,
+      w1_cosine: context.weights?.w1_cosine ?? baseWeights.w1_cosine,
+      w2_price: context.weights?.w2_price ?? baseWeights.w2_price,
+      w3_reputation: context.weights?.w3_reputation ?? baseWeights.w3_reputation,
+      w4_shipping: context.weights?.w4_shipping ?? baseWeights.w4_shipping,
     };
 
     const maxShippingDays = context.max_shipping_days || 7;
@@ -433,6 +469,81 @@ export class MurthyroshanScoringEngine {
       }
       return a.selected_offer.price - b.selected_offer.price;
     });
+
+    // Badge Engine: Award badges across non-eliminated candidates
+    // Badges: Best Value, Fastest Delivery, Top Rated Merchant, Price Leader
+    const activeCandidates = scoredItems.filter(item => !item.eliminated);
+    if (activeCandidates.length > 0) {
+      // 1. Price Leader: Lowest price among active items
+      let minPriceItem = activeCandidates[0];
+      for (const item of activeCandidates) {
+        if (item.selected_offer.price < minPriceItem.selected_offer.price) {
+          minPriceItem = item;
+        }
+      }
+      minPriceItem.badges = minPriceItem.badges || [];
+      minPriceItem.badges.push({
+        label: 'Price Leader',
+        color: '#e8a045',
+        description: 'Lowest upfront price among verified offerings',
+      });
+
+      // 2. Best Value: Highest utility score to price ratio
+      let bestValueItem = activeCandidates[0];
+      let bestValueRatio = bestValueItem.score / (bestValueItem.selected_offer.price || 1);
+      for (const item of activeCandidates) {
+        const ratio = item.score / (item.selected_offer.price || 1);
+        if (ratio > bestValueRatio) {
+          bestValueRatio = ratio;
+          bestValueItem = item;
+        }
+      }
+      bestValueItem.badges = bestValueItem.badges || [];
+      if (!bestValueItem.badges.some(b => b.label === 'Best Value')) {
+        bestValueItem.badges.push({
+          label: 'Best Value',
+          color: '#00d4aa',
+          description: 'Optimal balance of utility score, features, and price',
+        });
+      }
+
+      // 3. Top Rated Merchant: Highest merchant reputation score
+      let topMerchantItem = activeCandidates[0];
+      for (const item of activeCandidates) {
+        if (item.score_breakdown.reputation_score > topMerchantItem.score_breakdown.reputation_score) {
+          topMerchantItem = item;
+        }
+      }
+      topMerchantItem.badges = topMerchantItem.badges || [];
+      if (!topMerchantItem.badges.some(b => b.label === 'Top Rated Merchant')) {
+        topMerchantItem.badges.push({
+          label: 'Top Rated Merchant',
+          color: '#7c3aed',
+          description: 'Official brand or highest trust tier retailer',
+        });
+      }
+
+      // 4. Fastest Delivery: Lowest shipping penalty (lowest shipping days)
+      let fastestDeliveryItem = activeCandidates[0];
+      for (const item of activeCandidates) {
+        if (item.score_breakdown.shipping_penalty < fastestDeliveryItem.score_breakdown.shipping_penalty) {
+          fastestDeliveryItem = item;
+        }
+      }
+      fastestDeliveryItem.badges = fastestDeliveryItem.badges || [];
+      if (!fastestDeliveryItem.badges.some(b => b.label === 'Fastest Delivery')) {
+        fastestDeliveryItem.badges.push({
+          label: 'Fastest Delivery',
+          color: '#38bdf8',
+          description: 'Priority expedited shipping with minimal latency',
+        });
+      }
+    }
+
+    // Initialize empty badges array for items without badges for clean API contract
+    for (const item of scoredItems) {
+      item.badges = item.badges || [];
+    }
 
     return scoredItems;
   }
