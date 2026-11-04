@@ -6,3 +6,5 @@ dist
 .env.local
 *.log
 coverage
+.reference-repos/
+.task_prompt_tmp.txt
