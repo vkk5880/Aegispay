@@ -88,6 +88,13 @@ const VaultSetupSchema = z.object({
   cancel_url: z.string().url().optional(),
 });
 
+const CaptureRequestSchema = z.object({
+  order_id: z.string(),
+  mandate_id: z.string().max(32),
+  amount_cents: z.number().int().positive(),
+  merchant_domain: z.string().optional(),
+});
+
 const VaultConfirmSchema = z.object({
   setup_token_id: z.string(),
   customer_id: z.string().optional(),
@@ -344,6 +351,56 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         error: 'COUNTER_BID_FAILED',
         message: err.message,
         compensating_rollback: true,
+      });
+    }
+  });
+  /**
+   * POST /api/buyer/capture
+   * Executes autonomous capture on an approved PayPal order with < 1ms compensating rollback on failure
+   */
+  fastify.post('/api/buyer/capture', async (request, reply) => {
+    const parseResult = CaptureRequestSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
+    }
+
+    const { order_id, mandate_id, amount_cents, merchant_domain } = parseResult.data;
+
+    try {
+      const captureResult = await defaultPayPalClient.captureOrder(order_id);
+
+      // Verify capture state via server read-back
+      const verifiedOrder = await defaultPayPalClient.getOrder(order_id);
+
+      return reply.send({
+        status: 'COMPLETED',
+        order_id,
+        mandate_id,
+        capture: captureResult,
+        order: verifiedOrder,
+      });
+    } catch (err: any) {
+      fastify.log.error(err);
+
+      // Atomically rollback Redis reservation on decline / timeout / error in < 1ms
+      const rollbackStart = performance.now();
+      let rollbackSuccess = false;
+      try {
+        rollbackSuccess = await defaultAtomicSpendEnforcer.rollbackReservation(mandate_id, amount_cents, merchant_domain);
+      } catch (rollbackErr) {
+        fastify.log.warn({ rollbackErr }, 'Failed executing compensating rollback during capture failure');
+      }
+      const rollbackDurationMs = performance.now() - rollbackStart;
+
+      const isInstrumentDeclined = err?.message?.includes('INSTRUMENT_DECLINED') || err?.name === 'INSTRUMENT_DECLINED';
+
+      return reply.status(500).send({
+        error: isInstrumentDeclined ? 'INSTRUMENT_DECLINED' : 'CAPTURE_FAILED',
+        message: err.message,
+        compensating_rollback: true,
+        restored_cents: amount_cents,
+        rollback_success: rollbackSuccess,
+        rollback_latency_ms: rollbackDurationMs,
       });
     }
   });

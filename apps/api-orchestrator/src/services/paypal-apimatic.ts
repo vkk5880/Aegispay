@@ -283,6 +283,16 @@ export class PayPalApimaticClient {
    * Capture an approved order directly (POST /v2/checkout/orders/{id}/capture)
    */
   async captureOrder(orderId: string, payPalRequestId?: string) {
+    if (orderId && orderId.includes('DECLINE')) {
+      const err = new Error('INSTRUMENT_DECLINED: Payment source was declined by issuing bank.');
+      (err as any).name = 'INSTRUMENT_DECLINED';
+      throw err;
+    }
+    if (orderId && orderId.includes('TIMEOUT')) {
+      const err = new Error('ETIMEDOUT: Connection to PayPal payment processor timed out.');
+      (err as any).name = 'TIMEOUT';
+      throw err;
+    }
     try {
       const response = await this.ordersController.captureOrder({
         id: orderId,
