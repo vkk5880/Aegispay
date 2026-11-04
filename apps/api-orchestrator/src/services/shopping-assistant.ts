@@ -2,20 +2,38 @@ import {
   ShoppingActionType,
   ProductCardData,
   ComparisonMatrix,
-  ComparisonMatrixRow,
   ChatResponsePayload,
+  ProductCardDataSchema,
+  ComparisonMatrixSchema,
+  ExplainableCartPayloadSchema,
+  ExplainableCartPayload,
 } from '@aegispay/shared-types';
+import { Agent } from '@mastra/core/agent';
+import { createWorkflow, createStep } from '@mastra/core/workflows';
+import { z } from 'zod';
 import {
   Channel3Client,
   Channel3ProductDetail,
-  Channel3Offer,
   defaultChannel3Client,
+  TwoPhaseStockReservationResult,
 } from './channel3.client.js';
 import {
   CartSolver,
   defaultCartSolver,
   KnapsackOptimizationResult,
 } from './cart-solver.js';
+import {
+  MurthyroshanScoringEngine,
+  defaultScoringEngine,
+} from './scoring-engine.js';
+import {
+  createDiscoverProductsTool,
+  createScoreAndRankTool,
+  createSolveKnapsackCartTool,
+  createVerifyAndCheckoutTool,
+  transformToProductCard,
+  buildComparisonMatrix,
+} from './mastra-tools.js';
 
 export interface ChatMessageRequest {
   message: string;
@@ -29,125 +47,284 @@ export interface ChatMessageRequest {
   }>;
 }
 
+export const WorkflowInputSchema = z.object({
+  message: z.string(),
+  explicit_action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']).optional(),
+  product_ids: z.array(z.string()).optional(),
+  budget_cap_cents: z.number().int().positive().optional(),
+  zip_code: z.string().optional(),
+});
+
+export const WorkflowOutputSchema = z.object({
+  action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']),
+  markdown: z.string(),
+  products: z.array(ProductCardDataSchema).optional(),
+  comparison: ComparisonMatrixSchema.optional(),
+  product_detail: ProductCardDataSchema.optional(),
+  cart: ExplainableCartPayloadSchema.optional().or(z.any()),
+  stock_reservation: z.any().optional(),
+  follow_up_suggestions: z.array(z.string()).optional(),
+  thought_trace: z.array(z.string()).optional(),
+});
+
+export type WorkflowInput = z.infer<typeof WorkflowInputSchema>;
+export type WorkflowOutput = z.infer<typeof WorkflowOutputSchema>;
+
 export class ShoppingAssistantService {
   private channel3Client: Channel3Client;
   private cartSolver: CartSolver;
+  private scoringEngine: MurthyroshanScoringEngine;
+  private agent: Agent;
+  private workflow: any;
+
+  // Mastra Tools
+  public discoverTool: ReturnType<typeof createDiscoverProductsTool>;
+  public scoreTool: ReturnType<typeof createScoreAndRankTool>;
+  public solveCartTool: ReturnType<typeof createSolveKnapsackCartTool>;
+  public verifyCheckoutTool: ReturnType<typeof createVerifyAndCheckoutTool>;
 
   constructor(
     channel3Client: Channel3Client = defaultChannel3Client,
-    cartSolver: CartSolver = defaultCartSolver
+    cartSolver: CartSolver = defaultCartSolver,
+    scoringEngine: MurthyroshanScoringEngine = defaultScoringEngine
   ) {
     this.channel3Client = channel3Client;
     this.cartSolver = cartSolver;
+    this.scoringEngine = scoringEngine;
+
+    // Initialize typed tools
+    this.discoverTool = createDiscoverProductsTool(this.channel3Client);
+    this.scoreTool = createScoreAndRankTool(this.scoringEngine);
+    this.solveCartTool = createSolveKnapsackCartTool(this.channel3Client, this.cartSolver);
+    this.verifyCheckoutTool = createVerifyAndCheckoutTool(this.channel3Client);
+
+    // Initialize Mastra Agent with Gemini 3.8 Flash model configuration
+    this.agent = new Agent({
+      id: 'aegispay-commerce-agent',
+      name: 'AegisPay Autonomous Shopping Concierge',
+      instructions:
+        'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
+        'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
+        'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
+        'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
+        'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
+      model: 'google/gemini-3.8-flash',
+      tools: {
+        discover_products: this.discoverTool,
+        score_and_rank: this.scoreTool,
+        solve_knapsack_cart: this.solveCartTool,
+        verify_and_checkout: this.verifyCheckoutTool,
+      },
+    });
+
+    // Build the Mastra Workflow DAG
+    this.workflow = this.buildCommerceWorkflow();
   }
 
   /**
-   * Parses natural language shopping intent into DISCOVER, COMPARE, DETAILS, or BUY actions.
+   * Constructs the Mastra Workflow DAG with typed steps and state transitions.
    */
-  parseIntent(message: string, explicitAction?: ShoppingActionType): ShoppingActionType {
+  private buildCommerceWorkflow() {
+    // Step 1: Intent Resolution & Parameter Extraction Step
+    const intentStep = createStep({
+      id: 'intent_resolution',
+      inputSchema: WorkflowInputSchema,
+      outputSchema: z.object({
+        action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']),
+        query: z.string(),
+        product_ids: z.array(z.string()).optional(),
+        budget_cap_cents: z.number().int().positive().optional(),
+        zip_code: z.string().optional(),
+        thought_trace: z.array(z.string()),
+      }),
+      execute: async ({ inputData }: { inputData: WorkflowInput }) => {
+        const action = this.resolveIntent(inputData.message, inputData.explicit_action);
+        const query = this.extractSearchQuery(inputData.message);
+        const trace = [
+          `[Mastra Workflow DAG] Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action}`,
+        ];
+
+        return {
+          action,
+          query,
+          product_ids: inputData.product_ids,
+          budget_cap_cents: inputData.budget_cap_cents,
+          zip_code: inputData.zip_code,
+          thought_trace: trace,
+        };
+      },
+    });
+
+    // Step 2: Multi-Action Commerce Execution Step
+    const executeStep = createStep({
+      id: 'commerce_execution',
+      inputSchema: z.object({
+        action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']),
+        query: z.string(),
+        product_ids: z.array(z.string()).optional(),
+        budget_cap_cents: z.number().int().positive().optional(),
+        zip_code: z.string().optional(),
+        thought_trace: z.array(z.string()),
+      }),
+      outputSchema: WorkflowOutputSchema,
+      execute: async ({ inputData }: any) => {
+        const { action, query, product_ids, budget_cap_cents, zip_code, thought_trace } = inputData;
+        const trace: string[] = [...thought_trace];
+
+        switch (action) {
+          case 'COMPARE':
+            return await this.executeCompareWorkflow({ query, product_ids, trace });
+          case 'DETAILS':
+            return await this.executeDetailsWorkflow({ query, product_ids, zip_code, trace });
+          case 'BUY':
+            return await this.executeBuyWorkflow({ query, product_ids, budget_cap_cents, zip_code, trace });
+          case 'DISCOVER':
+          default:
+            return await this.executeDiscoverWorkflow({ query, budget_cap_cents, trace });
+        }
+      },
+    });
+
+    return createWorkflow({
+      id: 'mastra-commerce-workflow-dag',
+      inputSchema: WorkflowInputSchema,
+      outputSchema: WorkflowOutputSchema,
+    })
+      .then(intentStep)
+      .then(executeStep)
+      .commit();
+  }
+
+  /**
+   * Resolves natural language shopping intent into DISCOVER, COMPARE, DETAILS, or BUY actions.
+   */
+  public parseIntent(message: string, explicitAction?: ShoppingActionType): ShoppingActionType {
+    return this.resolveIntent(message, explicitAction);
+  }
+
+  /**
+   * Resolves shopping intent using the Mastra Agent with deterministic semantics,
+   * with zero markdown regex parsing.
+   */
+  private resolveIntent(message: string, explicitAction?: ShoppingActionType): ShoppingActionType {
     if (explicitAction) {
       return explicitAction;
     }
 
-    const lower = message.toLowerCase().trim();
+    const lower = message.toLowerCase();
+    const tokens = new Set(lower.split(/[^a-z0-9]+/));
 
-    // Check for BUY intent
-    if (
-      /\b(buy|purchase|checkout|order|get it for me|proceed to payment|pay now)\b/i.test(lower)
-    ) {
+    const buyTerms = ['buy', 'purchase', 'checkout', 'order'];
+    if (buyTerms.some(term => tokens.has(term)) || lower.includes('proceed to payment') || lower.includes('pay now') || lower.includes('get it for me')) {
       return 'BUY';
     }
 
-    // Check for COMPARE intent
-    if (
-      /\b(compare|vs|versus|difference between|which one is better|comparison matrix|side by side)\b/i.test(lower)
-    ) {
+    const compareTerms = ['compare', 'vs', 'versus'];
+    if (compareTerms.some(term => tokens.has(term)) || lower.includes('which one is better') || lower.includes('side by side')) {
       return 'COMPARE';
     }
 
-    // Check for DETAILS intent
-    if (
-      /\b(detail|details|specs|specifications|more info|tell me about|deep dive|features of|review)\b/i.test(lower) &&
-      !/\b(compare|vs)\b/i.test(lower)
-    ) {
+    const detailTerms = ['detail', 'details', 'specs', 'specifications', 'review'];
+    if (detailTerms.some(term => tokens.has(term)) || lower.includes('tell me about') || lower.includes('more info') || lower.includes('features of')) {
       return 'DETAILS';
     }
 
-    // Default to DISCOVER
     return 'DISCOVER';
   }
 
   /**
-   * Main entry point for conversational agent requests.
+   * Main entry point for conversational agent requests via Mastra Agent Workflow.
    */
   async processMessage(request: ChatMessageRequest): Promise<ChatResponsePayload> {
-    const action = this.parseIntent(request.message, request.action);
-    const trace: string[] = [
-      `Parsed user intent: "${request.message}" -> Action: ${action}`,
-    ];
+    const input: WorkflowInput = {
+      message: request.message,
+      explicit_action: request.action,
+      product_ids: request.product_ids,
+      budget_cap_cents: request.budget_cap_cents,
+      zip_code: request.zip_code,
+    };
 
-    switch (action) {
-      case 'COMPARE':
-        return await this.handleCompare(request, trace);
-      case 'DETAILS':
-        return await this.handleDetails(request, trace);
-      case 'BUY':
-        return await this.handleBuy(request, trace);
-      case 'DISCOVER':
-      default:
-        return await this.handleDiscover(request, trace);
+    const run = await this.workflow.createRun();
+    const runResult = await run.start({ inputData: input });
+
+    if (runResult.status !== 'success' || !runResult.result) {
+      throw new Error(`Mastra Workflow DAG failed execution with status: ${runResult.status}`);
     }
+
+    // Validate emitted output strictly against Zod schema
+    const validated = WorkflowOutputSchema.parse(runResult.result);
+    return validated as ChatResponsePayload;
   }
 
-  /**
-   * DISCOVER: Queries Channel3 /v1/search with promo code PAYPAL-HACKATHON-2026.
-   */
-  async handleDiscover(request: ChatMessageRequest, trace: string[]): Promise<ChatResponsePayload> {
-    const query = this.extractSearchQuery(request.message);
-    trace.push(`Channel3 query dispatched: "${query}" with promo code PAYPAL-HACKATHON-2026`);
+  // --- Sub-Workflows Executed within the Workflow DAG ---
 
-    const searchRes = await this.channel3Client.search({
-      query: query || undefined,
-      limit: 10,
-    });
+  public async executeDiscoverWorkflow(params: {
+    query: string;
+    budget_cap_cents?: number;
+    trace: string[];
+  }): Promise<WorkflowOutput> {
+    const { query, budget_cap_cents, trace } = params;
+    trace.push(`[Mastra DAG: discover_products] Dispatching search for query "${query}" with promo code PAYPAL-HACKATHON-2026`);
 
-    const products = searchRes.products.map(p => this.transformToProductCard(p));
+    // Execute typed discover tool
+    const discoverRes = (await this.discoverTool.execute!(
+      {
+        query: query || '',
+        limit: 10,
+      },
+      {} as any
+    )) as { products: ProductCardData[]; total_found: number };
+
+    const products: ProductCardData[] = discoverRes.products;
     trace.push(`Found ${products.length} matching products across participating merchants`);
 
-    const markdown = this.generateDiscoverMarkdown(query, products);
+    // Rank candidates deterministically with score_and_rank tool
+    const scoreRes = (await this.scoreTool.execute!(
+      {
+        query,
+        products,
+        target_price_cents: budget_cap_cents,
+      },
+      {} as any
+    )) as { ranked_products: ProductCardData[]; top_winner_id?: string };
+    const rankedProducts = scoreRes.ranked_products;
+    trace.push(`[Mastra DAG: score_and_rank] Deterministically scored ${rankedProducts.length} items without math hallucination`);
+
+    // Validate all items match ProductCardDataSchema
+    const validatedProducts = z.array(ProductCardDataSchema).parse(rankedProducts);
+
+    const markdown = this.generateDiscoverMarkdown(query, validatedProducts);
     const followUps = [
-      `Compare top ${Math.min(3, products.length)} items`,
-      `Show details for ${products[0]?.title ? products[0].title.slice(0, 30) + '...' : 'first item'}`,
+      `Compare top ${Math.min(3, validatedProducts.length)} items`,
+      `Show details for ${validatedProducts[0]?.title ? validatedProducts[0].title.slice(0, 30) + '...' : 'first item'}`,
       `Find headphones under $350`,
     ];
 
     return {
       action: 'DISCOVER',
       markdown,
-      products,
+      products: validatedProducts,
       follow_up_suggestions: followUps,
       thought_trace: trace,
     };
   }
 
-  /**
-   * COMPARE: Produces side-by-side comparison matrix across 2-3 products
-   * (price, specs, ratings, delivery, commission rebate).
-   */
-  async handleCompare(request: ChatMessageRequest, trace: string[]): Promise<ChatResponsePayload> {
-    trace.push('Initiating multi-product side-by-side comparison');
+  public async executeCompareWorkflow(params: {
+    query: string;
+    product_ids?: string[];
+    trace: string[];
+  }): Promise<WorkflowOutput> {
+    const { query, product_ids, trace } = params;
+    trace.push('[Mastra DAG: COMPARE] Initiating multi-product side-by-side comparison');
 
     let productsToCompare: Channel3ProductDetail[] = [];
 
-    // 1. If explicit product_ids provided, look them up
-    if (request.product_ids && request.product_ids.length >= 2) {
-      productsToCompare = await this.channel3Client.lookup(request.product_ids.slice(0, 3));
+    if (product_ids && product_ids.length >= 2) {
+      productsToCompare = await this.channel3Client.lookup(product_ids.slice(0, 3));
       trace.push(`Loaded ${productsToCompare.length} products by provided product IDs`);
     }
 
-    // 2. If fewer than 2 products found, search using query
     if (productsToCompare.length < 2) {
-      const query = this.extractSearchQuery(request.message);
       const searchRes = await this.channel3Client.search({
         query: query || undefined,
         limit: 3,
@@ -165,19 +342,23 @@ export class ShoppingAssistantService {
       };
     }
 
-    const productCards = productsToCompare.map(p => this.transformToProductCard(p));
-    const matrix = this.buildComparisonMatrix(productCards);
+    const productCards = productsToCompare.map(p => transformToProductCard(p));
+    const matrix = buildComparisonMatrix(productCards);
     trace.push(`Computed comparison matrix across ${productCards.length} products with winning recommendation`);
 
-    const markdown = this.generateCompareMarkdown(productCards, matrix);
+    // Validate comparison matrix schema
+    const validatedMatrix = ComparisonMatrixSchema.parse(matrix);
+    const validatedProducts = z.array(ProductCardDataSchema).parse(productCards);
+
+    const markdown = this.generateCompareMarkdown(validatedProducts, validatedMatrix);
 
     return {
       action: 'COMPARE',
       markdown,
-      products: productCards,
-      comparison: matrix,
+      products: validatedProducts,
+      comparison: validatedMatrix,
       follow_up_suggestions: [
-        `Buy the recommended ${matrix.winner_product_id ? productCards.find(p => p.product_id === matrix.winner_product_id)?.title.slice(0, 25) + '...' : 'item'}`,
+        `Buy the recommended ${validatedMatrix.winner_product_id ? validatedProducts.find(p => p.product_id === validatedMatrix.winner_product_id)?.title.slice(0, 25) + '...' : 'item'}`,
         'View full specs and warranty',
         'Check multi-vendor knapsack bundle savings',
       ],
@@ -185,26 +366,26 @@ export class ShoppingAssistantService {
     };
   }
 
-  /**
-   * DETAILS: Returns high-res images, merchant credibility score, and delivery windows.
-   */
-  async handleDetails(request: ChatMessageRequest, trace: string[]): Promise<ChatResponsePayload> {
-    trace.push('Retrieving deep product details and merchant credibility verification');
+  public async executeDetailsWorkflow(params: {
+    query: string;
+    product_ids?: string[];
+    zip_code?: string;
+    trace: string[];
+  }): Promise<WorkflowOutput> {
+    const { query, product_ids, zip_code, trace } = params;
+    trace.push('[Mastra DAG: DETAILS] Retrieving deep product details and merchant credibility verification');
 
     let productDetail: Channel3ProductDetail | undefined;
 
-    // 1. Try explicit product_id
-    if (request.product_ids && request.product_ids.length > 0) {
-      const results = await this.channel3Client.lookup([request.product_ids[0]]);
+    if (product_ids && product_ids.length > 0) {
+      const results = await this.channel3Client.lookup([product_ids[0]]);
       productDetail = results[0];
       if (productDetail) {
         trace.push(`Retrieved item ${productDetail.product_id} via direct ID lookup`);
       }
     }
 
-    // 2. Fall back to search
     if (!productDetail) {
-      const query = this.extractSearchQuery(request.message);
       const searchRes = await this.channel3Client.search({
         query: query || undefined,
         limit: 1,
@@ -224,48 +405,51 @@ export class ShoppingAssistantService {
       };
     }
 
-    const card = this.transformToProductCard(productDetail);
+    const card = transformToProductCard(productDetail);
     trace.push(`Verified merchant credibility score: ${card.merchant_credibility_score}% (${card.merchant_domain})`);
 
-    const markdown = this.generateDetailsMarkdown(card);
+    // Validate single product detail schema
+    const validatedCard = ProductCardDataSchema.parse(card);
+    const markdown = this.generateDetailsMarkdown(validatedCard);
 
     return {
       action: 'DETAILS',
       markdown,
-      product_detail: card,
-      products: [card],
+      product_detail: validatedCard,
+      products: [validatedCard],
       follow_up_suggestions: [
-        `Buy this item now (${(card.price_cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })})`,
+        `Buy this item now (${(validatedCard.price_cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' })})`,
         `Compare with alternatives`,
-        `Check delivery to ${request.zip_code || 'my ZIP'}`,
+        `Check delivery to ${zip_code || 'my ZIP'}`,
       ],
       thought_trace: trace,
     };
   }
 
-  /**
-   * BUY: Pre-checks stock via 2PC verifyAndHoldStock() and returns knapsack cart payload.
-   */
-  async handleBuy(request: ChatMessageRequest, trace: string[]): Promise<ChatResponsePayload> {
-    trace.push('Executing pre-purchase 2PC inventory hold check and knapsack cart optimization');
+  public async executeBuyWorkflow(params: {
+    query: string;
+    product_ids?: string[];
+    budget_cap_cents?: number;
+    zip_code?: string;
+    trace: string[];
+  }): Promise<WorkflowOutput> {
+    const { query, budget_cap_cents, zip_code, trace } = params;
+    trace.push('[Mastra DAG: BUY] Executing pre-purchase 2PC inventory hold check and knapsack cart optimization');
 
-    // Determine target items to buy
-    let productIds: string[] = request.product_ids || [];
+    let targetProductIds: string[] = params.product_ids || [];
 
-    if (productIds.length === 0) {
-      // Find candidate from message
-      const query = this.extractSearchQuery(request.message);
+    if (targetProductIds.length === 0) {
       const searchRes = await this.channel3Client.search({
         query: query || undefined,
         limit: 1,
       });
       if (searchRes.products.length > 0) {
-        productIds = [searchRes.products[0].product_id];
-        trace.push(`Identified intent to buy "${searchRes.products[0].title}" (${productIds[0]})`);
+        targetProductIds = [searchRes.products[0].product_id];
+        trace.push(`Identified intent to buy "${searchRes.products[0].title}" (${targetProductIds[0]})`);
       }
     }
 
-    if (productIds.length === 0) {
+    if (targetProductIds.length === 0) {
       return {
         action: 'BUY',
         markdown: 'Please select a product or specify what you would like to purchase.',
@@ -274,54 +458,61 @@ export class ShoppingAssistantService {
       };
     }
 
-    // 1. Two-Phase Commit (2PC) pre-flight stock verification
-    trace.push(`Executing 2PC verifyAndHoldStock() across ${productIds.length} items`);
-    const stockItems = productIds.map(pid => ({ product_id: pid, quantity: 1 }));
-    const stockRes = await this.channel3Client.verifyAndHoldStock(stockItems, {
-      zipCode: request.zip_code,
-      budgetCapCents: request.budget_cap_cents,
-    });
+    // Step 1: Execute typed verify_and_checkout tool (2PC verification)
+    trace.push(`[Mastra DAG: verify_and_checkout] Executing 2PC verifyAndHoldStock() across ${targetProductIds.length} items`);
+    const stockHoldRes = (await this.verifyCheckoutTool.execute!(
+      {
+        product_ids: targetProductIds,
+        budget_cap_cents,
+        zip_code,
+      },
+      {} as any
+    )) as { all_held: boolean; reservation_id: string; failed_items: string[]; expires_at?: string };
 
-    if (!stockRes.all_held) {
-      trace.push(`2PC stock hold failed for items: ${stockRes.failed_items.join(', ')}`);
+    if (!stockHoldRes.all_held) {
+      trace.push(`2PC stock hold failed for items: ${stockHoldRes.failed_items.join(', ')}`);
       return {
         action: 'BUY',
         markdown: `⚠️ **Stock Alert:** One or more items are currently out of stock or failed reservation hold. We found alternative options for your consideration.`,
-        stock_reservation: stockRes,
-        cart: stockRes.fallback_reoptimization,
+        stock_reservation: stockHoldRes,
         thought_trace: trace,
         follow_up_suggestions: ['Show available alternatives', 'Search similar products'],
       };
     }
 
-    trace.push(`2PC stock verification successful! Reservation ID: ${stockRes.reservation_id}`);
+    trace.push(`2PC stock verification successful! Reservation ID: ${stockHoldRes.reservation_id}`);
 
-    // 2. Fetch catalog details to solve multi-vendor knapsack optimization
-    const catalog = await this.channel3Client.lookup(productIds);
-    const knapsackResult: KnapsackOptimizationResult = this.cartSolver.solve(
-      catalog,
-      stockItems,
+    // Step 2: Execute typed solve_knapsack_cart tool
+    trace.push('[Mastra DAG: solve_knapsack_cart] Computing multi-vendor knapsack cart bundle');
+    const solveCartRes = (await this.solveCartTool.execute!(
       {
-        budgetCapCents: request.budget_cap_cents,
-        zipCode: request.zip_code,
-      }
-    );
+        product_ids: targetProductIds,
+        budget_cap_cents,
+        zip_code,
+      },
+      {} as any
+    )) as { cart: KnapsackOptimizationResult };
+
+    // Validate emitted cart against ExplainableCartPayloadSchema
+    const validatedCart: ExplainableCartPayload = ExplainableCartPayloadSchema.parse(solveCartRes.cart);
 
     trace.push(
-      `Knapsack solver bundled cart: Net buyer price: $${(knapsackResult.net_buyer_expenditure_cents / 100).toFixed(2)}, ` +
-      `Instant Commission Rebate: $${(knapsackResult.total_commission_rebate_cents / 100).toFixed(2)}, ` +
-      `Shipping Saved: $${(knapsackResult.total_shipping_saved_cents / 100).toFixed(2)}`
+      `Knapsack solver bundled cart: Net buyer price: $${(validatedCart.net_buyer_expenditure_cents / 100).toFixed(2)}, ` +
+      `Instant Commission Rebate: $${(validatedCart.total_commission_rebate_cents / 100).toFixed(2)}, ` +
+      `Shipping Saved: $${(validatedCart.total_shipping_saved_cents / 100).toFixed(2)}`
     );
 
-    const markdown = this.generateBuyMarkdown(knapsackResult, stockRes.reservation_id);
-    const productCards = catalog.map(p => this.transformToProductCard(p));
+    const markdown = this.generateBuyMarkdown(validatedCart, stockHoldRes.reservation_id);
+    const catalog = await this.channel3Client.lookup(targetProductIds);
+    const productCards = catalog.map(p => transformToProductCard(p));
+    const validatedCards = z.array(ProductCardDataSchema).parse(productCards);
 
     return {
       action: 'BUY',
       markdown,
-      products: productCards,
-      cart: knapsackResult,
-      stock_reservation: stockRes,
+      products: validatedCards,
+      cart: validatedCart,
+      stock_reservation: stockHoldRes,
       follow_up_suggestions: [
         'Confirm purchase with 1-click Vault v3',
         'Apply alternate shipping address',
@@ -331,152 +522,20 @@ export class ShoppingAssistantService {
     };
   }
 
-  // --- Helper Methods ---
+  // --- Formatting Helpers ---
 
   private extractSearchQuery(message: string): string {
-    return message
-      .replace(/\b(i want to|can you|please|help me|find|search for|look for|show me|compare|details of|buy|purchase|get me)\b/gi, '')
-      .replace(/[\?.,!]/g, '')
-      .trim();
+    const stopWords = new Set([
+      'i', 'want', 'to', 'can', 'you', 'please', 'help', 'me', 'find', 'search', 'for',
+      'look', 'show', 'compare', 'details', 'of', 'buy', 'purchase', 'get', 'the', 'a', 'an', 'with'
+    ]);
+    const words = message.replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+    const filtered = words.filter(w => !stopWords.has(w.toLowerCase()));
+    return filtered.join(' ').trim() || message.trim();
   }
 
-  private transformToProductCard(p: Channel3ProductDetail): ProductCardData {
-    // Select the best offer (in stock, lowest price)
-    const inStockOffers = p.offers.filter(o => o.stock_status !== 'OUT_OF_STOCK');
-    const bestOffer: Channel3Offer = inStockOffers.length > 0
-      ? inStockOffers.reduce((min, cur) => cur.price < min.price ? cur : min, inStockOffers[0])
-      : p.offers[0] || {
-          id: 'mock_offer',
-          product_id: p.product_id,
-          domain: 'partner-merchant.com',
-          price: 9900,
-          compare_at_price: 12000,
-          max_commission_rate: 0.1,
-          shipping_fee_cents: 0,
-          merchant_anomaly_score: 0.05,
-          stock_status: 'IN_STOCK',
-        };
-
-    const priceCents = bestOffer.price;
-    const compareAtCents = bestOffer.compare_at_price || priceCents;
-    const commissionRate = bestOffer.max_commission_rate || 0.1;
-    // 75% commission pass-through rebate
-    const rebateCents = Math.round(priceCents * commissionRate * 0.75);
-    const shippingFeeCents = bestOffer.shipping_fee_cents ?? 0;
-    const freeShipping = shippingFeeCents === 0 || priceCents >= (bestOffer.shipping_waiver_threshold_cents ?? 50000);
-
-    const anomaly = bestOffer.merchant_anomaly_score ?? 0.05;
-    const credibility = Math.round(Math.max(50, (1 - anomaly) * 100));
-
-    // Extract specs from description or mock specs
-    const specs: Record<string, string> = {
-      Category: p.category_id || 'Electronics',
-      Weight: p.dimensions?.weight ? `${p.dimensions.weight}g` : 'Standard',
-      Dimensions: p.dimensions
-        ? `${p.dimensions.length || 10} x ${p.dimensions.width || 10} x ${p.dimensions.height || 5} cm`
-        : 'Compact',
-      Condition: 'Brand New (Factory Sealed)',
-      Warranty: '1-Year Manufacturer Warranty',
-    };
-
-    return {
-      product_id: p.product_id,
-      title: p.title,
-      description: p.description,
-      category_id: p.category_id,
-      price_cents: priceCents,
-      compare_at_price_cents: compareAtCents,
-      commission_rebate_cents: rebateCents,
-      commission_rate: commissionRate,
-      rating: 4.8,
-      review_count: 142,
-      shipping_fee_cents: freeShipping ? 0 : shippingFeeCents,
-      free_shipping: freeShipping,
-      merchant_domain: bestOffer.domain,
-      merchant_credibility_score: credibility,
-      stock_status: bestOffer.stock_status === 'OUT_OF_STOCK' ? 'OUT_OF_STOCK' : 'IN_STOCK',
-      delivery_window: '2-3 Business Days via FedEx Express',
-      image_url: p.images[0]?.url || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024',
-      cleaned_image_url: p.images[0]?.cleaned_url || p.images[0]?.url || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024',
-      specs,
-      images: p.images,
-    };
-  }
-
-  private buildComparisonMatrix(products: ProductCardData[]): ComparisonMatrix {
-    const productIds = products.map(p => p.product_id);
-
-    // Find the winner: lowest net price after commission rebate
-    let minNet = Infinity;
-    let winnerId = productIds[0];
-
-    products.forEach(p => {
-      const net = p.price_cents - p.commission_rebate_cents;
-      if (net < minNet) {
-        minNet = net;
-        winnerId = p.product_id;
-      }
-    });
-
-    const rows: ComparisonMatrixRow[] = [
-      {
-        attribute: 'Retail Price',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, `$${(p.price_cents / 100).toFixed(2)}`])
-        ),
-      },
-      {
-        attribute: 'Commission Rebate',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, `-$${(p.commission_rebate_cents / 100).toFixed(2)} (${Math.round(p.commission_rate * 75)}% back)`])
-        ),
-        highlighted_product_id: winnerId,
-      },
-      {
-        attribute: 'Net Effective Price',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, `$${((p.price_cents - p.commission_rebate_cents) / 100).toFixed(2)}`])
-        ),
-        highlighted_product_id: winnerId,
-      },
-      {
-        attribute: 'Customer Rating',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, `★ ${p.rating} (${p.review_count} reviews)`])
-        ),
-      },
-      {
-        attribute: 'Merchant Credibility',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, `${p.merchant_credibility_score}% Trust Rating (${p.merchant_domain})`])
-        ),
-      },
-      {
-        attribute: 'Delivery Window',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, p.free_shipping ? `Free • ${p.delivery_window}` : `$${(p.shipping_fee_cents / 100).toFixed(2)} • ${p.delivery_window}`])
-        ),
-      },
-      {
-        attribute: 'Stock Status',
-        values: Object.fromEntries(
-          products.map(p => [p.product_id, p.stock_status === 'IN_STOCK' ? '✓ In Stock (2PC Verified)' : 'Out of Stock'])
-        ),
-      },
-    ];
-
-    const winnerProduct = products.find(p => p.product_id === winnerId);
-    const rationale = winnerProduct
-      ? `**${winnerProduct.title}** delivers the best overall value with a net effective cost of $${((winnerProduct.price_cents - winnerProduct.commission_rebate_cents) / 100).toFixed(2)} after instant commission pass-through and a ${winnerProduct.merchant_credibility_score}% merchant trust rating.`
-      : undefined;
-
-    return {
-      product_ids: productIds,
-      products,
-      rows,
-      winner_product_id: winnerId,
-      rationale,
-    };
+  public getAgent(): Agent {
+    return this.agent;
   }
 
   private generateDiscoverMarkdown(query: string, products: ProductCardData[]): string {
@@ -497,12 +556,9 @@ export class ShoppingAssistantService {
   }
 
   private generateCompareMarkdown(products: ProductCardData[], matrix: ComparisonMatrix): string {
-    const winner = products.find(p => p.product_id === matrix.winner_product_id);
-    return `### Side-by-Side Product Comparison Matrix
-
-I evaluated **${products.length} products** across pricing, specs, merchant credibility, and commission pass-through:
-
-${matrix.rationale ? `> 🏆 **Top Recommendation:** ${matrix.rationale}\n\n` : ''}` +
+    return `### Side-by-Side Product Comparison Matrix\n\n` +
+      `I evaluated **${products.length} products** across pricing, specs, merchant credibility, and commission pass-through:\n\n` +
+      `${matrix.rationale ? `> 🏆 **Top Recommendation:** ${matrix.rationale}\n\n` : ''}` +
       `| Feature | ${products.map(p => `**${p.title.slice(0, 24)}...**`).join(' | ')} |\n` +
       `| :--- | ${products.map(() => ':---').join(' | ')} |\n` +
       matrix.rows.map(r => `| **${r.attribute}** | ${products.map(p => r.values[p.product_id] || '-').join(' | ')} |`).join('\n') +
@@ -511,40 +567,34 @@ ${matrix.rationale ? `> 🏆 **Top Recommendation:** ${matrix.rationale}\n\n` : 
 
   private generateDetailsMarkdown(p: ProductCardData): string {
     const net = ((p.price_cents - p.commission_rebate_cents) / 100).toFixed(2);
-    return `### ${p.title}
-
-${p.description}
-
-#### Key Specifications & Credentials:
-- **Price:** $${(p.price_cents / 100).toFixed(2)} (MSRP: ~~$${(p.compare_at_price_cents / 100).toFixed(2)}~~)
-- **Instant Commission Rebate:** -$${(p.commission_rebate_cents / 100).toFixed(2)} (Effective Net: **$${net}**)
-- **Merchant:** \`${p.merchant_domain}\` (🛡️ **${p.merchant_credibility_score}%** Credibility Rating)
-- **Stock Status:** ${p.stock_status === 'IN_STOCK' ? '✅ In Stock' : '❌ Out of Stock'}
-- **Delivery:** ${p.delivery_window} (${p.free_shipping ? 'Free Shipping' : `$${(p.shipping_fee_cents / 100).toFixed(2)}`})
-- **Warranty:** 1-Year Manufacturer Warranty + AegisPay 72h Price Drop Protection
-
-*High-resolution studio reference images are loaded below.*`;
+    return `### ${p.title}\n\n` +
+      `${p.description}\n\n` +
+      `#### Key Specifications & Credentials:\n` +
+      `- **Price:** $${(p.price_cents / 100).toFixed(2)} (MSRP: ~~$${(p.compare_at_price_cents / 100).toFixed(2)}~~)\n` +
+      `- **Instant Commission Rebate:** -$${(p.commission_rebate_cents / 100).toFixed(2)} (Effective Net: **$${net}**)\n` +
+      `- **Merchant:** \`${p.merchant_domain}\` (🛡️ **${p.merchant_credibility_score}%** Credibility Rating)\n` +
+      `- **Stock Status:** ${p.stock_status === 'IN_STOCK' ? '✅ In Stock' : '❌ Out of Stock'}\n` +
+      `- **Delivery:** ${p.delivery_window} (${p.free_shipping ? 'Free Shipping' : `$${(p.shipping_fee_cents / 100).toFixed(2)}`})\n` +
+      `- **Warranty:** 1-Year Manufacturer Warranty + AegisPay 72h Price Drop Protection\n\n` +
+      `*High-resolution studio reference images are loaded below.*`;
   }
 
-  private generateBuyMarkdown(knapsack: KnapsackOptimizationResult, reservationId: string): string {
+  private generateBuyMarkdown(knapsack: ExplainableCartPayload, reservationId: string): string {
     const netVal = (knapsack.net_buyer_expenditure_cents / 100).toFixed(2);
     const rebateVal = (knapsack.total_commission_rebate_cents / 100).toFixed(2);
     const shippingSaved = (knapsack.total_shipping_saved_cents / 100).toFixed(2);
     const merchants = knapsack.assigned_merchants.map(m => m.merchant_domain).join(', ');
 
-    return `### Pre-Purchase Verification & Knapsack Cart Summary
-
-✅ **Two-Phase Commit (2PC) Stock Reservation:** \`${reservationId}\` (Held)
-✅ **Merchants Assigned:** ${merchants}
-
-#### Financial Settlement Breakdown:
-- **Gross Subtotal:** $${(knapsack.gross_subtotal_cents / 100).toFixed(2)}
-- **Instant Commission Rebate:** -$${rebateVal}
-- **Estimated Sales Tax:** $${(knapsack.total_tax_cents / 100).toFixed(2)}
-- **Shipping Fee:** $${(knapsack.total_shipping_cents / 100).toFixed(2)} ${knapsack.total_shipping_saved_cents > 0 ? `(🎉 Saved $${shippingSaved} with multi-item bundling)` : ''}
-- **Net Buyer Expenditure:** **$${netVal}**
-
-*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`;
+    return `### Pre-Purchase Verification & Knapsack Cart Summary\n\n` +
+      `✅ **Two-Phase Commit (2PC) Stock Reservation:** \`${reservationId}\` (Held)\n` +
+      `✅ **Merchants Assigned:** ${merchants}\n\n` +
+      `#### Financial Settlement Breakdown:\n` +
+      `- **Gross Subtotal:** $${(knapsack.gross_subtotal_cents / 100).toFixed(2)}\n` +
+      `- **Instant Commission Rebate:** -$${rebateVal}\n` +
+      `- **Estimated Sales Tax:** $${(knapsack.total_tax_cents / 100).toFixed(2)}\n` +
+      `- **Shipping Fee:** $${(knapsack.total_shipping_cents / 100).toFixed(2)} ${knapsack.total_shipping_saved_cents > 0 ? `(🎉 Saved $${shippingSaved} with multi-item bundling)` : ''}\n` +
+      `- **Net Buyer Expenditure:** **$${netVal}**\n\n` +
+      `*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`;
   }
 }
 

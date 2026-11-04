@@ -165,13 +165,56 @@ export const ComparisonMatrixSchema = z.object({
   rationale: z.string().optional(),
 });
 
+export const ExplainableCartItemSchema = z.object({
+  product_id: z.string(),
+  title: z.string(),
+  quantity: z.number().int().positive(),
+  unit_price_cents: z.number().int().nonnegative(),
+  unit_compare_price_cents: z.number().int().nonnegative(),
+  commission_rate: z.number().min(0).max(1),
+  cleaned_url: z.string(),
+});
+
+export const ExplainableCartMerchantGroupSchema = z.object({
+  merchant_domain: z.string(),
+  items: z.array(ExplainableCartItemSchema),
+  subtotal_cents: z.number().int().nonnegative(),
+  commission_rebate_cents: z.number().int().nonnegative(),
+  shipping_fee_cents: z.number().int().nonnegative(),
+  shipping_waived: z.boolean(),
+  merchant_anomaly_penalty_cents: z.number().int().nonnegative().default(0),
+  tax_cents: z.number().int().nonnegative().default(0),
+  tax_rate_bps: z.number().int().nonnegative().default(0),
+  net_merchant_cents: z.number().int().nonnegative(),
+  merchant_retail_authorized_cents: z.number().int().nonnegative(),
+  platform_subsidy_cents: z.number().int().nonnegative(),
+});
+
+export const ExplainableCartPayloadSchema = z.object({
+  assigned_merchants: z.array(ExplainableCartMerchantGroupSchema),
+  gross_subtotal_cents: z.number().int().nonnegative(),
+  total_commission_rebate_cents: z.number().int().nonnegative(),
+  total_shipping_cents: z.number().int().nonnegative(),
+  total_shipping_saved_cents: z.number().int().nonnegative(),
+  total_tax_cents: z.number().int().nonnegative(),
+  net_buyer_expenditure_cents: z.number().int().nonnegative(),
+  total_merchant_authorized_cents: z.number().int().nonnegative().optional(),
+  total_platform_subsidy_credit_cents: z.number().int().nonnegative().optional(),
+  savings_percentage: z.number().min(0).max(100),
+  is_within_budget: z.boolean(),
+  budget_cap_cents: z.number().int().positive().optional(),
+  overage_percentage: z.number().optional(),
+  zip_code: z.string().optional(),
+  paypal_purchase_units: z.array(z.any()).optional(),
+});
+
 export const ChatResponsePayloadSchema = z.object({
   action: ShoppingActionTypeSchema,
   markdown: z.string(),
   products: z.array(ProductCardDataSchema).optional(),
   comparison: ComparisonMatrixSchema.optional(),
   product_detail: ProductCardDataSchema.optional(),
-  cart: z.any().optional(), // KnapsackOptimizationResult
+  cart: ExplainableCartPayloadSchema.optional().or(z.any()), // KnapsackOptimizationResult / ExplainableCartPayload
   stock_reservation: z.any().optional(), // TwoPhaseStockReservationResult
   follow_up_suggestions: z.array(z.string()).optional(),
   thought_trace: z.array(z.string()).optional(),
@@ -192,6 +235,9 @@ export type ShoppingActionType = z.infer<typeof ShoppingActionTypeSchema>;
 export type ProductCardData = z.infer<typeof ProductCardDataSchema>;
 export type ComparisonMatrixRow = z.infer<typeof ComparisonMatrixRowSchema>;
 export type ComparisonMatrix = z.infer<typeof ComparisonMatrixSchema>;
+export type ExplainableCartItem = z.infer<typeof ExplainableCartItemSchema>;
+export type ExplainableCartMerchantGroup = z.infer<typeof ExplainableCartMerchantGroupSchema>;
+export type ExplainableCartPayload = z.infer<typeof ExplainableCartPayloadSchema>;
 export type ChatResponsePayload = z.infer<typeof ChatResponsePayloadSchema>;
 
 /**
