@@ -193,3 +193,64 @@ export type ProductCardData = z.infer<typeof ProductCardDataSchema>;
 export type ComparisonMatrixRow = z.infer<typeof ComparisonMatrixRowSchema>;
 export type ComparisonMatrix = z.infer<typeof ComparisonMatrixSchema>;
 export type ChatResponsePayload = z.infer<typeof ChatResponsePayloadSchema>;
+
+/**
+ * Custodian Reason Codes and Violation Taxonomies
+ * Derived from AP2 Intent Mandates and Custodian Gate verification architecture
+ */
+export const CustodianReasonCodeSchema = z.enum([
+  // Price Integrity
+  'PRICE_MATCHES_CATALOG',
+  'PRICE_MISMATCH',
+  'ITEM_NOT_IN_CATALOG',
+  'ITEM_OUT_OF_STOCK',
+  'SNAPSHOT_STALE',
+  'LINE_ITEM_SUM_MISMATCH',
+
+  // Budget
+  'BUDGET_SATISFIED',
+  'BUDGET_EXCEEDED',
+  'BUDGET_UNSET',
+  'UNIT_PRICE_CEILING_EXCEEDED',
+  'INVALID_SPEND_AMOUNT',
+
+  // Merchant Scope & Anomaly
+  'MERCHANT_IN_SCOPE',
+  'MERCHANT_OUT_OF_SCOPE',
+  'MERCHANT_UNNAMED_BY_HUMAN',
+  'MERCHANT_ANOMALY_THRESHOLD_EXCEEDED',
+
+  // Category Scope
+  'CATEGORY_IN_SCOPE',
+  'CATEGORY_OUT_OF_SCOPE',
+
+  // Mandate & Cryptographic Authority
+  'MANDATE_SATISFIED',
+  'MANDATE_TOTAL_EXCEEDED',
+  'MANDATE_PER_TXN_EXCEEDED',
+  'MANDATE_EXPIRED',
+  'MANDATE_NOT_YET_VALID',
+  'MANDATE_REVOKED',
+  'MANDATE_MERCHANT_NOT_ALLOWED',
+  'MANDATE_CATEGORY_NOT_ALLOWED',
+  'MANDATE_CURRENCY_MISMATCH',
+  'MANDATE_NOT_FOUND',
+  'ED25519_SIGNATURE_VERIFICATION_FAILED',
+  'MANDATE_UNSIGNED_OR_TAMPERED',
+
+  // Hard constraints
+  'HARD_CONSTRAINT_VIOLATED'
+]);
+
+export type CustodianReasonCode = z.infer<typeof CustodianReasonCodeSchema>;
+
+export const CustodianViolationTaxonomySchema = z.object({
+  code: CustodianReasonCodeSchema,
+  message: z.string(),
+  stage: z.enum(['STAGE_1_SCHEMA', 'STAGE_2_CRYPTOGRAPHIC', 'STAGE_3_MERCHANT_ANOMALY', 'STAGE_4_REDIS_LUA_PRE_RESERVATION']),
+  is_blocking: z.boolean().default(true),
+  observed_value: z.union([z.string(), z.number(), z.record(z.string(), z.any())]).optional(),
+  expected_ceiling: z.union([z.string(), z.number(), z.record(z.string(), z.any())]).optional(),
+});
+
+export type CustodianViolationTaxonomy = z.infer<typeof CustodianViolationTaxonomySchema>;

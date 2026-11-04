@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { z } from 'zod';
 import { verifySessionMandateSignature } from './ed25519-verifier.js';
 import { calculateMerchantAnomalyScore, isMerchantAllowed } from './merchant-anomaly-gate.js';
@@ -133,15 +134,17 @@ export const OptimizeBasketSchema = z.object({
 // 2. authorize_conditional_escrow_order
 export const AuthorizeEscrowOrderSchema = z.object({
   mandate_id: z.string().max(32),
-  merchant_domain: z.string().max(128),
+  merchant_domain: z.string().max(128).min(1),
   requested_cents: z.number().int().positive(),
-  category_id: z.string(),
+  category_id: z.string().min(1),
   items: z.array(z.object({
-    product_id: z.string(),
+    product_id: z.string().min(1),
     price_cents: z.number().int().positive(),
     quantity: z.number().int().positive()
-  })),
+  })).min(1, 'Cart items array must not be empty'),
   mandate: z.custom<SpendMandate>().optional(),
+  merchant_dispute_rate: z.number().min(0).max(1).optional(),
+  merchant_discount_variance: z.number().min(0).max(1).optional(),
   redis_client: z.any().optional(),
   spend_enforcer: z.custom<AtomicSpendEnforcer>().optional()
 }).refine(
@@ -231,7 +234,11 @@ export const toolHandlers = {
   async handleAuthorizeEscrow(args: z.infer<typeof AuthorizeEscrowOrderSchema>): Promise<AuthorizeEscrowOrderResult> {
     console.error('[MCP Enforcer] Authorizing escrow...', sanitizeForLogging(args));
 
-    // 1. If mandate object is provided, verify Ed25519 signature
+    // Sequential 4-Stage Custodian Verification Gate:
+    // Stage 1: Strict Zod schema refinement ensuring requested_cents === sum(price_cents * quantity)
+    // (Validated upfront via AuthorizeEscrowOrderSchema)
+
+    // Stage 2: Ed25519 Cryptographic Signature Verification against buyer public key
     if (args.mandate) {
       const isSignatureValid = await verifySessionMandateSignature(args.mandate);
       if (!isSignatureValid) {
@@ -239,18 +246,18 @@ export const toolHandlers = {
       }
     }
 
-    // 2. Evaluate merchant anomaly score
+    // Stage 3: Merchant Anomaly Gate check (reject score > 300 / 1000)
     const anomalyScore = calculateMerchantAnomalyScore({
       domain: args.merchant_domain,
-      disputeRate: 0,
-      averageDiscountVariance: 0,
+      disputeRate: args.merchant_dispute_rate ?? 0,
+      averageDiscountVariance: args.merchant_discount_variance ?? 0,
     });
 
     if (!isMerchantAllowed(anomalyScore)) {
       throw new Error(`ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED: score ${anomalyScore}`);
     }
 
-    // 3. Reserve budget via AtomicSpendEnforcer if redis client or custom enforcer provided
+    // Stage 4: Single-threaded Redis Lua reserveBudget() pre-reservation using {vch_<mandate_id>} hash tags
     let newSpent = args.requested_cents;
     const enforcer = args.spend_enforcer || defaultAtomicSpendEnforcer;
 
@@ -271,10 +278,10 @@ export const toolHandlers = {
       newSpent = reservation.new_spent ?? args.requested_cents;
     }
 
-    const deterministicSuffix = Date.now().toString(36);
+    const uniqueEntropy = crypto.randomUUID().slice(0, 12);
     return {
-      paypal_order_id: `ord_${args.mandate_id}_${deterministicSuffix}`,
-      invoice_id: `inv_${args.merchant_domain}_${deterministicSuffix}`,
+      paypal_order_id: `ord_${args.mandate_id}_${uniqueEntropy}`,
+      invoice_id: `inv_${args.merchant_domain}_${uniqueEntropy}`,
       status: 'AUTHORIZED',
       spent_cents: newSpent,
       merchant_anomaly_score: anomalyScore,
@@ -283,9 +290,10 @@ export const toolHandlers = {
 
   async handleBroadcastIntent(args: z.infer<typeof BroadcastSyntheticIntentSchema>): Promise<BroadcastSyntheticIntentResult> {
     console.error('[MCP Enforcer] Broadcasting synthetic intent...', sanitizeForLogging(args));
+    const entropy = crypto.randomUUID().slice(0, 12);
     return {
-      voucher_id: `syn_${args.mandate_id.slice(0, 8)}_${Date.now().toString(36)}`,
-      setup_token_id: `set_${Date.now().toString(36)}`,
+      voucher_id: `syn_${args.mandate_id.slice(0, 8)}_${entropy}`,
+      setup_token_id: `set_${entropy}`,
       status: 'BROADCASTED'
     };
   },
@@ -293,8 +301,8 @@ export const toolHandlers = {
   async handleVoidOrCapture(args: z.infer<typeof VoidOrCaptureEscrowSchema>): Promise<VoidOrCaptureEscrowResult> {
     console.error('[MCP Enforcer] Voiding or capturing...', sanitizeForLogging(args));
     return {
-      status: 'COMPLETED',
-      transaction_id: `tx_${args.authorization_id}`
+      status: args.action === 'CAPTURE' ? 'CAPTURED' : 'VOIDED',
+      transaction_id: `tx_${args.authorization_id}_${crypto.randomUUID().slice(0, 8)}`
     };
   },
 
@@ -302,7 +310,7 @@ export const toolHandlers = {
     console.error('[MCP Enforcer] Submitting evidence...', sanitizeForLogging(args));
     return {
       status: 'SUBMITTED',
-      evidence_id: `ev_${args.paypal_dispute_id}`
+      evidence_id: `ev_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`
     };
   },
 
@@ -310,7 +318,7 @@ export const toolHandlers = {
     console.error('[MCP Enforcer] Proposing settlement...', sanitizeForLogging(args));
     return {
       status: 'PROPOSED',
-      offer_id: `off_${args.paypal_dispute_id}`
+      offer_id: `off_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`
     };
   }
 };
