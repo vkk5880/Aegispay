@@ -19,6 +19,7 @@ const ChatMessageSchema = z.object({
   model: z.string().optional(),
   provider: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
+  user_api_key: z.string().max(256).optional(),
   history: z.array(z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string(),
@@ -53,7 +54,12 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const response: ChatResponsePayload = await defaultShoppingAssistant.processMessage(parseResult.data);
+      const userApiKeyHeader = request.headers['x-user-llm-api-key'] as string | undefined;
+      const chatPayload = {
+        ...parseResult.data,
+        user_api_key: parseResult.data.user_api_key || userApiKeyHeader,
+      };
+      const response: ChatResponsePayload = await defaultShoppingAssistant.processMessage(chatPayload);
       return reply.send({
         status: 'SUCCESS',
         ...response,

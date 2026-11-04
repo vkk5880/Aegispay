@@ -6,16 +6,18 @@ import {
   MapPin,
   Clock,
   ShieldCheck,
-  Zap,
   Sliders,
-  DollarSign,
   Save,
   RotateCcw,
   CheckCircle2,
   Building,
   Bot,
   Sparkles,
-  Cpu,
+  Lock,
+  Key,
+  Code,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -26,9 +28,10 @@ export interface UserSettings {
   state: string;
   zipCode: string;
 
-  // Mastra Commerce AI Model & Reasoning Engine
-  aiModel: string;
-  aiProvider?: 'google' | 'anthropic' | 'openai' | 'auto';
+  // Advanced / Developer Mode (Hidden for normal shoppers)
+  developerModeEnabled: boolean;
+  aiModel?: string;
+  userApiKey?: string;
 
   // Fulfillment & Protection Mode
   fulfillmentMode: 'PRICE_WATCHER_72H' | 'PRIORITY_EXPRESS';
@@ -46,8 +49,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   city: 'San Jose',
   state: 'CA',
   zipCode: '95131',
-  aiModel: 'google/gemini-2.5-flash',
-  aiProvider: 'google',
+  developerModeEnabled: false,
+  aiModel: '',
+  userApiKey: '',
   fulfillmentMode: 'PRICE_WATCHER_72H',
   purchasingRule: 'ALWAYS_CONFIRM',
   autoBuyThresholdCents: 15000, // $150.00
@@ -71,6 +75,7 @@ export function UserSettingsDrawer({
 }: UserSettingsDrawerProps) {
   const [formData, setFormData] = useState<UserSettings>(initialSettings);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
 
   useEffect(() => {
     setFormData(initialSettings);
@@ -197,92 +202,6 @@ export function UserSettingsDrawer({
                     />
                   </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Section: Mastra Commerce AI Model Selection */}
-            <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800/80">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-                  <Bot className="w-3.5 h-3.5 text-cyan-500" />
-                  <span>Mastra Commerce AI Model</span>
-                </label>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-300 dark:border-cyan-800/60">
-                  {formData.aiModel.split('/')[1] || formData.aiModel}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Choose which underlying LLM model powers the autonomous conversational concierge and knapsack solver.
-              </p>
-
-              <div className="space-y-2">
-                {[
-                  {
-                    id: 'google/gemini-2.5-flash',
-                    name: 'Gemini 2.5 Flash',
-                    badge: 'Fast & Default',
-                    provider: 'google',
-                    desc: 'Ultra-fast sub-second tool execution with 1M context window. Optimal for live cart negotiation.',
-                  },
-                  {
-                    id: 'google/gemini-1.5-pro',
-                    name: 'Gemini 1.5 Pro',
-                    badge: 'Deep Multimodal',
-                    provider: 'google',
-                    desc: 'Complex 2M token reasoning over huge multi-vendor catalogs and high-res vision diffs.',
-                  },
-                  {
-                    id: 'anthropic/claude-3-5-sonnet',
-                    name: 'Claude 3.5 Sonnet',
-                    badge: 'Superior Synthesis',
-                    provider: 'anthropic',
-                    desc: 'Advanced schema verification, deterministic step synthesis, and strict Zod compliance.',
-                  },
-                  {
-                    id: 'openai/gpt-4o',
-                    name: 'GPT-4o',
-                    badge: 'Omni Reasoning',
-                    provider: 'openai',
-                    desc: 'Omni-channel reasoning with flexible natural language comprehension and tool use.',
-                  },
-                ].map((m) => (
-                  <div
-                    key={m.id}
-                    onClick={() =>
-                      setFormData({
-                        ...formData,
-                        aiModel: m.id,
-                        aiProvider: m.provider as any,
-                      })
-                    }
-                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
-                      formData.aiModel === m.id
-                        ? 'border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 ring-1 ring-cyan-500/40 shadow-xs'
-                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`w-2 h-2 rounded-full ${
-                            formData.aiModel === m.id
-                              ? 'bg-cyan-500 ring-4 ring-cyan-500/20'
-                              : 'bg-slate-300 dark:bg-slate-700'
-                          }`}
-                        />
-                        <span className="text-xs font-bold text-slate-900 dark:text-white">
-                          {m.name}
-                        </span>
-                      </div>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                        {m.badge}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
-                      {m.desc}
-                    </p>
-                  </div>
-                ))}
               </div>
             </div>
 
@@ -501,6 +420,172 @@ export function UserSettingsDrawer({
                   <span>Max: {formatCents(maxBudgetCents)}</span>
                 </div>
               </div>
+            </div>
+
+            {/* Section 5: Advanced / Developer AI Controls (BYOK & Model Override) */}
+            <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Code className="w-4 h-4 text-amber-500" />
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Developer & Judge Mode
+                    </span>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Override agent model & supply personal user-scoped key (BYOK)
+                    </p>
+                  </div>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.developerModeEnabled}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        developerModeEnabled: e.target.checked,
+                        aiModel: e.target.checked
+                          ? formData.aiModel || 'google/gemini-2.5-flash'
+                          : '',
+                      })
+                    }
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                </label>
+              </div>
+
+              {!formData.developerModeEnabled ? (
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
+                  <span>
+                    Standard shoppers automatically use the platform deployment model (<code className="text-cyan-600 dark:text-cyan-400 font-mono">COMMERCE_AGENT_MODEL</code>). Toggle on to test alternative reasoning engines or supply custom tokens.
+                  </span>
+                </div>
+              ) : (
+                <div className="space-y-4 pt-1 animate-fade-in">
+                  {/* User-Scoped Isolation Callout */}
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold">
+                      <Lock className="w-3.5 h-3.5 text-amber-500" />
+                      <span>User-Scoped Isolation Guarantee</span>
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-slate-600 dark:text-slate-400">
+                      Your model preference and API key are strictly personal to your browser session and ephemeral requests. Keys are <strong>never</strong> saved to database, Redis, or platform logs, and never shared with other users.
+                    </p>
+                  </div>
+
+                  {/* Model Selection */}
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Bot className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Select LLM Reasoning Engine</span>
+                      </span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800/60">
+                        {formData.aiModel ? formData.aiModel.split('/')[1] || formData.aiModel : 'Default'}
+                      </span>
+                    </label>
+
+                    <div className="space-y-2">
+                      {[
+                        {
+                          id: 'google/gemini-2.5-flash',
+                          name: 'Gemini 2.5 Flash',
+                          badge: 'Fast & Default',
+                          desc: 'Ultra-fast sub-second tool execution with 1M context window.',
+                        },
+                        {
+                          id: 'google/gemini-1.5-pro',
+                          name: 'Gemini 1.5 Pro',
+                          badge: 'Deep Multimodal',
+                          desc: 'Complex 2M token reasoning over huge multi-vendor catalogs.',
+                        },
+                        {
+                          id: 'anthropic/claude-3-5-sonnet',
+                          name: 'Claude 3.5 Sonnet',
+                          badge: 'Superior Synthesis',
+                          desc: 'Advanced schema verification and deterministic step synthesis.',
+                        },
+                        {
+                          id: 'openai/gpt-4o',
+                          name: 'GPT-4o',
+                          badge: 'Omni Reasoning',
+                          desc: 'Omni-channel reasoning with flexible tool use.',
+                        },
+                      ].map((m) => (
+                        <div
+                          key={m.id}
+                          onClick={() => setFormData({ ...formData, aiModel: m.id })}
+                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                            formData.aiModel === m.id
+                              ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/30 ring-1 ring-amber-500/40 shadow-xs'
+                              : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  formData.aiModel === m.id
+                                    ? 'bg-amber-500 ring-4 ring-amber-500/20'
+                                    : 'bg-slate-300 dark:bg-slate-700'
+                                }`}
+                              />
+                              <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                {m.name}
+                              </span>
+                            </div>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {m.badge}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                            {m.desc}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* User-Scoped API Key (BYOK) */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Key className="w-3.5 h-3.5 text-amber-500" />
+                        <span>User-Scoped Personal API Key (BYOK)</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400">Optional</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        value={formData.userApiKey || ''}
+                        onChange={(e) =>
+                          setFormData({ ...formData, userApiKey: e.target.value })
+                        }
+                        placeholder="sk-... or AIzaSy..."
+                        className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                      >
+                        {showApiKey ? (
+                          <EyeOff className="w-3.5 h-3.5" />
+                        ) : (
+                          <Eye className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      Used strictly for your requests without consuming platform quota. Discarded when session ends.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </form>
 

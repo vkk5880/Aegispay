@@ -27,6 +27,8 @@ import {
   Layers,
   Info,
   Zap,
+  Code,
+  Key,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -55,7 +57,9 @@ interface ConversationalAgentChatProps {
   onPurchaseConfirmed?: (result: { orderId: string; authorizedCents: number }) => void;
   budgetCapCents?: number;
   zipCode?: string;
+  developerModeEnabled?: boolean;
   selectedModel?: string;
+  userApiKey?: string;
 }
 
 export function ConversationalAgentChat({
@@ -66,7 +70,9 @@ export function ConversationalAgentChat({
   onPurchaseConfirmed,
   budgetCapCents = 50000,
   zipCode = '94016',
-  selectedModel = 'google/gemini-2.5-flash',
+  developerModeEnabled = false,
+  selectedModel,
+  userApiKey,
 }: ConversationalAgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -113,17 +119,30 @@ export function ConversationalAgentChat({
     setIsLoading(true);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (developerModeEnabled && userApiKey && userApiKey.trim().length > 0) {
+        headers['x-user-llm-api-key'] = userApiKey.trim();
+      }
+
+      const payload: Record<string, any> = {
+        message: text,
+        action: actionOverride,
+        product_ids: productIds,
+        budget_cap_cents: budgetCapCents,
+        zip_code: zipCode,
+      };
+
+      if (developerModeEnabled && selectedModel && selectedModel.trim().length > 0) {
+        payload.model = selectedModel.trim();
+        if (userApiKey && userApiKey.trim().length > 0) {
+          payload.user_api_key = userApiKey.trim();
+        }
+      }
+
       const res = await fetch('/api/buyer/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          action: actionOverride,
-          product_ids: productIds,
-          budget_cap_cents: budgetCapCents,
-          zip_code: zipCode,
-          model: selectedModel,
-        }),
+        headers,
+        body: JSON.stringify(payload),
       });
 
       const data: ChatResponsePayload = await res.json();
@@ -205,12 +224,25 @@ export function ConversationalAgentChat({
         </div>
 
         <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-slate-500 dark:text-slate-400">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 font-sans text-[11px] font-semibold">
-            <Zap className="w-3.5 h-3.5 text-cyan-500" />
-            <span>Model: {selectedModel.split('/')[1] || selectedModel}</span>
+          {developerModeEnabled ? (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 font-sans text-[11px] font-semibold"
+              title={userApiKey ? 'User-Scoped BYOK Key Active' : 'Developer Model Override Active'}
+            >
+              <Code className="w-3.5 h-3.5 text-amber-500" />
+              <span>Dev: {selectedModel ? selectedModel.split('/')[1] || selectedModel : 'Default Deployment'}</span>
+              {userApiKey && <Key className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-sans text-[11px] font-medium">
+              <Sparkles className="w-3 h-3 text-cyan-500" />
+              <span>Autonomous Assistant</span>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 text-xs">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>Escrow Protected</span>
           </div>
-          <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          <span>Escrow Protected</span>
         </div>
       </div>
 

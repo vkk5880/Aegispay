@@ -227,7 +227,9 @@ export default function BuyerPortalPage() {
           <ConversationalAgentChat
             budgetCapCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
             zipCode={userSettings.zipCode}
+            developerModeEnabled={userSettings.developerModeEnabled}
             selectedModel={userSettings.aiModel}
+            userApiKey={userSettings.userApiKey}
             onOpenCart={() => setIsCartOpen(true)}
             onPurchaseConfirmed={(result) => {
               setSpentCents((prev) => prev + result.authorizedCents);

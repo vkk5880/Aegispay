@@ -99,6 +99,7 @@ export interface ChatMessageRequest {
   zip_code?: string;
   model?: string;
   provider?: string;
+  user_api_key?: string;
   temperature?: number;
   history?: Array<{
     role: 'user' | 'assistant';
@@ -114,6 +115,7 @@ export const WorkflowInputSchema = z.object({
   zip_code: z.string().optional(),
   model: z.string().optional(),
   provider: z.string().optional(),
+  user_api_key: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
 });
 
@@ -200,6 +202,7 @@ export class ShoppingAssistantService {
         zip_code: z.string().optional(),
   model: z.string().optional(),
   provider: z.string().optional(),
+  user_api_key: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
         thought_trace: z.array(z.string()),
       }),
@@ -207,8 +210,9 @@ export class ShoppingAssistantService {
         const activeModel = resolveCommerceModel(inputData.model);
         const action = this.resolveIntent(inputData.message, inputData.explicit_action);
         const query = this.extractSearchQuery(inputData.message);
+        const keyAuth = inputData.user_api_key ? 'User-Scoped BYOK' : 'Platform Deploy';
         const trace = [
-          `[Mastra Workflow DAG] Active Model: ${activeModel} | Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action}`,
+          `[Mastra Workflow DAG] Active Model: ${activeModel} (${keyAuth}) | Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action}`,
         ];
 
         return {
@@ -235,6 +239,7 @@ export class ShoppingAssistantService {
         zip_code: z.string().optional(),
   model: z.string().optional(),
   provider: z.string().optional(),
+  user_api_key: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
         thought_trace: z.array(z.string()),
       }),
@@ -336,6 +341,7 @@ export class ShoppingAssistantService {
       model: resolveCommerceModel(request.model),
       provider: request.provider,
       temperature: request.temperature,
+      user_api_key: request.user_api_key,
     };
 
     const run = await this.workflow.createRun();
@@ -469,6 +475,7 @@ export class ShoppingAssistantService {
     zip_code?: string;
   model?: string;
   provider?: string;
+  user_api_key?: string;
   temperature?: number;
     trace: string[];
   }): Promise<WorkflowOutput> {
@@ -533,6 +540,7 @@ export class ShoppingAssistantService {
     zip_code?: string;
   model?: string;
   provider?: string;
+  user_api_key?: string;
   temperature?: number;
     trace: string[];
   }): Promise<WorkflowOutput> {
@@ -637,7 +645,28 @@ export class ShoppingAssistantService {
     return filtered.join(' ').trim() || message.trim();
   }
 
-  public getAgent(requestedModel?: string): Agent {
+  public getAgent(requestedModel?: string, userApiKey?: string): Agent {
+    if (userApiKey && userApiKey.trim().length > 0) {
+      // Ephemeral Agent with user-scoped BYOK key: NEVER cached or stored platform-wide
+      const model = resolveCommerceModel(requestedModel);
+      return new Agent({
+        id: `aegispay-user-agent-${Date.now()}`,
+        name: `AegisPay User-Scoped Concierge (${model})`,
+        instructions:
+          'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
+          'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
+          'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
+          'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
+          'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
+        model: model,
+        tools: {
+          discover_products: this.discoverTool,
+          score_and_rank: this.scoreTool,
+          solve_knapsack_cart: this.solveCartTool,
+          verify_and_checkout: this.verifyCheckoutTool,
+        },
+      });
+    }
     if (requestedModel && requestedModel !== resolveCommerceModel()) {
       return new Agent({
         id: `aegispay-agent-${requestedModel.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
