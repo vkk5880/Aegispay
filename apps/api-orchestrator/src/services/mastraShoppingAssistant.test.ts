@@ -133,3 +133,31 @@ test('Mastra Tools: Typed tool calls execute and validate schemas', async () => 
   assert.ok(cartOutput && 'cart' in cartOutput);
   assert.ok(cartOutput.cart.gross_subtotal_cents > 0);
 });
+
+test('Mastra Shopping Assistant: Supports dynamic deploy-time and per-request model selection', async () => {
+  const service = new ShoppingAssistantService();
+
+  // Test 1: Per-request override to Anthropic Claude 3.5 Sonnet
+  const claudeRes = await service.processMessage({
+    message: 'Find headphones',
+    model: 'anthropic/claude-3-5-sonnet',
+  });
+  assert.equal(claudeRes.active_model, 'anthropic/claude-3-5-sonnet');
+  assert.ok(claudeRes.thought_trace?.some(t => t.includes('anthropic/claude-3-5-sonnet')));
+
+  // Test 2: Per-request override to Gemini 1.5 Pro
+  const geminiProRes = await service.processMessage({
+    message: 'Compare studio gear',
+    action: 'COMPARE',
+    model: 'google/gemini-1.5-pro',
+  });
+  assert.equal(geminiProRes.active_model, 'google/gemini-1.5-pro');
+  assert.ok(geminiProRes.thought_trace?.some(t => t.includes('google/gemini-1.5-pro')));
+
+  // Test 3: Default model resolution
+  const defaultRes = await service.processMessage({
+    message: 'Show specs',
+    action: 'DETAILS',
+  });
+  assert.ok(defaultRes.active_model);
+});

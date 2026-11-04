@@ -13,6 +13,9 @@ import {
   RotateCcw,
   CheckCircle2,
   Building,
+  Bot,
+  Sparkles,
+  Cpu,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -22,6 +25,10 @@ export interface UserSettings {
   city: string;
   state: string;
   zipCode: string;
+
+  // Mastra Commerce AI Model & Reasoning Engine
+  aiModel: string;
+  aiProvider?: 'google' | 'anthropic' | 'openai' | 'auto';
 
   // Fulfillment & Protection Mode
   fulfillmentMode: 'PRICE_WATCHER_72H' | 'PRIORITY_EXPRESS';
@@ -39,6 +46,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   city: 'San Jose',
   state: 'CA',
   zipCode: '95131',
+  aiModel: 'google/gemini-2.5-flash',
+  aiProvider: 'google',
   fulfillmentMode: 'PRICE_WATCHER_72H',
   purchasingRule: 'ALWAYS_CONFIRM',
   autoBuyThresholdCents: 15000, // $150.00
@@ -188,6 +197,92 @@ export function UserSettingsDrawer({
                     />
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Section: Mastra Commerce AI Model Selection */}
+            <div className="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Bot className="w-3.5 h-3.5 text-cyan-500" />
+                  <span>Mastra Commerce AI Model</span>
+                </label>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 font-bold border border-cyan-300 dark:border-cyan-800/60">
+                  {formData.aiModel.split('/')[1] || formData.aiModel}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Choose which underlying LLM model powers the autonomous conversational concierge and knapsack solver.
+              </p>
+
+              <div className="space-y-2">
+                {[
+                  {
+                    id: 'google/gemini-2.5-flash',
+                    name: 'Gemini 2.5 Flash',
+                    badge: 'Fast & Default',
+                    provider: 'google',
+                    desc: 'Ultra-fast sub-second tool execution with 1M context window. Optimal for live cart negotiation.',
+                  },
+                  {
+                    id: 'google/gemini-1.5-pro',
+                    name: 'Gemini 1.5 Pro',
+                    badge: 'Deep Multimodal',
+                    provider: 'google',
+                    desc: 'Complex 2M token reasoning over huge multi-vendor catalogs and high-res vision diffs.',
+                  },
+                  {
+                    id: 'anthropic/claude-3-5-sonnet',
+                    name: 'Claude 3.5 Sonnet',
+                    badge: 'Superior Synthesis',
+                    provider: 'anthropic',
+                    desc: 'Advanced schema verification, deterministic step synthesis, and strict Zod compliance.',
+                  },
+                  {
+                    id: 'openai/gpt-4o',
+                    name: 'GPT-4o',
+                    badge: 'Omni Reasoning',
+                    provider: 'openai',
+                    desc: 'Omni-channel reasoning with flexible natural language comprehension and tool use.',
+                  },
+                ].map((m) => (
+                  <div
+                    key={m.id}
+                    onClick={() =>
+                      setFormData({
+                        ...formData,
+                        aiModel: m.id,
+                        aiProvider: m.provider as any,
+                      })
+                    }
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${
+                      formData.aiModel === m.id
+                        ? 'border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 ring-1 ring-cyan-500/40 shadow-xs'
+                        : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            formData.aiModel === m.id
+                              ? 'bg-cyan-500 ring-4 ring-cyan-500/20'
+                              : 'bg-slate-300 dark:bg-slate-700'
+                          }`}
+                        />
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">
+                          {m.name}
+                        </span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        {m.badge}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                      {m.desc}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
 

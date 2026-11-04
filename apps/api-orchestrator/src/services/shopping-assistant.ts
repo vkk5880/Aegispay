@@ -35,12 +35,71 @@ import {
   buildComparisonMatrix,
 } from './mastra-tools.js';
 
+export interface CommerceModelOption {
+  id: string;
+  name: string;
+  provider: 'google' | 'anthropic' | 'openai' | 'custom';
+  description: string;
+  badge?: string;
+  contextWindow?: string;
+}
+
+export const AVAILABLE_COMMERCE_MODELS: CommerceModelOption[] = [
+  {
+    id: 'google/gemini-2.5-flash',
+    name: 'Gemini 2.5 Flash',
+    provider: 'google',
+    description: 'Sub-second tool latency, optimized for autonomous multi-vendor shopping concierges.',
+    badge: 'Recommended / Default',
+    contextWindow: '1M tokens',
+  },
+  {
+    id: 'google/gemini-1.5-pro',
+    name: 'Gemini 1.5 Pro',
+    provider: 'google',
+    description: 'Advanced reasoning over complex catalogs and multi-attribute product comparison.',
+    badge: 'Deep Reasoning',
+    contextWindow: '2M tokens',
+  },
+  {
+    id: 'anthropic/claude-3-5-sonnet',
+    name: 'Claude 3.5 Sonnet',
+    provider: 'anthropic',
+    description: 'Premier structured schema verification, tool execution, and explainable logic.',
+    badge: 'Advanced Synthesis',
+    contextWindow: '200k tokens',
+  },
+  {
+    id: 'openai/gpt-4o',
+    name: 'GPT-4o',
+    provider: 'openai',
+    description: 'Omni-channel conversational intelligence with high natural language flexibility.',
+    badge: 'Omni Reasoning',
+    contextWindow: '128k tokens',
+  },
+];
+
+export function resolveCommerceModel(requestedModel?: string): string {
+  if (requestedModel && requestedModel.trim().length > 0) {
+    return requestedModel.trim();
+  }
+  return (
+    process.env.COMMERCE_AGENT_MODEL ||
+    process.env.MASTRA_DEFAULT_MODEL ||
+    process.env.LLM_MODEL ||
+    'google/gemini-2.5-flash'
+  );
+}
+
 export interface ChatMessageRequest {
   message: string;
   action?: ShoppingActionType;
   product_ids?: string[];
   budget_cap_cents?: number;
   zip_code?: string;
+  model?: string;
+  provider?: string;
+  temperature?: number;
   history?: Array<{
     role: 'user' | 'assistant';
     content: string;
@@ -53,6 +112,9 @@ export const WorkflowInputSchema = z.object({
   product_ids: z.array(z.string()).optional(),
   budget_cap_cents: z.number().int().positive().optional(),
   zip_code: z.string().optional(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
 });
 
 export const WorkflowOutputSchema = z.object({
@@ -65,6 +127,7 @@ export const WorkflowOutputSchema = z.object({
   stock_reservation: z.any().optional(),
   follow_up_suggestions: z.array(z.string()).optional(),
   thought_trace: z.array(z.string()).optional(),
+  active_model: z.string().optional(),
 });
 
 export type WorkflowInput = z.infer<typeof WorkflowInputSchema>;
@@ -108,7 +171,7 @@ export class ShoppingAssistantService {
         'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
         'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
         'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
-      model: 'google/gemini-3.8-flash',
+      model: resolveCommerceModel(),
       tools: {
         discover_products: this.discoverTool,
         score_and_rank: this.scoreTool,
@@ -135,13 +198,17 @@ export class ShoppingAssistantService {
         product_ids: z.array(z.string()).optional(),
         budget_cap_cents: z.number().int().positive().optional(),
         zip_code: z.string().optional(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
         thought_trace: z.array(z.string()),
       }),
       execute: async ({ inputData }: { inputData: WorkflowInput }) => {
+        const activeModel = resolveCommerceModel(inputData.model);
         const action = this.resolveIntent(inputData.message, inputData.explicit_action);
         const query = this.extractSearchQuery(inputData.message);
         const trace = [
-          `[Mastra Workflow DAG] Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action}`,
+          `[Mastra Workflow DAG] Active Model: ${activeModel} | Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action}`,
         ];
 
         return {
@@ -151,7 +218,9 @@ export class ShoppingAssistantService {
           budget_cap_cents: inputData.budget_cap_cents,
           zip_code: inputData.zip_code,
           thought_trace: trace,
+          model: activeModel,
         };
+
       },
     });
 
@@ -164,24 +233,46 @@ export class ShoppingAssistantService {
         product_ids: z.array(z.string()).optional(),
         budget_cap_cents: z.number().int().positive().optional(),
         zip_code: z.string().optional(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
         thought_trace: z.array(z.string()),
       }),
       outputSchema: WorkflowOutputSchema,
       execute: async ({ inputData }: any) => {
-        const { action, query, product_ids, budget_cap_cents, zip_code, thought_trace } = inputData;
+        const { action, query, product_ids, budget_cap_cents, zip_code, thought_trace, model } = inputData;
+        const activeModel = resolveCommerceModel(model);
         const trace: string[] = [...thought_trace];
+
 
         switch (action) {
           case 'COMPARE':
-            return await this.executeCompareWorkflow({ query, product_ids, trace });
+            return {
+              ...(await this.executeCompareWorkflow({ query, product_ids, trace })),
+              active_model: activeModel,
+            };
+            break;
           case 'DETAILS':
-            return await this.executeDetailsWorkflow({ query, product_ids, zip_code, trace });
+            return {
+              ...(await this.executeDetailsWorkflow({ query, product_ids, zip_code, trace })),
+              active_model: activeModel,
+            };
+            break;
           case 'BUY':
-            return await this.executeBuyWorkflow({ query, product_ids, budget_cap_cents, zip_code, trace });
+            return {
+              ...(await this.executeBuyWorkflow({ query, product_ids, budget_cap_cents, zip_code, trace })),
+              active_model: activeModel,
+            };
+            break;
           case 'DISCOVER':
           default:
-            return await this.executeDiscoverWorkflow({ query, budget_cap_cents, trace });
-        }
+            return {
+              ...(await this.executeDiscoverWorkflow({ query, budget_cap_cents, trace })),
+              active_model: activeModel,
+            };
+            break;
+        };
+
       },
     });
 
@@ -242,6 +333,9 @@ export class ShoppingAssistantService {
       product_ids: request.product_ids,
       budget_cap_cents: request.budget_cap_cents,
       zip_code: request.zip_code,
+      model: resolveCommerceModel(request.model),
+      provider: request.provider,
+      temperature: request.temperature,
     };
 
     const run = await this.workflow.createRun();
@@ -253,7 +347,10 @@ export class ShoppingAssistantService {
 
     // Validate emitted output strictly against Zod schema
     const validated = WorkflowOutputSchema.parse(runResult.result);
-    return validated as ChatResponsePayload;
+    return {
+      ...(validated as ChatResponsePayload),
+      active_model: resolveCommerceModel(request.model),
+    };
   }
 
   // --- Sub-Workflows Executed within the Workflow DAG ---
@@ -370,6 +467,9 @@ export class ShoppingAssistantService {
     query: string;
     product_ids?: string[];
     zip_code?: string;
+  model?: string;
+  provider?: string;
+  temperature?: number;
     trace: string[];
   }): Promise<WorkflowOutput> {
     const { query, product_ids, zip_code, trace } = params;
@@ -431,6 +531,9 @@ export class ShoppingAssistantService {
     product_ids?: string[];
     budget_cap_cents?: number;
     zip_code?: string;
+  model?: string;
+  provider?: string;
+  temperature?: number;
     trace: string[];
   }): Promise<WorkflowOutput> {
     const { query, budget_cap_cents, zip_code, trace } = params;
@@ -534,7 +637,26 @@ export class ShoppingAssistantService {
     return filtered.join(' ').trim() || message.trim();
   }
 
-  public getAgent(): Agent {
+  public getAgent(requestedModel?: string): Agent {
+    if (requestedModel && requestedModel !== resolveCommerceModel()) {
+      return new Agent({
+        id: `aegispay-agent-${requestedModel.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+        name: `AegisPay Autonomous Shopping Concierge (${requestedModel})`,
+        instructions:
+          'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
+          'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
+          'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
+          'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
+          'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
+        model: requestedModel,
+        tools: {
+          discover_products: this.discoverTool,
+          score_and_rank: this.scoreTool,
+          solve_knapsack_cart: this.solveCartTool,
+          verify_and_checkout: this.verifyCheckoutTool,
+        },
+      });
+    }
     return this.agent;
   }
 

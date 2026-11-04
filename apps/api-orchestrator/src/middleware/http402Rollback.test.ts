@@ -230,3 +230,4 @@ test('HTTP 402 Interceptor & Redis Lua Compensating Rollback Test Suite', async 
     assert.ok(tDuration < 5, `Rollback took ${tDuration.toFixed(3)}ms (< 5ms limit)`);
   });
 });
+

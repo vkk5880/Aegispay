@@ -218,6 +218,7 @@ export const ChatResponsePayloadSchema = z.object({
   stock_reservation: z.any().optional(), // TwoPhaseStockReservationResult
   follow_up_suggestions: z.array(z.string()).optional(),
   thought_trace: z.array(z.string()).optional(),
+  active_model: z.string().optional(),
 });
 
 export type SpendMandate = z.infer<typeof SpendMandateSchema>;

@@ -4,7 +4,11 @@ import {
   ShoppingActionTypeSchema,
   ChatResponsePayload,
 } from '@aegispay/shared-types';
-import { defaultShoppingAssistant } from '../services/shopping-assistant.js';
+import {
+  defaultShoppingAssistant,
+  resolveCommerceModel,
+  AVAILABLE_COMMERCE_MODELS,
+} from '../services/shopping-assistant.js';
 
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
@@ -12,6 +16,9 @@ const ChatMessageSchema = z.object({
   product_ids: z.array(z.string()).optional(),
   budget_cap_cents: z.number().int().positive().optional(),
   zip_code: z.string().optional(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
   history: z.array(z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string(),
@@ -19,6 +26,18 @@ const ChatMessageSchema = z.object({
 });
 
 export const chatRoutes: FastifyPluginAsync = async (fastify) => {
+  /**
+   * GET /api/buyer/models
+   * Dynamically lists supported Mastra AI models, active deploy model, and reasoning profiles.
+   */
+  fastify.get('/api/buyer/models', async () => {
+    return {
+      status: 'SUCCESS',
+      active_model: resolveCommerceModel(),
+      default_model: 'google/gemini-2.5-flash',
+      available_models: AVAILABLE_COMMERCE_MODELS,
+    };
+  });
   /**
    * POST /api/buyer/chat
    * Conversational AI Shopping Concierge & Product Comparison Engine

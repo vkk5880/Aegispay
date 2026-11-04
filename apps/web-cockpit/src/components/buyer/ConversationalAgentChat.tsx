@@ -26,6 +26,7 @@ import {
   ExternalLink,
   Layers,
   Info,
+  Zap,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -54,6 +55,7 @@ interface ConversationalAgentChatProps {
   onPurchaseConfirmed?: (result: { orderId: string; authorizedCents: number }) => void;
   budgetCapCents?: number;
   zipCode?: string;
+  selectedModel?: string;
 }
 
 export function ConversationalAgentChat({
@@ -64,6 +66,7 @@ export function ConversationalAgentChat({
   onPurchaseConfirmed,
   budgetCapCents = 50000,
   zipCode = '94016',
+  selectedModel = 'google/gemini-2.5-flash',
 }: ConversationalAgentChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -119,6 +122,7 @@ export function ConversationalAgentChat({
           product_ids: productIds,
           budget_cap_cents: budgetCapCents,
           zip_code: zipCode,
+          model: selectedModel,
         }),
       });
 
@@ -200,7 +204,11 @@ export function ConversationalAgentChat({
           </div>
         </div>
 
-        <div className="hidden sm:flex items-center gap-2 text-xs font-mono text-slate-500 dark:text-slate-400">
+        <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-slate-500 dark:text-slate-400">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 font-sans text-[11px] font-semibold">
+            <Zap className="w-3.5 h-3.5 text-cyan-500" />
+            <span>Model: {selectedModel.split('/')[1] || selectedModel}</span>
+          </div>
           <ShieldCheck className="w-4 h-4 text-emerald-500" />
           <span>Escrow Protected</span>
         </div>
