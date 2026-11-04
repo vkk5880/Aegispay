@@ -80,10 +80,18 @@ export class Channel3Client {
   constructor(apiKey?: string, baseUrl?: string, promoCode?: string) {
     this.apiKey = apiKey || process.env.CHANNEL3_API_KEY || '';
     this.baseUrl = baseUrl || process.env.CHANNEL3_BASE_URL || 'https://api.channel3.ai';
-    this.promoCode = promoCode || 'PAYPAL-HACKATHON-2026';
+    this.promoCode = promoCode || process.env.CHANNEL3_PROMO_CODE || 'PAYPAL-HACKATHON-2026';
   }
 
-  private getHeaders(): Record<string, string> {
+  public getPromoCode(): string {
+    return this.promoCode;
+  }
+
+  public getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  public getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-promo-code': this.promoCode,
@@ -295,17 +303,28 @@ export class Channel3Client {
       },
     ];
 
-    if (filters.query) {
-      const q = filters.query.toLowerCase();
-      const filtered = mockProducts.filter(p =>
-        p.title.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
-      );
-      if (filtered.length > 0) {
-        return { total: filtered.length, products: filtered };
+    let filtered = [...mockProducts];
+
+    if (filters.category_ids && filters.category_ids.length > 0) {
+      const catSet = new Set(filters.category_ids);
+      filtered = filtered.filter(p => catSet.has(p.category_id));
+      if (filtered.length === 0) {
+        // Fall back to all if category wasn't in mock catalog
+        filtered = [...mockProducts];
       }
     }
 
-    return { total: mockProducts.length, products: mockProducts };
+    if (filters.query) {
+      const q = filters.query.toLowerCase();
+      const match = filtered.filter(p =>
+        p.title.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
+      );
+      if (match.length > 0) {
+        filtered = match;
+      }
+    }
+
+    return { total: filtered.length, products: filtered };
   }
 
   private getMockLookupResponse(productIds: string[]): Channel3ProductDetail[] {
