@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint",
-    "test": "tsx --test src/app/judge/chaosSimulator.test.ts src/app/judge/disputeHardening.test.ts src/components/buyer/buyerChatComponents.test.ts src/workers/duckdbOptimization.test.ts"
+    "test": "tsx --test src/app/judge/e2eProductionPipeline.test.ts src/app/judge/chaosSimulator.test.ts src/app/judge/disputeHardening.test.ts src/components/buyer/buyerChatComponents.test.ts src/workers/duckdbOptimization.test.ts"
   },
   "dependencies": {
     "@aegispay/shared-types": "workspace:*",
