@@ -248,56 +248,27 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    // Resolve or verify PayPal payment token (from Vault token or mandate mapping)
-    let effectiveTokenId = payment_token_id;
-    if (!effectiveTokenId && mandate_id) {
-      const storedToken = defaultVaultOnboardingService.getVaultedTokenForMandate(mandate_id);
-      if (storedToken) {
-        effectiveTokenId = storedToken.paypal_payment_token_id;
-      }
-    }
-
-    // Default to a deterministic vaulted token ID if none provided
-    if (!effectiveTokenId) {
-      effectiveTokenId = `vault_tok_${crypto.randomUUID().slice(0, 8)}`;
-    }
-
     try {
-      // Execute multi-purchase unit PayPal authorization/capture
-      const orderResult = await defaultPayPalClient.createMultiPurchaseUnitOrder({
-        intent: 'CAPTURE',
-        purchaseUnits: [
-          {
-            reference_id: `pu_${session.id}`,
-            amount: {
-              currency_code: session.currency.toUpperCase(),
-              value: (session.total_cents / 100).toFixed(2),
-              breakdown: {
-                item_total: {
-                  currency_code: session.currency.toUpperCase(),
-                  value: (session.subtotal_cents / 100).toFixed(2),
-                },
-                tax_total: {
-                  currency_code: session.currency.toUpperCase(),
-                  value: (session.tax_cents / 100).toFixed(2),
-                },
-                shipping: {
-                  currency_code: session.currency.toUpperCase(),
-                  value: (session.shipping_fee_cents / 100).toFixed(2),
-                },
-              },
-            },
-            description: `ACP Autonomous Order for Session ${session.id}`,
-          },
-        ],
+      // Execute autonomous delegated checkout pipeline via VaultOnboardingService
+      const checkoutResult = await defaultVaultOnboardingService.executeDelegatedCheckout({
+        paymentTokenId: payment_token_id,
+        mandateId: mandate_id,
+        currency: session.currency,
+        totalCents: session.total_cents,
+        subtotalCents: session.subtotal_cents,
+        taxCents: session.tax_cents,
+        shippingFeeCents: session.shipping_fee_cents,
+        sessionId: session.id,
+        payPalRequestId: (request.headers['idempotency-key'] as string) || undefined,
       });
 
-      const orderId = orderResult.id || `MOCK_ORDER_${Date.now()}`;
-      const captureId = `CAP_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+      const orderId = checkoutResult.orderId;
+      const captureId = checkoutResult.captureId;
+      const effectiveTokenId = checkoutResult.paymentTokenId;
 
       // Update session status
       session.status = 'completed';
-      session.completed_at = new Date().toISOString();
+      session.completed_at = checkoutResult.completedAt;
       session.payment_execution = {
         handler_id: payment_handler_id,
         payment_token_id: effectiveTokenId,
@@ -330,7 +301,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
           vault_payment_token_id: effectiveTokenId,
           delegated: true,
         },
-        read_back_verified: true,
+        read_back_verified: checkoutResult.readBackVerified,
         completed_at: session.completed_at,
       });
     } catch (err: any) {
