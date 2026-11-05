@@ -5,6 +5,14 @@ import {
   generatePaymentReceipt,
   verifyPaymentReceipt,
   executeAgentPaymentRetry,
+  http402Interceptor,
+  X402ChallengeResponseSchema,
+  HEADER_PAY_TO,
+  HEADER_X_PAYMENT_CONTRACT_ID,
+  HEADER_X_PAYPAL_VAULT_SETUP_URL,
+  HEADER_PAYMENT_REQUIRED,
+  HEADER_X_AEGIS_SPEND_POLICY,
+  HEADER_X_PAYMENT_RECEIPT,
 } from './http402-interceptor.js';
 import { AtomicSpendEnforcer, ROLLBACK_LUA_SCRIPT } from '@aegispay/mcp-enforcer';
 
@@ -12,6 +20,15 @@ test('HTTP 402 Interceptor & Redis Lua Compensating Rollback Test Suite', async 
   const app = await buildApp();
 
   await t.test('1. Intercepts unauthorized procurement call and formats RFC-compliant HTTP 402 challenge', async () => {
+    // Verify exported header constants
+    assert.equal(HEADER_PAY_TO, 'PAY-TO');
+    assert.equal(HEADER_X_PAYMENT_CONTRACT_ID, 'X-Payment-Contract-Id');
+    assert.equal(HEADER_X_PAYPAL_VAULT_SETUP_URL, 'X-PayPal-Vault-Setup-Url');
+    assert.equal(HEADER_PAYMENT_REQUIRED, 'PAYMENT-REQUIRED');
+    assert.equal(HEADER_X_AEGIS_SPEND_POLICY, 'X-Aegis-Spend-Policy');
+    assert.equal(HEADER_X_PAYMENT_RECEIPT, 'X-Payment-Receipt');
+    assert.equal(typeof http402Interceptor, 'function');
+
     const response = await app.inject({
       method: 'POST',
       url: '/api/buyer/capture',
@@ -52,16 +69,44 @@ test('HTTP 402 Interceptor & Redis Lua Compensating Rollback Test Suite', async 
     assert.equal(body.status, 402);
     assert.equal(body.error, 'PAYMENT_REQUIRED');
     assert.equal(body.challenge.payment_contract_id, contractId);
+
+    // Validate body strictly against X402ChallengeResponseSchema
+    const parsedChallenge = X402ChallengeResponseSchema.safeParse(body);
+    assert.equal(parsedChallenge.success, true, 'Response body must satisfy X402ChallengeResponseSchema');
+    if (parsedChallenge.success) {
+      assert.equal(parsedChallenge.data.status, 402);
+      assert.equal(parsedChallenge.data.error, 'PAYMENT_REQUIRED');
+      assert.equal(parsedChallenge.data.challenge.pay_to, payTo);
+      assert.equal(parsedChallenge.data.x402Version, 2);
+    }
+
+    // Negative schema verification
+    assert.equal(X402ChallengeResponseSchema.safeParse({ invalid: true }).success, false);
   });
 
-  await t.test('2. Cryptographic receipt generation and timing-safe verification', () => {
+  await t.test('2. Cryptographic receipt generation and timing-safe verification with 24h TTL', () => {
     const contractId = 'ct_402_abcdef0123456789';
     const secret = 'custom_secret_key_for_testing';
 
-    // Valid receipt
+    // Valid fresh receipt
     const receipt = generatePaymentReceipt(contractId, 2500, 'USD', secret);
     assert.ok(receipt.startsWith('rcpt_'), 'Receipt must start with rcpt_ prefix');
     assert.equal(verifyPaymentReceipt(receipt, secret), true, 'Valid receipt must verify cleanly');
+
+    // Receipt within 24h window (23 hours old)
+    const twentyThreeHoursAgo = Date.now() - 23 * 60 * 60 * 1000;
+    const freshReceipt = generatePaymentReceipt(contractId, 2500, 'USD', secret, twentyThreeHoursAgo);
+    assert.equal(verifyPaymentReceipt(freshReceipt, secret), true, 'Receipt within 24h must pass');
+
+    // Expired receipt (25 hours old exceeding 24h TTL)
+    const twentyFiveHoursAgo = Date.now() - 25 * 60 * 60 * 1000;
+    const expiredReceipt = generatePaymentReceipt(contractId, 2500, 'USD', secret, twentyFiveHoursAgo);
+    assert.equal(verifyPaymentReceipt(expiredReceipt, secret), false, 'Expired receipt (>24h) must fail');
+
+    // Future timestamp beyond clock skew (2 minutes in future)
+    const twoMinutesInFuture = Date.now() + 120000;
+    const futureReceipt = generatePaymentReceipt(contractId, 2500, 'USD', secret, twoMinutesInFuture);
+    assert.equal(verifyPaymentReceipt(futureReceipt, secret), false, 'Future timestamp beyond clock skew must fail');
 
     // Tampered payload
     const rawData = Buffer.from(receipt.slice(5), 'base64').toString('utf8');

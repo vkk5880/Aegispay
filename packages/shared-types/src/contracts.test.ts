@@ -33,6 +33,8 @@ import {
   AcpPaymentHandlerRequestSchema,
   AcpPaymentHandlerResponseSchema,
   AcpDiscountExtensionSchema,
+  X402PaymentContractSchema,
+  X402PaymentReceiptSchema,
 } from './index.js';
 
 test('SpendMandateSchema: validates valid mandate and enforces cap refinement', () => {
@@ -545,3 +547,97 @@ test('CustodianVerdictSchema: validates alignment, enforces float rejection on s
   };
   assert.equal(CustodianVerdictSchema.safeParse(validHold).success, true);
 });
+
+test('X402PaymentContractSchema & X402PaymentReceiptSchema: validates x402 specifications and receipts', () => {
+  // 1. Valid standard x402 core PaymentRequired contract
+  const standardX402Contract = {
+    x402Version: 2,
+    resource: {
+      url: 'https://aegispay.dev/api/procurement/checkout',
+      description: 'Autonomous multi-merchant procurement agent execution',
+      mimeType: 'application/json',
+      serviceName: 'AegisPay',
+      tags: ['agentic-commerce', 'paypal'],
+    },
+    accepts: [
+      {
+        scheme: 'exact',
+        network: 'paypal-sandbox',
+        asset: 'USD',
+        amount: '129.99',
+        payTo: 'payto://paypal/merchant@aegispay.dev',
+        maxTimeoutSeconds: 3600,
+        extra: { invoice_id: 'inv_12345' },
+      },
+    ],
+  };
+
+  const parsedStandard = X402PaymentContractSchema.safeParse(standardX402Contract);
+  assert.equal(parsedStandard.success, true);
+  if (parsedStandard.success) {
+    assert.equal(parsedStandard.data.x402Version, 2);
+    assert.equal(parsedStandard.data.accepts?.length, 1);
+    assert.equal(parsedStandard.data.resource?.serviceName, 'AegisPay');
+  }
+
+  // 2. Valid AegisPay interceptor 402 challenge contract
+  const aegispayX402Contract = {
+    x402Version: 2,
+    payment_contract_id: 'ct_402_987654321',
+    pay_to: 'payto://paypal/merchant@aegispay.dev?contract=ct_402_987654321',
+    vault_setup_url: 'https://www.sandbox.paypal.com/v3/vault/setup-tokens',
+    accepted_headers: ['X-Payment-Receipt', 'X-Spend-Mandate-Id', 'X-Synthetic-Voucher-Id'],
+    spend_policy: {
+      currency: 'USD',
+      mandate_protocol: 'Ed25519-SessionMandate-v1',
+      atomic_settlement: 'REDIS_LUA_PRE_RESERVED',
+      max_allowed_spend_cents: 100000,
+    },
+  };
+
+  const parsedAegis = X402PaymentContractSchema.safeParse(aegispayX402Contract);
+  assert.equal(parsedAegis.success, true);
+
+  // 3. Valid X402PaymentReceiptSchema
+  const validReceipt = {
+    contractId: 'ct_402_987654321',
+    amountCents: 5000,
+    currency: 'USD',
+    timestamp: Date.now(),
+    hmac: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    receipt_token: 'rcpt_eyJuYW1lIjoidGVzdCJ9',
+    x402Version: 2,
+  };
+
+  const parsedReceipt = X402PaymentReceiptSchema.safeParse(validReceipt);
+  assert.equal(parsedReceipt.success, true);
+
+  // 4. Invalid receipts: negative amount, too short HMAC, non-numeric timestamp
+  assert.equal(
+    X402PaymentReceiptSchema.safeParse({
+      ...validReceipt,
+      amountCents: -500,
+    }).success,
+    false,
+    'Negative amountCents must fail receipt validation'
+  );
+
+  assert.equal(
+    X402PaymentReceiptSchema.safeParse({
+      ...validReceipt,
+      hmac: 'too_short',
+    }).success,
+    false,
+    'HMAC shorter than 32 characters must fail receipt validation'
+  );
+
+  assert.equal(
+    X402PaymentReceiptSchema.safeParse({
+      ...validReceipt,
+      timestamp: 'not-a-number',
+    }).success,
+    false,
+    'Non-numeric timestamp must fail receipt validation'
+  );
+});
+

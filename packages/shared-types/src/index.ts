@@ -955,3 +955,69 @@ export const AcpPaymentHandlerResponseSchema = z.object({
 
 export type AcpPaymentHandlerResponse = z.infer<typeof AcpPaymentHandlerResponseSchema>;
 
+/**
+ * x402 Core Protocol Schemas
+ * Standardized HTTP 402 payment requirements, contracts, and cryptographic receipts
+ * Matching x402 payment specifications (v2) and AegisPay autonomous execution
+ */
+export const X402ResourceInfoSchema = z.object({
+  url: z.string(),
+  description: z.string().optional(),
+  mimeType: z.string().optional(),
+  serviceName: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  iconUrl: z.string().optional(),
+});
+
+export type X402ResourceInfo = z.infer<typeof X402ResourceInfoSchema>;
+
+export const X402PaymentRequirementsSchema = z.object({
+  scheme: z.string().default('exact'),
+  network: z.string().default('paypal-sandbox'),
+  asset: z.string().default('USD'),
+  amount: z.union([z.string(), z.number()]),
+  payTo: z.string(),
+  maxTimeoutSeconds: z.number().int().positive().default(86400),
+  extra: z.record(z.string(), z.any()).optional().default({}),
+});
+
+export type X402PaymentRequirements = z.infer<typeof X402PaymentRequirementsSchema>;
+
+export const X402SpendPolicySchema = z.object({
+  currency: z.string().default('USD'),
+  mandate_protocol: z.string().default('Ed25519-SessionMandate-v1'),
+  atomic_settlement: z.string().default('REDIS_LUA_PRE_RESERVED'),
+  max_allowed_spend_cents: z.number().int().positive().optional(),
+});
+
+export type X402SpendPolicy = z.infer<typeof X402SpendPolicySchema>;
+
+export const X402PaymentContractSchema = z.object({
+  x402Version: z.number().int().default(2),
+  error: z.string().optional(),
+  payment_contract_id: z.string().optional(),
+  pay_to: z.string().optional(),
+  resource: X402ResourceInfoSchema.optional(),
+  accepts: z.array(X402PaymentRequirementsSchema).optional().default([]),
+  vault_setup_url: z.string().optional(),
+  accepted_headers: z.array(z.string()).optional(),
+  spend_policy: X402SpendPolicySchema.optional(),
+  extensions: z.record(z.string(), z.any()).optional().default({}),
+  created_at: z.union([z.date(), z.string().datetime()]).optional().transform(v => typeof v === 'string' ? new Date(v) : (v || new Date())),
+});
+
+export type X402PaymentContract = z.infer<typeof X402PaymentContractSchema>;
+
+export const X402PaymentReceiptSchema = z.object({
+  contractId: z.string(),
+  amountCents: z.number().int().nonnegative(),
+  currency: z.string().default('USD'),
+  timestamp: z.number().int().positive(),
+  hmac: z.string().min(32),
+  receipt_token: z.string().optional(),
+  x402Version: z.number().int().default(2).optional(),
+});
+
+export type X402PaymentReceipt = z.infer<typeof X402PaymentReceiptSchema>;
+
+

@@ -85,6 +85,7 @@ if (process.argv[1] && (process.argv[1].endsWith('dist/index.js') || process.arg
 }
 
 export * from './services/paypal-apimatic.js';
+export * from './services/vault-onboarding.js';
 export * from './services/channel3.client.js';
 export * from './services/cart-solver.js';
 export * from './services/synthetic-intent.js';

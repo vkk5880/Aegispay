@@ -1,4 +1,10 @@
 import { PayPalApimaticClient, defaultPayPalClient } from './paypal-apimatic.js';
+import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
+
+/**
+ * Canonical constant identifier for PayPal Vault v3 payment tokens in autonomous agent workflows
+ */
+export const paypal_payment_token_id = 'paypal_payment_token_id';
 
 export interface VaultSetupSessionParams {
   customerId?: string;
@@ -23,6 +29,72 @@ export interface VaultConfirmResult {
   customer_id?: string;
   mandate_id?: string;
   vaulted_at: string;
+}
+
+export interface HeadlessAutoBuyParams {
+  paypal_payment_token_id?: string;
+  paymentTokenId?: string;
+  fallbackPaymentTokenId?: string;
+  mandateId?: string;
+  currency?: string;
+  totalCents: number;
+  subtotalCents?: number;
+  taxCents?: number;
+  shippingFeeCents?: number;
+  purchaseUnits?: Array<{
+    reference_id: string;
+    custom_id?: string;
+    invoice_id?: string;
+    amount: {
+      currency_code: string;
+      value: string;
+      breakdown?: {
+        item_total?: { currency_code: string; value: string };
+        shipping?: { currency_code: string; value: string };
+        tax_total?: { currency_code: string; value: string };
+        discount?: { currency_code: string; value: string };
+      };
+    };
+    items?: Array<{
+      name: string;
+      unit_amount: { currency_code: string; value: string };
+      quantity: string;
+      sku?: string;
+      category?: 'DIGITAL_GOODS' | 'PHYSICAL_GOODS' | 'DONATION';
+    }>;
+    payee?: {
+      email_address?: string;
+      merchant_id?: string;
+    };
+    description?: string;
+  }>;
+  sessionId?: string;
+  payPalRequestId?: string;
+  maxRetries?: number;
+  initialBackoffMs?: number;
+  merchantDomain?: string;
+  enforceCompensatingRollback?: boolean;
+}
+
+export interface HeadlessAutoBuyResult {
+  status: 'COMPLETED';
+  orderId: string;
+  captureId: string;
+  intent: 'CAPTURE';
+  paymentTokenId: string;
+  paypal_payment_token_id: string;
+  readBackVerified: boolean;
+  order: any;
+  completedAt: string;
+  retriesAttempted: number;
+  recovered: boolean;
+  executionHistory: Array<{
+    attempt: number;
+    timestamp: string;
+    status: 'ATTEMPT_FAILED' | 'SUCCESS';
+    error?: string;
+    tokenUsed: string;
+  }>;
 }
 
 export class VaultOnboardingService {
@@ -169,7 +241,7 @@ export class VaultOnboardingService {
     completedAt: string;
   }> {
     // 1. Resolve vaulted payment token
-    let effectiveTokenId = params.paymentTokenId;
+    let effectiveTokenId = params.paymentTokenId || (params as any).paypal_payment_token_id;
     if (!effectiveTokenId && params.mandateId) {
       const storedToken = this.getVaultedTokenForMandate(params.mandateId);
       if (storedToken) {
@@ -261,6 +333,119 @@ export class VaultOnboardingService {
       completedAt: new Date().toISOString(),
     };
   }
+
+  /**
+   * Autonomous Headless Auto-Buy using Vault v3 paypal_payment_token_id:
+   * Coordinates zero-click off-session agent purchasing with exponential retry backoff,
+   * autonomous payment token resubmission upon transient decline, and compensating
+   * rollback via AtomicSpendEnforcer if reservation is held and execution fails.
+   */
+  async executeHeadlessAutoBuy(params: HeadlessAutoBuyParams): Promise<HeadlessAutoBuyResult> {
+    const maxRetries = params.maxRetries ?? 2;
+    const initialBackoffMs = params.initialBackoffMs ?? 25;
+    const enforceRollback = params.enforceCompensatingRollback !== false;
+
+    // 1. Resolve initial payment token
+    let activeToken = params.paypal_payment_token_id || params.paymentTokenId;
+    if (!activeToken && params.mandateId) {
+      const stored = this.getVaultedTokenForMandate(params.mandateId);
+      if (stored) {
+        activeToken = stored.paypal_payment_token_id;
+      }
+    }
+    if (!activeToken) {
+      activeToken = `pm_tok_${Date.now()}`;
+    }
+
+    const executionHistory: HeadlessAutoBuyResult['executionHistory'] = [];
+    let lastError: any = null;
+    let attempt = 0;
+
+    while (attempt <= maxRetries) {
+      attempt++;
+      // Autonomous recovery: if retry attempt and a fallback payment token was provided, resubmit with fallback token
+      const currentToken = (attempt > 1 && params.fallbackPaymentTokenId)
+        ? params.fallbackPaymentTokenId
+        : activeToken;
+
+      try {
+        const checkoutResult = await this.executeDelegatedCheckout({
+          paymentTokenId: currentToken,
+          mandateId: params.mandateId,
+          currency: params.currency,
+          totalCents: params.totalCents,
+          subtotalCents: params.subtotalCents,
+          taxCents: params.taxCents,
+          shippingFeeCents: params.shippingFeeCents,
+          purchaseUnits: params.purchaseUnits,
+          sessionId: params.sessionId,
+          payPalRequestId: params.payPalRequestId ? `${params.payPalRequestId}-att${attempt}` : undefined,
+        });
+
+        executionHistory.push({
+          attempt,
+          timestamp: new Date().toISOString(),
+          status: 'SUCCESS',
+          tokenUsed: currentToken,
+        });
+
+        return {
+          ...checkoutResult,
+          paypal_payment_token_id: currentToken,
+          retriesAttempted: attempt - 1,
+          recovered: attempt > 1,
+          executionHistory,
+        };
+      } catch (err: any) {
+        lastError = err;
+        executionHistory.push({
+          attempt,
+          timestamp: new Date().toISOString(),
+          status: 'ATTEMPT_FAILED',
+          error: err?.message || String(err),
+          tokenUsed: currentToken,
+        });
+
+        // Exponential backoff sleep before next retry attempt
+        if (attempt <= maxRetries) {
+          const delay = initialBackoffMs * Math.pow(2, attempt - 1);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    }
+
+    // Retries exhausted: trigger compensating rollback on reservation hold
+    if (enforceRollback && params.mandateId) {
+      try {
+        await defaultAtomicSpendEnforcer.rollbackReservation(
+          params.mandateId,
+          params.totalCents,
+          params.merchantDomain
+        );
+      } catch (rollbackErr) {
+        // Rollback failure handled gracefully
+      }
+    }
+
+    const failureError = new Error(
+      `Autonomous Headless Auto-Buy failed after ${attempt} attempts: ${lastError?.message || 'Unknown error'}`
+    );
+    (failureError as any).cause = lastError;
+    (failureError as any).executionHistory = executionHistory;
+    (failureError as any).name = lastError?.name || 'HeadlessAutoBuyError';
+    (failureError as any).paypal_payment_token_id = activeToken;
+    throw failureError;
+  }
 }
 
 export const defaultVaultOnboardingService = new VaultOnboardingService();
+
+/**
+ * Autonomous Headless Auto-Buy entry point
+ */
+export async function executeHeadlessAutoBuy(
+  params: HeadlessAutoBuyParams,
+  vaultService: VaultOnboardingService = defaultVaultOnboardingService
+): Promise<HeadlessAutoBuyResult> {
+  return vaultService.executeHeadlessAutoBuy(params);
+}

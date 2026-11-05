@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { PayPalApimaticClient } from './paypal-apimatic.js';
-import { VaultOnboardingService } from './vault-onboarding.js';
+import {
+  VaultOnboardingService,
+  executeHeadlessAutoBuy,
+  paypal_payment_token_id,
+} from './vault-onboarding.js';
+import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 
 test('Vault v3 Setup Token Creation: Mints setup token with usage_type MERCHANT for consumer onboarding', async () => {
   const paypalClient = new PayPalApimaticClient();
@@ -180,4 +185,147 @@ test('Delegated Headless Auto-Buy: supports custom multi-purchase units across m
   assert.ok(checkoutResult.captureId);
   assert.equal(checkoutResult.paymentTokenId, 'vault_direct_tok_888');
   assert.equal(checkoutResult.readBackVerified, true);
+});
+
+test('Autonomous Headless Auto-Buy (a2a-x402): Happy path autonomous checkout without human presence', async () => {
+  assert.equal(paypal_payment_token_id, 'paypal_payment_token_id');
+  const paypalClient = new PayPalApimaticClient();
+  const vaultService = new VaultOnboardingService(paypalClient);
+
+  // Register pre-authorized mandate vault token
+  vaultService.registerVaultedToken({
+    paypal_payment_token_id: 'vault_pm_tok_headless_100',
+    setup_token_id: 'setup_tok_headless_100',
+    status: 'VAULTED',
+    mandate_id: 'mandate_autonomous_buyer_01',
+    customer_id: 'cust_auto_01',
+    vaulted_at: new Date().toISOString(),
+  });
+
+  const buyResult = await vaultService.executeHeadlessAutoBuy({
+    mandateId: 'mandate_autonomous_buyer_01',
+    paypal_payment_token_id: 'vault_pm_tok_headless_100',
+    currency: 'USD',
+    totalCents: 8900,
+    sessionId: 'cs_headless_happy_01',
+    maxRetries: 2,
+    initialBackoffMs: 10,
+  });
+
+  assert.equal(buyResult.status, 'COMPLETED');
+  assert.ok(buyResult.orderId);
+  assert.ok(buyResult.captureId);
+  assert.equal(buyResult.intent, 'CAPTURE');
+  assert.equal(buyResult.paypal_payment_token_id, 'vault_pm_tok_headless_100');
+  assert.equal(buyResult.readBackVerified, true);
+  assert.equal(buyResult.retriesAttempted, 0);
+  assert.equal(buyResult.recovered, false);
+  assert.equal(buyResult.executionHistory.length, 1);
+  assert.equal(buyResult.executionHistory[0].status, 'SUCCESS');
+  assert.equal(buyResult.executionHistory[0].attempt, 1);
+
+  // Also verify standalone executeHeadlessAutoBuy function
+  const standaloneResult = await executeHeadlessAutoBuy({
+    mandateId: 'mandate_autonomous_buyer_01',
+    paypal_payment_token_id: 'vault_pm_tok_headless_100',
+    totalCents: 4500,
+    maxRetries: 1,
+    initialBackoffMs: 5,
+  }, vaultService);
+
+  assert.equal(standaloneResult.status, 'COMPLETED');
+  assert.equal(standaloneResult.retriesAttempted, 0);
+});
+
+test('Autonomous Headless Auto-Buy (a2a-x402): Autonomous retry backoff and payment token resubmission', async () => {
+  let callCount = 0;
+  const mockPayPalClient = new PayPalApimaticClient();
+  const originalCreateOrder = mockPayPalClient.createOrder.bind(mockPayPalClient);
+
+  // Mock initial failure to trigger retry backoff and token resubmission
+  mockPayPalClient.createOrder = async (params: any) => {
+    callCount++;
+    if (callCount === 1) {
+      const err = new Error('PAYMENT_SOURCE_DECLINED: Payment token expired or unauthorized');
+      (err as any).name = 'PAYMENT_SOURCE_DECLINED';
+      throw err;
+    }
+    return originalCreateOrder(params);
+  };
+
+  const vaultService = new VaultOnboardingService(mockPayPalClient);
+
+  const retryResult = await vaultService.executeHeadlessAutoBuy({
+    paypal_payment_token_id: 'primary_expired_tok',
+    fallbackPaymentTokenId: 'backup_valid_pm_tok_999',
+    currency: 'USD',
+    totalCents: 15000,
+    sessionId: 'cs_retry_recovery_01',
+    maxRetries: 2,
+    initialBackoffMs: 15,
+  });
+
+  assert.equal(retryResult.status, 'COMPLETED');
+  assert.equal(retryResult.retriesAttempted, 1);
+  assert.equal(retryResult.recovered, true);
+  assert.equal(retryResult.paypal_payment_token_id, 'backup_valid_pm_tok_999');
+  assert.equal(retryResult.readBackVerified, true);
+  assert.equal(retryResult.executionHistory.length, 2);
+  assert.equal(retryResult.executionHistory[0].status, 'ATTEMPT_FAILED');
+  assert.equal(retryResult.executionHistory[0].tokenUsed, 'primary_expired_tok');
+  assert.equal(retryResult.executionHistory[1].status, 'SUCCESS');
+  assert.equal(retryResult.executionHistory[1].tokenUsed, 'backup_valid_pm_tok_999');
+});
+
+test('Autonomous Headless Auto-Buy (a2a-x402): Error handling, retry exhaustion, and compensating rollback', async () => {
+  const mockPayPalClient = new PayPalApimaticClient();
+  mockPayPalClient.createOrder = async () => {
+    const err = new Error('INSTRUMENT_DECLINED: Payment source was declined by issuing bank.');
+    (err as any).name = 'INSTRUMENT_DECLINED';
+    throw err;
+  };
+
+  let rollbackCalled = false;
+  let rollbackMandateId = '';
+  let rollbackCents = 0;
+
+  const originalRollback = defaultAtomicSpendEnforcer.rollbackReservation.bind(defaultAtomicSpendEnforcer);
+  defaultAtomicSpendEnforcer.rollbackReservation = async (mandateId: any, amountCents: any, domain?: any) => {
+    rollbackCalled = true;
+    rollbackMandateId = String(mandateId);
+    rollbackCents = Number(amountCents);
+    return true;
+  };
+
+  const vaultService = new VaultOnboardingService(mockPayPalClient);
+
+  try {
+    await assert.rejects(
+      async () => {
+        await vaultService.executeHeadlessAutoBuy({
+          mandateId: 'mandate_fail_decline_402',
+          paypal_payment_token_id: 'failing_tok_decline',
+          currency: 'USD',
+          totalCents: 9500,
+          maxRetries: 2,
+          initialBackoffMs: 10,
+          merchantDomain: 'declining-store.com',
+          enforceCompensatingRollback: true,
+        });
+      },
+      (err: any) => {
+        assert.ok(err.message.includes('Autonomous Headless Auto-Buy failed after 3 attempts'));
+        assert.equal(err.name, 'INSTRUMENT_DECLINED');
+        assert.equal(err.executionHistory.length, 3);
+        assert.equal(err.executionHistory.every((h: any) => h.status === 'ATTEMPT_FAILED'), true);
+        return true;
+      }
+    );
+
+    assert.equal(rollbackCalled, true, 'Compensating rollback must be triggered on retry exhaustion');
+    assert.equal(rollbackMandateId, 'mandate_fail_decline_402');
+    assert.equal(rollbackCents, 9500);
+  } finally {
+    defaultAtomicSpendEnforcer.rollbackReservation = originalRollback;
+  }
 });
