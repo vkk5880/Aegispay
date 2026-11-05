@@ -340,3 +340,42 @@ export function createVerifyAndCheckoutTool(channel3Client: Channel3Client = def
     },
   });
 }
+
+/**
+ * Mastra Tool: execute_escrow_hold
+ * Executes Two-Phase Commit (2PC) inventory hold and escrow reservation verification.
+ */
+export function createExecuteEscrowHoldTool(channel3Client: Channel3Client = defaultChannel3Client) {
+  return createTool({
+    id: 'execute_escrow_hold',
+    description: 'Performs Two-Phase Commit (2PC) inventory hold verification prior to escrow authorization',
+    inputSchema: z.object({
+      product_ids: z.array(z.string()).min(1),
+      budget_cap_cents: z.number().int().positive().optional(),
+      zip_code: z.string().optional(),
+    }),
+    outputSchema: z.object({
+      all_held: z.boolean(),
+      reservation_id: z.string(),
+      failed_items: z.array(z.string()),
+      expires_at: z.string().optional(),
+    }),
+    execute: async (input: any) => {
+      const args = input?.context || input;
+      const { product_ids, budget_cap_cents, zip_code } = args;
+      const targetIds: string[] = product_ids || [];
+      const stockItems = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
+      const stockRes = await channel3Client.verifyAndHoldStock(stockItems, {
+        zipCode: zip_code,
+        budgetCapCents: budget_cap_cents,
+      });
+
+      return {
+        all_held: stockRes.all_held,
+        reservation_id: stockRes.reservation_id,
+        failed_items: stockRes.failed_items,
+        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      };
+    },
+  });
+}

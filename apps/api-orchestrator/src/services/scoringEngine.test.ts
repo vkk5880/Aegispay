@@ -2,6 +2,13 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert';
 import {
   MurthyroshanScoringEngine,
+  ScoringEngine,
+  rankItems,
+  WEIGHT_PRESETS,
+  merchantReputationWeight,
+  REPUTATION_FIRST,
+  computeScore,
+  priceAffinityScore,
   computeCosineSimilarity,
   computePriceAffinity,
   computeMerchantReputation,
@@ -10,6 +17,9 @@ import {
   computeDealVerdict,
   defaultScoringEngine,
   SCORING_WEIGHT_PRESETS,
+  assignProductBadges,
+  ProductBadge,
+  RankedProductItem,
 } from './scoring-engine.js';
 import { Channel3ProductDetail } from './channel3.client.js';
 
@@ -273,5 +283,266 @@ describe('Task 26: Murthyroshan Deterministic Mathematical Scoring Engine', () =
     // Top Rated Merchant badge should be on prod_sony_xm5 (official store)
     const sonyItem = results.find(r => r.product_id === 'prod_sony_xm5');
     assert.ok(sonyItem?.badges?.some(b => b.label === 'Top Rated Merchant'));
+  });
+
+  test('Subagent 3A: computeScore verifies pure deterministic utility math formula: Score = w1*Cosine + w2*Price + w3*Rep - w4*Shipping', () => {
+    // 1. Full 1.0 components with default weights (0.35 + 0.35 + 0.20 - 0.10*0 = 0.90)
+    const score1 = computeScore(1.0, 1.0, 1.0, 0.0);
+    assert.strictEqual(score1, 0.90);
+
+    // 2. Full 1.0 components with full shipping penalty (0.35 + 0.35 + 0.20 - 0.10*1.0 = 0.80)
+    const score2 = computeScore(1.0, 1.0, 1.0, 1.0);
+    assert.strictEqual(score2, 0.80);
+
+    // 3. Realistic components: Cosine 0.8, Price 0.9, Rep 0.95, Ship 0.2
+    // w1=0.35, w2=0.35, w3=0.20, w4=0.10
+    // Expected = 0.35*0.8 + 0.35*0.9 + 0.20*0.95 - 0.10*0.2
+    //          = 0.28 + 0.315 + 0.19 - 0.02 = 0.765
+    const score3 = computeScore(0.8, 0.9, 0.95, 0.2);
+    assert.strictEqual(score3, 0.765);
+
+    // 4. Object argument form
+    const scoreObj = computeScore({
+      cosineSim: 0.8,
+      priceAffinity: 0.9,
+      reputation: 0.95,
+      shippingPenalty: 0.2,
+    });
+    assert.strictEqual(scoreObj, 0.765);
+
+    // 5. Custom weights object: 50% cosine, 30% price, 15% rep, 5% ship
+    // 0.50*1.0 + 0.30*0.5 + 0.15*0.8 - 0.05*0.1 = 0.50 + 0.15 + 0.12 - 0.005 = 0.765
+    const scoreCustom = computeScore(1.0, 0.5, 0.8, 0.1, {
+      w1_cosine: 0.50,
+      w2_price: 0.30,
+      w3_reputation: 0.15,
+      w4_shipping: 0.05,
+    });
+    assert.strictEqual(scoreCustom, 0.765);
+
+    // 6. Guaranteed 0% LLM math hallucination: repeated runs produce identical deterministic numbers
+    for (let i = 0; i < 50; i++) {
+      assert.strictEqual(computeScore(0.8, 0.9, 0.95, 0.2), 0.765);
+    }
+  });
+
+  test('Subagent 3A: rankItems and ScoringEngine class export verification', () => {
+    const context = {
+      query: 'Sony WH-1000XM5 wireless noise cancelling headphones',
+      target_price_cents: 35000,
+    };
+
+    // 1. Standalone rankItems function export
+    const rankedViaFn = rankItems(sampleProducts, context);
+    assert.strictEqual(rankedViaFn.length, 3);
+    assert.strictEqual(rankedViaFn[0].product_id, 'prod_sony_xm5');
+
+    // 2. ScoringEngine class instantiation and rankItems method
+    const customEngine = new ScoringEngine();
+    const rankedViaClassMethod = customEngine.rankItems(sampleProducts, context);
+    assert.strictEqual(rankedViaClassMethod.length, 3);
+    assert.strictEqual(rankedViaClassMethod[0].product_id, 'prod_sony_xm5');
+
+    // 3. Verify rankItems output is identical across both paths
+    assert.strictEqual(rankedViaFn[0].score, rankedViaClassMethod[0].score);
+    assert.strictEqual(rankedViaFn[1].product_id, rankedViaClassMethod[1].product_id);
+    assert.strictEqual(rankedViaFn[2].product_id, rankedViaClassMethod[2].product_id);
+  });
+
+  test('Subagent 3A: priceAffinityScore calculation and boundary checks', () => {
+    // Exact target match
+    assert.strictEqual(priceAffinityScore(35000, 35000), 1.0);
+
+    // 10% deviation below or above target
+    assert.strictEqual(priceAffinityScore(38500, 35000), 0.9);
+    assert.strictEqual(priceAffinityScore(31500, 35000), 0.9);
+
+    // 50% deviation
+    assert.strictEqual(priceAffinityScore(52500, 35000), 0.5);
+
+    // 100% deviation or more clamps to 0.0
+    assert.strictEqual(priceAffinityScore(70000, 35000), 0.0);
+    assert.strictEqual(priceAffinityScore(140000, 35000), 0.0);
+
+    // Undefined or non-positive target defaults to 1.0 neutral
+    assert.strictEqual(priceAffinityScore(35000, undefined), 1.0);
+    assert.strictEqual(priceAffinityScore(35000, 0), 1.0);
+  });
+
+  test('Subagent 3A: merchantReputationWeight evaluation across tiers and domain strings', () => {
+    const tier1Offer = sampleProducts[0].offers[0];
+    const repTier1 = merchantReputationWeight(tier1Offer);
+    assert.strictEqual(repTier1.tier, 'tier1');
+    assert.strictEqual(repTier1.multiplier, 1.12);
+    assert.ok(repTier1.reputation >= 0.9);
+
+    // ValueOf / numeric coercion support
+    assert.ok(Number(repTier1) >= 0.9);
+    assert.strictEqual(repTier1.valueOf(), repTier1.reputation);
+
+    // Direct domain string overload
+    const repSonyDomain = merchantReputationWeight('sony.com');
+    assert.strictEqual(repSonyDomain.tier, 'tier1');
+
+    const repAmazonDomain = merchantReputationWeight('amazon.com');
+    assert.strictEqual(repAmazonDomain.tier, 'tier2_high');
+
+    const repUnknownDomain = merchantReputationWeight('shady-deals.xyz');
+    assert.strictEqual(repUnknownDomain.tier, 'unknown');
+  });
+
+  test('Subagent 3A: WEIGHT_PRESETS and REPUTATION_FIRST exports', () => {
+    assert.strictEqual(WEIGHT_PRESETS, SCORING_WEIGHT_PRESETS);
+    assert.strictEqual(REPUTATION_FIRST, SCORING_WEIGHT_PRESETS.REPUTATION_FIRST);
+
+    // Verify REPUTATION_FIRST gives 45% weight to merchant reputation
+    assert.strictEqual(REPUTATION_FIRST.w3_reputation, 0.45);
+    assert.strictEqual(REPUTATION_FIRST.w1_cosine, 0.25);
+    assert.strictEqual(REPUTATION_FIRST.w2_price, 0.20);
+    assert.strictEqual(REPUTATION_FIRST.w4_shipping, 0.10);
+
+    // Verify all 4 presets exist in WEIGHT_PRESETS
+    assert.ok(WEIGHT_PRESETS.DEFAULT);
+    assert.ok(WEIGHT_PRESETS.BUDGET_CONSCIOUS);
+    assert.ok(WEIGHT_PRESETS.SPEED_FIRST);
+    assert.ok(WEIGHT_PRESETS.REPUTATION_FIRST);
+  });
+
+  test('Subagent 3B: assignProductBadges awards Price Leader, Best Value, Top Rated Merchant, and Fastest Delivery', () => {
+    const rawItems: RankedProductItem[] = [
+      {
+        product_id: 'item_a',
+        title: 'Sony Premium Headphones',
+        description: 'Noise cancelling',
+        category_id: 'audio',
+        selected_offer: {
+          id: 'off_a',
+          product_id: 'item_a',
+          domain: 'sony.com',
+          price: 35000,
+          compare_at_price: 39900,
+          max_commission_rate: 0.1,
+          merchant_anomaly_score: 0.02,
+          stock_status: 'IN_STOCK',
+        },
+        score: 0.95,
+        deal_verdict: { verdict_text: 'Excellent deal. Buy now.', verdict_colour: '#34d399' },
+        score_breakdown: {
+          cosine_similarity: 0.95,
+          price_affinity: 0.90,
+          reputation_score: 0.98, // Highest reputation -> Top Rated Merchant
+          shipping_penalty: 0.40,
+          raw_score: 0.85,
+        },
+        price_anomaly: { is_suspicious: false, deviation_pct: 0, median_price_cents: 25000 },
+      },
+      {
+        product_id: 'item_b',
+        title: 'Bose Value Headphones',
+        description: 'Compact comfort',
+        category_id: 'audio',
+        selected_offer: {
+          id: 'off_b',
+          product_id: 'item_b',
+          domain: 'amazon.com',
+          price: 15000,
+          compare_at_price: 22000,
+          max_commission_rate: 0.08,
+          merchant_anomaly_score: 0.05,
+          stock_status: 'IN_STOCK',
+        },
+        score: 0.90, // Ratio 0.90 / 15000 = 0.00006 -> highest ratio -> Best Value
+        deal_verdict: { verdict_text: 'Excellent deal. Buy now.', verdict_colour: '#34d399' },
+        score_breakdown: {
+          cosine_similarity: 0.85,
+          price_affinity: 0.92,
+          reputation_score: 0.85,
+          shipping_penalty: 0.10, // Lowest penalty -> Fastest Delivery
+          raw_score: 0.82,
+        },
+        price_anomaly: { is_suspicious: false, deviation_pct: 0, median_price_cents: 25000 },
+      },
+      {
+        product_id: 'item_c',
+        title: 'Budget Audio In-Ear',
+        description: 'Ultra affordable earbuds',
+        category_id: 'audio',
+        selected_offer: {
+          id: 'off_c',
+          product_id: 'item_c',
+          domain: 'deals.com',
+          price: 2900, // Lowest price -> Price Leader
+          compare_at_price: 5000,
+          max_commission_rate: 0.05,
+          merchant_anomaly_score: 0.15,
+          stock_status: 'IN_STOCK',
+        },
+        score: 0.10, // Ratio 0.10 / 3000 = 0.000033 -> lower than item_b (0.000060)
+        deal_verdict: { verdict_text: 'Decent pick.', verdict_colour: '#fbbf24' },
+        score_breakdown: {
+          cosine_similarity: 0.30,
+          price_affinity: 0.50,
+          reputation_score: 0.60,
+          shipping_penalty: 0.50,
+          raw_score: 0.10,
+        },
+        price_anomaly: { is_suspicious: false, deviation_pct: 0, median_price_cents: 25000 },
+      },
+      {
+        product_id: 'item_eliminated',
+        title: 'Avoided Brand Counterfeit',
+        description: 'Should not get positive badges',
+        category_id: 'audio',
+        selected_offer: {
+          id: 'off_elim',
+          product_id: 'item_eliminated',
+          domain: 'shady.xyz',
+          price: 1000,
+          compare_at_price: 1000,
+          max_commission_rate: 0.0,
+          merchant_anomaly_score: 0.99,
+          stock_status: 'IN_STOCK',
+        },
+        score: 0.0,
+        deal_verdict: { verdict_text: 'Overpriced.', verdict_colour: '#f87171' },
+        score_breakdown: {
+          cosine_similarity: 0.0,
+          price_affinity: 0.0,
+          reputation_score: 0.0,
+          shipping_penalty: 1.0,
+          raw_score: 0.0,
+        },
+        price_anomaly: { is_suspicious: true, deviation_pct: 90, median_price_cents: 25000 },
+        eliminated: true,
+        elimination_reason: 'Avoided brand',
+      },
+    ];
+
+    const badged = assignProductBadges(rawItems);
+    assert.strictEqual(badged.length, 4);
+
+    // 1. Price Leader on cheapest active candidate (item_c @ $29.00)
+    const itemC = badged.find(i => i.product_id === 'item_c');
+    assert.ok(itemC?.badges?.some(b => b.label === 'Price Leader'));
+
+    // 2. Best Value on highest utility score / price ratio (item_b)
+    const itemB = badged.find(i => i.product_id === 'item_b');
+    assert.ok(itemB?.badges?.some(b => b.label === 'Best Value'));
+
+    // 3. Top Rated Merchant on highest reputation score (item_a from sony.com)
+    const itemA = badged.find(i => i.product_id === 'item_a');
+    assert.ok(itemA?.badges?.some(b => b.label === 'Top Rated Merchant'));
+
+    // 4. Fastest Delivery on lowest shipping penalty (item_b @ 0.10)
+    assert.ok(itemB?.badges?.some(b => b.label === 'Fastest Delivery'));
+
+    // 5. Eliminated item receives no positive badges
+    const elim = badged.find(i => i.product_id === 'item_eliminated');
+    assert.strictEqual(elim?.badges?.length, 0);
+
+    // 6. Single item overload signature: assignProductBadges(item, allItems)
+    const singleResult = assignProductBadges(rawItems[0], rawItems);
+    assert.strictEqual(singleResult.product_id, 'item_a');
+    assert.ok(singleResult.badges?.some(b => b.label === 'Top Rated Merchant'));
   });
 });

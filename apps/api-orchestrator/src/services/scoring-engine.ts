@@ -49,6 +49,8 @@ export const SCORING_WEIGHT_PRESETS: Record<ScoringPreset, ScoringWeights> = {
   },
 };
 
+export const WEIGHT_PRESETS = SCORING_WEIGHT_PRESETS;
+export const REPUTATION_FIRST = SCORING_WEIGHT_PRESETS.REPUTATION_FIRST;
 export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = SCORING_WEIGHT_PRESETS.DEFAULT;
 
 export interface ScoringQueryContext {
@@ -83,6 +85,7 @@ export interface ProductBadge {
   label: 'Best Value' | 'Fastest Delivery' | 'Top Rated Merchant' | 'Price Leader' | string;
   color: string;
   description?: string;
+  note?: string;
 }
 
 export interface RankedProductItem {
@@ -222,13 +225,24 @@ export function computePriceAffinity(priceCents: number, targetPriceCents?: numb
   return Math.min(1.0, affinity);
 }
 
+export const priceAffinityScore = computePriceAffinity;
+
+export interface MerchantReputationResult {
+  reputation: number;
+  tier: string;
+  multiplier: number;
+  valueOf(): number;
+}
+
 /**
  * Merchant reputation weighting:
  * Combines domain tier heuristics and Channel3 merchant_anomaly_score.
  * Returns float in [0.0, 1.0].
  */
-export function computeMerchantReputation(offer: Channel3Offer): { reputation: number; tier: string; multiplier: number } {
-  const domain = (offer.domain || '').toLowerCase();
+export function computeMerchantReputation(
+  offer: Channel3Offer | { domain?: string; merchant_anomaly_score?: number }
+): MerchantReputationResult {
+  const domain = (offer?.domain || '').toLowerCase();
   let tier = 'unknown';
   let multiplier = STORE_TRUST_TIERS.unknown.multiplier;
   let baseRep = STORE_TRUST_TIERS.unknown.base_reputation;
@@ -248,7 +262,7 @@ export function computeMerchantReputation(offer: Channel3Offer): { reputation: n
   }
 
   // Factor in merchant_anomaly_score if present in Channel3 offer (0 = safe, 1 = fraudulent)
-  const anomalyScore = offer.merchant_anomaly_score ?? (1.0 - baseRep);
+  const anomalyScore = offer?.merchant_anomaly_score ?? (1.0 - baseRep);
   const anomalyAdjustedReputation = Math.max(0.0, Math.min(1.0, 1.0 - anomalyScore));
 
   // Blend base tier reputation with anomaly check
@@ -258,7 +272,19 @@ export function computeMerchantReputation(offer: Channel3Offer): { reputation: n
     reputation: finalRep,
     tier,
     multiplier,
+    valueOf() {
+      return finalRep;
+    },
   };
+}
+
+export function merchantReputationWeight(
+  offerOrDomain: Channel3Offer | { domain?: string; merchant_anomaly_score?: number } | string
+): MerchantReputationResult {
+  if (typeof offerOrDomain === 'string') {
+    return computeMerchantReputation({ domain: offerOrDomain });
+  }
+  return computeMerchantReputation(offerOrDomain);
 }
 
 /**
@@ -313,7 +339,187 @@ export function detectPriceAnomaly(
   };
 }
 
+export interface ComputeScoreInput {
+  cosineSim?: number;
+  cosine_similarity?: number;
+  priceAffinity?: number;
+  price_affinity?: number;
+  reputation?: number;
+  reputation_score?: number;
+  shippingPenalty?: number;
+  shipping_penalty?: number;
+  weights?: Partial<ScoringWeights>;
+}
+
+/**
+ * Pure deterministic multi-attribute composite utility formula:
+ * Score = w1 * CosineSim + w2 * PriceAffinity + w3 * Reputation - w4 * ShippingPenalty
+ * Guaranteed 0% LLM math hallucination.
+ */
+export function computeScore(
+  cosineOrInput: number | ComputeScoreInput,
+  priceAffinity?: number,
+  reputation?: number,
+  shippingPenalty?: number,
+  weights?: Partial<ScoringWeights>
+): number {
+  let c = 0;
+  let p = 0;
+  let r = 0;
+  let s = 0;
+  let w = DEFAULT_SCORING_WEIGHTS;
+
+  if (typeof cosineOrInput === 'object' && cosineOrInput !== null) {
+    c = cosineOrInput.cosineSim ?? cosineOrInput.cosine_similarity ?? 0;
+    p = cosineOrInput.priceAffinity ?? cosineOrInput.price_affinity ?? 0;
+    r = cosineOrInput.reputation ?? cosineOrInput.reputation_score ?? 0;
+    s = cosineOrInput.shippingPenalty ?? cosineOrInput.shipping_penalty ?? 0;
+    if (cosineOrInput.weights) {
+      w = { ...DEFAULT_SCORING_WEIGHTS, ...cosineOrInput.weights };
+    }
+  } else {
+    c = typeof cosineOrInput === 'number' ? cosineOrInput : 0;
+    p = priceAffinity ?? 0;
+    r = reputation ?? 0;
+    s = shippingPenalty ?? 0;
+    if (weights) {
+      w = { ...DEFAULT_SCORING_WEIGHTS, ...weights };
+    }
+  }
+
+  const rawScore =
+    (w.w1_cosine * c) +
+    (w.w2_price * p) +
+    (w.w3_reputation * r) -
+    (w.w4_shipping * s);
+
+  return Math.max(0.0, Math.min(1.0, Math.round(rawScore * 10000) / 10000));
+}
+
+/**
+ * Assigns trust and recognition badges across scored products based on comparative metrics.
+ * Badges awarded:
+ * - 'Price Leader': Lowest upfront price among active items
+ * - 'Best Value': Highest utility score to price ratio
+ * - 'Top Rated Merchant': Highest merchant reputation score (tier 1 official / high trust)
+ * - 'Fastest Delivery': Lowest shipping penalty / expedited delivery
+ */
+export function assignProductBadges(
+  items: RankedProductItem[]
+): RankedProductItem[];
+export function assignProductBadges(
+  item: RankedProductItem,
+  allItems: RankedProductItem[]
+): RankedProductItem;
+export function assignProductBadges(
+  input: RankedProductItem[] | RankedProductItem,
+  allScored?: RankedProductItem[]
+): RankedProductItem[] | RankedProductItem {
+  if (Array.isArray(input)) {
+    const activeCandidates = input.filter(item => !item.eliminated);
+    for (const item of input) {
+      item.badges = item.badges || [];
+    }
+
+    if (activeCandidates.length > 0) {
+      // 1. Price Leader: Lowest price among active items
+      let minPriceItem = activeCandidates[0];
+      for (const item of activeCandidates) {
+        if (item.selected_offer.price < minPriceItem.selected_offer.price) {
+          minPriceItem = item;
+        }
+      }
+      minPriceItem.badges = minPriceItem.badges || [];
+      if (!minPriceItem.badges.some(b => b.label === 'Price Leader')) {
+        minPriceItem.badges.push({
+          label: 'Price Leader',
+          color: '#e8a045',
+          description: 'Lowest upfront price among verified offerings',
+        });
+      }
+
+      // 2. Best Value: Highest utility score to price ratio
+      let bestValueItem = activeCandidates[0];
+      let bestValueRatio = bestValueItem.score / (bestValueItem.selected_offer.price || 1);
+      for (const item of activeCandidates) {
+        const ratio = item.score / (item.selected_offer.price || 1);
+        if (ratio > bestValueRatio) {
+          bestValueRatio = ratio;
+          bestValueItem = item;
+        }
+      }
+      bestValueItem.badges = bestValueItem.badges || [];
+      if (!bestValueItem.badges.some(b => b.label === 'Best Value')) {
+        bestValueItem.badges.push({
+          label: 'Best Value',
+          color: '#00d4aa',
+          description: 'Optimal balance of utility score, features, and price',
+        });
+      }
+
+      // 3. Top Rated Merchant: Highest merchant reputation score
+      let topMerchantItem = activeCandidates[0];
+      for (const item of activeCandidates) {
+        if (item.score_breakdown.reputation_score > topMerchantItem.score_breakdown.reputation_score) {
+          topMerchantItem = item;
+        }
+      }
+      topMerchantItem.badges = topMerchantItem.badges || [];
+      if (!topMerchantItem.badges.some(b => b.label === 'Top Rated Merchant')) {
+        topMerchantItem.badges.push({
+          label: 'Top Rated Merchant',
+          color: '#7c3aed',
+          description: 'Official brand or highest trust tier retailer',
+        });
+      }
+
+      // 4. Fastest Delivery: Lowest shipping penalty (lowest shipping days)
+      let fastestDeliveryItem = activeCandidates[0];
+      for (const item of activeCandidates) {
+        if (item.score_breakdown.shipping_penalty < fastestDeliveryItem.score_breakdown.shipping_penalty) {
+          fastestDeliveryItem = item;
+        }
+      }
+      fastestDeliveryItem.badges = fastestDeliveryItem.badges || [];
+      if (!fastestDeliveryItem.badges.some(b => b.label === 'Fastest Delivery')) {
+        fastestDeliveryItem.badges.push({
+          label: 'Fastest Delivery',
+          color: '#38bdf8',
+          description: 'Priority expedited shipping with minimal latency',
+        });
+      }
+    }
+
+    return input;
+  } else {
+    const all = allScored && allScored.length > 0 ? allScored : [input];
+    assignProductBadges(all);
+    return input;
+  }
+}
+
 export class MurthyroshanScoringEngine {
+  /**
+   * Assign badges across scored products.
+   */
+  assignProductBadges(items: RankedProductItem[]): RankedProductItem[] {
+    return assignProductBadges(items);
+  }
+
+  assignBadges(items: RankedProductItem[]): RankedProductItem[] {
+    return assignProductBadges(items);
+  }
+
+  /**
+   * Alias for rankProducts to satisfy the rankItems interface.
+   */
+  rankItems(
+    products: Channel3ProductDetail[],
+    context: ScoringQueryContext
+  ): RankedProductItem[] {
+    return this.rankProducts(products, context);
+  }
+
   /**
    * Ingests raw Channel3 JSON-RPC products and returns mathematically ranked SKUs.
    * Pure deterministic calculation - 0% LLM math hallucination.
@@ -472,81 +678,20 @@ export class MurthyroshanScoringEngine {
 
     // Badge Engine: Award badges across non-eliminated candidates
     // Badges: Best Value, Fastest Delivery, Top Rated Merchant, Price Leader
-    const activeCandidates = scoredItems.filter(item => !item.eliminated);
-    if (activeCandidates.length > 0) {
-      // 1. Price Leader: Lowest price among active items
-      let minPriceItem = activeCandidates[0];
-      for (const item of activeCandidates) {
-        if (item.selected_offer.price < minPriceItem.selected_offer.price) {
-          minPriceItem = item;
-        }
-      }
-      minPriceItem.badges = minPriceItem.badges || [];
-      minPriceItem.badges.push({
-        label: 'Price Leader',
-        color: '#e8a045',
-        description: 'Lowest upfront price among verified offerings',
-      });
-
-      // 2. Best Value: Highest utility score to price ratio
-      let bestValueItem = activeCandidates[0];
-      let bestValueRatio = bestValueItem.score / (bestValueItem.selected_offer.price || 1);
-      for (const item of activeCandidates) {
-        const ratio = item.score / (item.selected_offer.price || 1);
-        if (ratio > bestValueRatio) {
-          bestValueRatio = ratio;
-          bestValueItem = item;
-        }
-      }
-      bestValueItem.badges = bestValueItem.badges || [];
-      if (!bestValueItem.badges.some(b => b.label === 'Best Value')) {
-        bestValueItem.badges.push({
-          label: 'Best Value',
-          color: '#00d4aa',
-          description: 'Optimal balance of utility score, features, and price',
-        });
-      }
-
-      // 3. Top Rated Merchant: Highest merchant reputation score
-      let topMerchantItem = activeCandidates[0];
-      for (const item of activeCandidates) {
-        if (item.score_breakdown.reputation_score > topMerchantItem.score_breakdown.reputation_score) {
-          topMerchantItem = item;
-        }
-      }
-      topMerchantItem.badges = topMerchantItem.badges || [];
-      if (!topMerchantItem.badges.some(b => b.label === 'Top Rated Merchant')) {
-        topMerchantItem.badges.push({
-          label: 'Top Rated Merchant',
-          color: '#7c3aed',
-          description: 'Official brand or highest trust tier retailer',
-        });
-      }
-
-      // 4. Fastest Delivery: Lowest shipping penalty (lowest shipping days)
-      let fastestDeliveryItem = activeCandidates[0];
-      for (const item of activeCandidates) {
-        if (item.score_breakdown.shipping_penalty < fastestDeliveryItem.score_breakdown.shipping_penalty) {
-          fastestDeliveryItem = item;
-        }
-      }
-      fastestDeliveryItem.badges = fastestDeliveryItem.badges || [];
-      if (!fastestDeliveryItem.badges.some(b => b.label === 'Fastest Delivery')) {
-        fastestDeliveryItem.badges.push({
-          label: 'Fastest Delivery',
-          color: '#38bdf8',
-          description: 'Priority expedited shipping with minimal latency',
-        });
-      }
-    }
-
-    // Initialize empty badges array for items without badges for clean API contract
-    for (const item of scoredItems) {
-      item.badges = item.badges || [];
-    }
+    assignProductBadges(scoredItems);
 
     return scoredItems;
   }
 }
 
 export const defaultScoringEngine = new MurthyroshanScoringEngine();
+
+export const ScoringEngine = MurthyroshanScoringEngine;
+export type ScoringEngine = MurthyroshanScoringEngine;
+
+export function rankItems(
+  products: Channel3ProductDetail[],
+  context: ScoringQueryContext
+): RankedProductItem[] {
+  return defaultScoringEngine.rankProducts(products, context);
+}
