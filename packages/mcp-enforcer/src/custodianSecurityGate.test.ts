@@ -15,6 +15,9 @@ import {
   canonicalJson,
   canonicalHash,
   CanonicalisationError,
+  ImmutableAuditChain,
+  appendVerdict,
+  verifyChainIntegrity,
 } from './audit-chain.js';
 import type { SpendMandate } from '@aegispay/shared-types';
 
@@ -61,6 +64,8 @@ function createValidMandateAndKeypair() {
 }
 
 test('Custodian Gate - Stage 1: Strict Zod Schema & Arithmetic Refinement', async () => {
+  const { validMandate } = createValidMandateAndKeypair();
+
   // 1. Line-item sum mismatch strictly rejected
   const mismatchPayload = {
     mandate_id: 'vch_custodian_1',
@@ -115,7 +120,93 @@ test('Custodian Gate - Stage 1: Strict Zod Schema & Arithmetic Refinement', asyn
   const parsedEmpty = AuthorizeEscrowOrderSchema.safeParse(emptyItemsPayload);
   assert.equal(parsedEmpty.success, false);
 
-  // 5. Valid arithmetic matches exactly
+  // 5. Float values strictly rejected (Float-Safe integer enforcement)
+  const floatRequested = AuthorizeEscrowOrderSchema.safeParse({
+    mandate_id: 'vch_custodian_1',
+    merchant_domain: 'bestbuy.com',
+    requested_cents: 99.99,
+    category_id: 'electronics',
+    items: [{ product_id: 'p1', price_cents: 99.99, quantity: 1 }],
+  });
+  assert.equal(floatRequested.success, false);
+
+  const floatQuantity = AuthorizeEscrowOrderSchema.safeParse({
+    mandate_id: 'vch_custodian_1',
+    merchant_domain: 'bestbuy.com',
+    requested_cents: 3000,
+    category_id: 'electronics',
+    items: [{ product_id: 'p1', price_cents: 2000, quantity: 1.5 }],
+  });
+  assert.equal(floatQuantity.success, false);
+
+  // 6. Stage 1 Budget Cap enforcement: requested_cents > mandate.max_total_spend_cents
+  const totalBudgetExceededPayload = {
+    mandate_id: validMandate.mandate_id,
+    merchant_domain: 'bestbuy.com',
+    requested_cents: 60000, // exceeds max_total_spend_cents: 50000
+    category_id: 'electronics',
+    items: [{ product_id: 'p1', price_cents: 60000, quantity: 1 }],
+    mandate: validMandate,
+  };
+  const parsedTotalExceeded = AuthorizeEscrowOrderSchema.safeParse(totalBudgetExceededPayload);
+  assert.equal(parsedTotalExceeded.success, false);
+  if (!parsedTotalExceeded.success) {
+    assert.ok(
+      parsedTotalExceeded.error.issues.some((i) =>
+        i.message.includes('ERR_EXCEEDS_TOTAL_MANDATE_BUDGET')
+      )
+    );
+  }
+
+  // 7. Stage 1 Merchant Cap enforcement: requested_cents > mandate.max_single_merchant_cents
+  const merchantCapExceededPayload = {
+    mandate_id: validMandate.mandate_id,
+    merchant_domain: 'bestbuy.com',
+    requested_cents: 25000, // exceeds max_single_merchant_cents: 20000 (though <= 50000)
+    category_id: 'electronics',
+    items: [{ product_id: 'p1', price_cents: 25000, quantity: 1 }],
+    mandate: validMandate,
+  };
+  const parsedMerchantCapExceeded = AuthorizeEscrowOrderSchema.safeParse(merchantCapExceededPayload);
+  assert.equal(parsedMerchantCapExceeded.success, false);
+  if (!parsedMerchantCapExceeded.success) {
+    assert.ok(
+      parsedMerchantCapExceeded.error.issues.some((i) =>
+        i.message.includes('ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP')
+      )
+    );
+  }
+
+  // 8. Runtime Stage 1 enforcement in handleAuthorizeEscrow
+  await assert.rejects(
+    async () => {
+      await toolHandlers.handleAuthorizeEscrow({
+        mandate_id: validMandate.mandate_id,
+        merchant_domain: 'bestbuy.com',
+        requested_cents: 60000,
+        category_id: 'electronics',
+        items: [{ product_id: 'p1', price_cents: 60000, quantity: 1 }],
+        mandate: validMandate,
+      });
+    },
+    { message: 'ERR_EXCEEDS_TOTAL_MANDATE_BUDGET' }
+  );
+
+  await assert.rejects(
+    async () => {
+      await toolHandlers.handleAuthorizeEscrow({
+        mandate_id: validMandate.mandate_id,
+        merchant_domain: 'bestbuy.com',
+        requested_cents: 25000,
+        category_id: 'electronics',
+        items: [{ product_id: 'p1', price_cents: 25000, quantity: 1 }],
+        mandate: validMandate,
+      });
+    },
+    { message: 'ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP' }
+  );
+
+  // 9. Valid arithmetic matches exactly and fits within mandate caps
   const validPayload = {
     mandate_id: 'vch_custodian_1',
     merchant_domain: 'bestbuy.com',
@@ -222,7 +313,41 @@ test('Custodian Gate - Stage 3: Merchant Anomaly Gate (reject score > 300 / 1000
     /ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED/
   );
 
-  // 3. Cumulative penalty (digits + discount variance + dispute rate) exceeding 300
+  // 3. Borderline anomaly score: 300 allowed, 301 rejected
+  assert.equal(isMerchantAllowed(300), true, 'Anomaly score of 300 basis points must be permitted');
+  assert.equal(isMerchantAllowed(301), false, 'Anomaly score > 300 basis points must be rejected');
+
+  // 4. Verify handleAuthorizeEscrow short-circuits before Stage 4 (Redis is never called)
+  let redisWasCalled = false;
+  const mockUnreachedRedis: any = {
+    script: async () => {
+      redisWasCalled = true;
+      return 'mock_sha';
+    },
+    evalsha: async () => {
+      redisWasCalled = true;
+      return [1, '2000'];
+    },
+  };
+
+  await assert.rejects(
+    async () => {
+      await toolHandlers.handleAuthorizeEscrow({
+        mandate_id: validMandate.mandate_id,
+        merchant_domain: 'suspicious-fast-payout.com',
+        merchant_dispute_rate: 0.2, // triggers high anomaly
+        requested_cents: 2000,
+        category_id: 'electronics',
+        items: [{ product_id: 'p1', price_cents: 2000, quantity: 1 }],
+        mandate: validMandate,
+        redis_client: mockUnreachedRedis,
+      });
+    },
+    /ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED/
+  );
+  assert.equal(redisWasCalled, false, 'Redis Lua pre-reservation must not be called when Stage 3 fails');
+
+  // 5. Cumulative penalty (digits + discount variance + dispute rate) exceeding 300
   const combinedScore = calculateMerchantAnomalyScore({
     domain: 'fraud-88888.com', // 150
     disputeRate: 0.08,         // 0.08 * 1000 = 80
@@ -309,10 +434,58 @@ test('Custodian Gate - Stage 4: Single-Threaded Redis Lua reserveBudget() Pre-Re
   assert.ok(result.invoice_id.startsWith('inv_legit-store.com_'));
   assert.ok(result.audit_hash);
   assert.equal(result.audit_hash.length, 64);
+
+  // 4. Category unauthorized simulation in Redis Lua
+  const mockRedisCatUnauthorized: any = {
+    script: async () => 'mock_sha',
+    evalsha: async () => [0, 'ERR_CATEGORY_NOT_AUTHORIZED:gaming'],
+  };
+
+  await assert.rejects(
+    async () => {
+      await toolHandlers.handleAuthorizeEscrow({
+        mandate_id: validMandate.mandate_id,
+        merchant_domain: 'legit-store.com',
+        requested_cents: 4500,
+        category_id: 'gaming',
+        items: [{ product_id: 'p1', price_cents: 4500, quantity: 1 }],
+        mandate: validMandate,
+        redis_client: mockRedisCatUnauthorized,
+        spend_enforcer: enforcer,
+      });
+    },
+    { message: 'ERR_CATEGORY_NOT_AUTHORIZED:gaming' }
+  );
+
+  // 5. Compensating rollback via rollbackReservation with cluster-safe {vch_<id>} tags
+  let rollbackKeys: string[] = [];
+  let rollbackArgv: string[] = [];
+  const mockRedisRollback: any = {
+    script: async () => 'mock_rollback_sha',
+    evalsha: async (_sha: string, _keyCount: number, ...args: any[]) => {
+      rollbackKeys = [args[0], args[1]];
+      rollbackArgv = [args[2]];
+      return [1, '0'];
+    },
+  };
+
+  const rollbackOk = await enforcer.rollbackReservation(
+    mockRedisRollback,
+    validMandate.mandate_id,
+    4500,
+    'legit-store.com'
+  );
+
+  assert.equal(rollbackOk, true);
+  assert.ok(rollbackKeys[0].startsWith('aegis:{vch_'));
+  assert.ok(rollbackKeys[0].endsWith('}:mandate'));
+  assert.ok(rollbackKeys[1].startsWith('aegis:{vch_'));
+  assert.ok(rollbackKeys[1].endsWith('}:exposure:legit-store.com'));
+  assert.equal(rollbackArgv[0], '4500');
 });
 
 test('Custodian Gate - Immutable Hash-Chained Evidence Ledger (chain.py & canonical.py)', async () => {
-  const chain = new AuditChain();
+  const chain = new ImmutableAuditChain();
 
   // 1. Genesis Hash & Sequence 1 link
   const ev1 = chain.append({
@@ -326,17 +499,17 @@ test('Custodian Gate - Immutable Hash-Chained Evidence Ledger (chain.py & canoni
   assert.equal(ev1.prev_hash, GENESIS_HASH);
   assert.equal(ev1.hash.length, 64);
 
-  // 2. Sequence 2 links to Sequence 1 hash
-  const ev2 = chain.append({
-    request_id: 'req_001',
-    event_type: 'DECISION_MADE',
-    observed: { anomaly_score: 50, merchant: 'legit.com' },
-    inferred: { disposition: 'APPROVE' },
+  // 2. Sequence 2 links to Sequence 1 hash via appendVerdict helper
+  const ev2 = appendVerdict(chain, 'req_001', {
+    anomaly_score: 50,
+    merchant: 'legit.com',
+    disposition: 'APPROVE',
   });
 
   assert.equal(ev2.seq, 2);
   assert.equal(ev2.prev_hash, ev1.hash);
   assert.equal(chain.verifyChain(), true);
+  assert.equal(verifyChainIntegrity(chain), true);
 
   // 3. Deterministic canonical serialization (key sorting, whitespace invariance)
   const objA = { z_merchant: 'abc', a_cents: 1000 };
@@ -358,23 +531,26 @@ test('Custodian Gate - Immutable Hash-Chained Evidence Ledger (chain.py & canoni
   assert.equal(events.length, 2);
 
   // Create tampered copy of chain
-  const tamperedChain = new AuditChain();
+  const tamperedChain = new ImmutableAuditChain();
   (tamperedChain as any).events = [
     { ...ev1, payload: { observed: { intent_id: 'int_123', max_budget_cents: 9999999 }, inferred: {} } },
     ev2,
   ];
   assert.equal(tamperedChain.verifyChain(), false, 'Tampered payload in event 1 must fail verifyChain()');
+  assert.equal(verifyChainIntegrity(tamperedChain), false, 'verifyChainIntegrity helper must fail on tampered chain');
 
   // Tampering prev_hash breaks chain integrity
-  const brokenLinkChain = new AuditChain();
+  const brokenLinkChain = new ImmutableAuditChain();
   (brokenLinkChain as any).events = [
     ev1,
     { ...ev2, prev_hash: 'f'.repeat(64) },
   ];
   assert.equal(brokenLinkChain.verifyChain(), false, 'Broken prev_hash link must fail verifyChain()');
+  assert.equal(verifyChainIntegrity(brokenLinkChain), false);
 
   // 6. Global defaultAuditChain records real transactions from handleAuthorizeEscrow
   assert.ok(defaultAuditChain.getEvents().length > 0);
   assert.equal(defaultAuditChain.verifyChain(), true);
+  assert.equal(verifyChainIntegrity(defaultAuditChain), true);
 });
 

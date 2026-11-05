@@ -1,5 +1,254 @@
 import { z } from 'zod';
 
+/**
+ * Float-Safe Money and Basis Points Primitives
+ * Direct TypeScript port from Custodian (custodian.money and custodian.bp).
+ * Floating-point numbers have no canonical byte form and lead to rounding drift.
+ * All amounts are integer cents (paise) and all scores are integer basis points.
+ */
+export class MoneyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MoneyError';
+  }
+}
+
+export class BpError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BpError';
+  }
+}
+
+/**
+ * Refuse floats explicitly so the failure names the real problem.
+ * In JS runtime, Number.isInteger distinguishes whole numbers from fractional floats.
+ */
+export function rejectFloat(value: unknown, context: string = 'value'): asserts value is number {
+  if (typeof value === 'boolean') {
+    throw new MoneyError(`bool is not a valid ${context}: ${value}`);
+  }
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new MoneyError(
+      `float or non-integer is not a valid ${context}: ${value}. ` +
+      `Pass an integer count of cents/paise or basis points.`
+    );
+  }
+}
+
+/**
+ * CentsSchema: Strict integer cents validation (custodian.money).
+ * Rejects floating-point numbers and negative values.
+ */
+export const CentsSchema = z
+  .number({
+    required_error: 'Amount in cents is required',
+    invalid_type_error: 'Amount in cents must be an integer number',
+  })
+  .int('Amount in cents must be an integer; floats are strictly rejected')
+  .nonnegative('Amount in cents must be non-negative');
+
+export type Cents = z.infer<typeof CentsSchema>;
+
+export const PositiveCentsSchema = CentsSchema.refine((v) => v > 0, {
+  message: 'Amount in cents must be strictly positive',
+});
+
+export type PositiveCents = z.infer<typeof PositiveCentsSchema>;
+
+/**
+ * Parse a dollar/rupee amount string or integer into integer cents without float math.
+ */
+export function parseCents(raw: string | number): number {
+  if (typeof raw === 'number') {
+    if (typeof raw === 'boolean' || !Number.isInteger(raw)) {
+      throw new MoneyError(`float is not a valid money input: ${raw}. Pass a str or integer cents.`);
+    }
+    if (raw < 0) {
+      throw new MoneyError(`negative amount: ${raw}`);
+    }
+    return raw;
+  }
+
+  if (typeof raw !== 'string') {
+    throw new MoneyError(`unparseable amount: ${String(raw)}`);
+  }
+
+  const trimmed = raw.trim();
+  const match = trimmed.match(/^(?:[\$₹]|rs\.?|usd|inr)?\s*([0-9,]+(?:\.[0-9]+)?)\s*(?:\/-)?$/i);
+  if (!match) {
+    throw new MoneyError(`unparseable amount: ${raw}`);
+  }
+
+  const cleanNumStr = match[1].replace(/,/g, '');
+  if (!/^\d+(\.\d+)?$/.test(cleanNumStr)) {
+    throw new MoneyError(`unparseable amount: ${raw}`);
+  }
+
+  const parts = cleanNumStr.split('.');
+  const whole = parseInt(parts[0], 10);
+  if (isNaN(whole) || whole < 0) {
+    throw new MoneyError(`negative amount: ${raw}`);
+  }
+
+  let cents = whole * 100;
+  if (parts.length > 1) {
+    const fractionStr = parts[1].slice(0, 3);
+    if (fractionStr.length === 1) {
+      cents += parseInt(fractionStr, 10) * 10;
+    } else if (fractionStr.length === 2) {
+      cents += parseInt(fractionStr, 10);
+    } else {
+      const twoDec = parseInt(fractionStr.slice(0, 2), 10);
+      const thirdDec = parseInt(fractionStr[2], 10);
+      cents += twoDec + (thirdDec >= 5 ? 1 : 0);
+    }
+  }
+
+  return cents;
+}
+
+/**
+ * Format integer cents for humans ($1,299.50 or ₹1,299.50). Never parse back.
+ */
+export function formatCents(cents: number, currency: string = 'USD'): string {
+  if (typeof cents !== 'number' || !Number.isInteger(cents)) {
+    throw new MoneyError(`expected int cents, got ${typeof cents === 'number' ? 'float' : typeof cents}`);
+  }
+  const sign = cents < 0 ? '-' : '';
+  const absCents = Math.abs(cents);
+  const dollars = Math.floor(absCents / 100);
+  const remCents = absCents % 100;
+  const remCentsStr = remCents.toString().padStart(2, '0');
+  const formattedDollars = dollars.toLocaleString('en-US');
+
+  if (currency === 'INR') {
+    return `${sign}₹${formattedDollars}.${remCentsStr}`;
+  }
+  return `${sign}$${formattedDollars}.${remCentsStr}`;
+}
+
+/**
+ * Line item total: integer multiplication with strict float rejection and no rounding.
+ */
+export function lineTotal(unitPriceCents: number, quantity: number): number {
+  if (typeof unitPriceCents !== 'number' || !Number.isInteger(unitPriceCents)) {
+    throw new MoneyError(`float is not a valid money input for unitPriceCents: ${unitPriceCents}`);
+  }
+  if (typeof quantity !== 'number' || !Number.isInteger(quantity)) {
+    throw new MoneyError(`float is not a valid quantity input: ${quantity}`);
+  }
+  if (unitPriceCents < 0) {
+    throw new MoneyError(`negative unit price: ${unitPriceCents}`);
+  }
+  if (quantity < 0) {
+    throw new MoneyError(`negative quantity: ${quantity}`);
+  }
+  return unitPriceCents * quantity;
+}
+
+/**
+ * BasisPointsSchema: Integer basis points (0 to 10,000 bp, custodian.bp).
+ * 0 = 0.00%, 10,000 = 100.00%, 1 bp = 0.01%.
+ * Strict float rejection: floats have no canonical byte form and are rejected.
+ */
+export const BasisPointsSchema = z
+  .number({
+    required_error: 'Basis points value is required',
+    invalid_type_error: 'Basis points must be an integer number',
+  })
+  .int('Basis points must be an integer; floats are strictly rejected')
+  .min(0, 'Basis points out of range [0, 10000]: must be >= 0')
+  .max(10000, 'Basis points out of range [0, 10000]: must be <= 10000');
+
+export type BasisPoints = z.infer<typeof BasisPointsSchema>;
+
+export const FULL_BP = 10_000;
+export const ZERO_BP = 0;
+
+export function validateBasisPoints(score: number): number {
+  if (typeof score !== 'number' || !Number.isInteger(score)) {
+    throw new BpError(`basis points must be int, got ${typeof score}: ${score}`);
+  }
+  if (score < ZERO_BP || score > FULL_BP) {
+    throw new BpError(`basis points out of range [0, ${FULL_BP}]: ${score}`);
+  }
+  return score;
+}
+
+/**
+ * Convert a ratio to basis points, rounding half up in integer arithmetic.
+ */
+export function basisPointsFromRatio(numerator: number, denominator: number): number {
+  if (typeof numerator !== 'number' || !Number.isInteger(numerator) ||
+      typeof denominator !== 'number' || !Number.isInteger(denominator)) {
+    throw new BpError('basisPointsFromRatio takes ints; floats cannot enter a score');
+  }
+  if (denominator === 0) {
+    throw new BpError('basisPointsFromRatio: zero denominator — the caller must decide what empty means');
+  }
+  if (numerator < 0 || denominator < 0) {
+    throw new BpError(`basisPointsFromRatio: negative input ${numerator}/${denominator}`);
+  }
+  const score = Math.floor((numerator * FULL_BP + Math.floor(denominator / 2)) / denominator);
+  return validateBasisPoints(Math.min(FULL_BP, score));
+}
+
+/**
+ * Parse human percentage like "85" or "85.5" into integer basis points.
+ */
+export function basisPointsFromPercent(percent: string): number {
+  const trimmed = percent.trim().replace(/%$/, '');
+  const match = trimmed.match(/^(\d+)(?:\.(\d+))?$/);
+  if (!match) {
+    throw new BpError(`unparseable percentage: ${percent}`);
+  }
+  const whole = parseInt(match[1], 10);
+  let bp = whole * 100;
+  if (match[2]) {
+    const fractionStr = match[2].slice(0, 3);
+    if (fractionStr.length === 1) {
+      bp += parseInt(fractionStr, 10) * 10;
+    } else if (fractionStr.length === 2) {
+      bp += parseInt(fractionStr, 10);
+    } else {
+      const twoDec = parseInt(fractionStr.slice(0, 2), 10);
+      const thirdDec = parseInt(fractionStr[2], 10);
+      bp += twoDec + (thirdDec >= 5 ? 1 : 0);
+    }
+  }
+  return validateBasisPoints(bp);
+}
+
+/**
+ * Weighted mean of [scoreBp, weight] pairs in integer arithmetic (round half up).
+ */
+export function weightedBasisPoints(parts: Array<[number, number]>): number {
+  const pairs = parts.map(([score, weight]) => {
+    return [validateBasisPoints(score), weight] as [number, number];
+  });
+  if (pairs.some(([, w]) => typeof w !== 'number' || !Number.isInteger(w) || w < 0)) {
+    throw new BpError('negative or float weight');
+  }
+  const totalWeight = pairs.reduce((sum, [, w]) => sum + w, 0);
+  if (totalWeight === 0) {
+    return ZERO_BP;
+  }
+  const numerator = pairs.reduce((sum, [score, weight]) => sum + score * weight, 0);
+  const rounded = Math.floor((numerator + Math.floor(totalWeight / 2)) / totalWeight);
+  return validateBasisPoints(rounded);
+}
+
+/**
+ * Render basis points for humans: 8500 -> "85.00%".
+ */
+export function formatBasisPoints(score: number): string {
+  validateBasisPoints(score);
+  const whole = Math.floor(score / 100);
+  const part = score % 100;
+  return `${whole}.${part.toString().padStart(2, '0')}%`;
+}
+
 export const SpendMandateSchema = z.object({
   mandate_id: z.string().max(32),
   buyer_id: z.string().max(64),
@@ -296,18 +545,232 @@ export const CustodianReasonCodeSchema = z.enum([
 
 export type CustodianReasonCode = z.infer<typeof CustodianReasonCodeSchema>;
 
+export const CUSTODIAN_REASON_CODES = CustodianReasonCodeSchema.options;
+
+export const CUSTODIAN_BLOCKING_REASON_CODES: readonly CustodianReasonCode[] = [
+  'PRICE_MISMATCH',
+  'ITEM_NOT_IN_CATALOG',
+  'ITEM_OUT_OF_STOCK',
+  'LINE_ITEM_SUM_MISMATCH',
+  'BUDGET_EXCEEDED',
+  'UNIT_PRICE_CEILING_EXCEEDED',
+  'INVALID_SPEND_AMOUNT',
+  'MERCHANT_OUT_OF_SCOPE',
+  'MERCHANT_ANOMALY_THRESHOLD_EXCEEDED',
+  'CATEGORY_OUT_OF_SCOPE',
+  'MANDATE_TOTAL_EXCEEDED',
+  'MANDATE_PER_TXN_EXCEEDED',
+  'MANDATE_EXPIRED',
+  'MANDATE_NOT_YET_VALID',
+  'MANDATE_REVOKED',
+  'MANDATE_MERCHANT_NOT_ALLOWED',
+  'MANDATE_CATEGORY_NOT_ALLOWED',
+  'MANDATE_CURRENCY_MISMATCH',
+  'MANDATE_NOT_FOUND',
+  'ED25519_SIGNATURE_VERIFICATION_FAILED',
+  'MANDATE_UNSIGNED_OR_TAMPERED',
+  'HARD_CONSTRAINT_VIOLATED',
+] as const;
+
+export function isBlockingReasonCode(code: CustodianReasonCode): boolean {
+  return (CUSTODIAN_BLOCKING_REASON_CODES as readonly string[]).includes(code);
+}
+
 export const CustodianViolationTaxonomySchema = z.object({
   code: CustodianReasonCodeSchema,
   message: z.string(),
   stage: z.enum(['STAGE_1_SCHEMA', 'STAGE_2_CRYPTOGRAPHIC', 'STAGE_3_MERCHANT_ANOMALY', 'STAGE_4_REDIS_LUA_PRE_RESERVATION']),
   is_blocking: z.boolean().default(true),
-  observed_value: z.union([z.string(), z.number(), z.record(z.string(), z.any())]).optional(),
-  expected_ceiling: z.union([z.string(), z.number(), z.record(z.string(), z.any())]).optional(),
+  observed_value: z.union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.any()), z.array(z.any()), z.null()]).optional(),
+  expected_ceiling: z.union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.any()), z.array(z.any()), z.null()]).optional(),
 });
 
 export type CustodianViolationTaxonomy = z.infer<typeof CustodianViolationTaxonomySchema>;
 export const ViolationTaxonomySchema = CustodianViolationTaxonomySchema;
 export type ViolationTaxonomy = CustodianViolationTaxonomy;
+
+export const CUSTODIAN_TAXONOMY_REGISTRY: Record<CustodianReasonCode, CustodianViolationTaxonomy> = {
+  PRICE_MATCHES_CATALOG: {
+    code: 'PRICE_MATCHES_CATALOG',
+    message: 'Every price quoted by the agent matches the verified catalog.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: false,
+  },
+  PRICE_MISMATCH: {
+    code: 'PRICE_MISMATCH',
+    message: 'The agent quoted a price the catalog does not have.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  ITEM_NOT_IN_CATALOG: {
+    code: 'ITEM_NOT_IN_CATALOG',
+    message: 'The cart contains an item this catalog does not sell.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  ITEM_OUT_OF_STOCK: {
+    code: 'ITEM_OUT_OF_STOCK',
+    message: 'The cart contains an item that is out of stock.',
+    stage: 'STAGE_4_REDIS_LUA_PRE_RESERVATION',
+    is_blocking: true,
+  },
+  SNAPSHOT_STALE: {
+    code: 'SNAPSHOT_STALE',
+    message: 'The catalog snapshot is older than this decision allows.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: false,
+  },
+  LINE_ITEM_SUM_MISMATCH: {
+    code: 'LINE_ITEM_SUM_MISMATCH',
+    message: 'Sum of item prices does not equal the claimed subtotal.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  BUDGET_SATISFIED: {
+    code: 'BUDGET_SATISFIED',
+    message: 'The verified total is within the stated budget ceiling.',
+    stage: 'STAGE_4_REDIS_LUA_PRE_RESERVATION',
+    is_blocking: false,
+  },
+  BUDGET_EXCEEDED: {
+    code: 'BUDGET_EXCEEDED',
+    message: 'The verified total exceeds the stated budget ceiling.',
+    stage: 'STAGE_4_REDIS_LUA_PRE_RESERVATION',
+    is_blocking: true,
+  },
+  BUDGET_UNSET: {
+    code: 'BUDGET_UNSET',
+    message: 'No budget was stated; the mandate caps govern instead.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: false,
+  },
+  UNIT_PRICE_CEILING_EXCEEDED: {
+    code: 'UNIT_PRICE_CEILING_EXCEEDED',
+    message: 'An item costs more per unit than was allowed for it.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  INVALID_SPEND_AMOUNT: {
+    code: 'INVALID_SPEND_AMOUNT',
+    message: 'Spend amount is non-integer, negative, or invalid.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  MERCHANT_IN_SCOPE: {
+    code: 'MERCHANT_IN_SCOPE',
+    message: 'The merchant is one the human named in scope.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: false,
+  },
+  MERCHANT_OUT_OF_SCOPE: {
+    code: 'MERCHANT_OUT_OF_SCOPE',
+    message: 'The purchase is from a merchant outside the permitted scope.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  MERCHANT_UNNAMED_BY_HUMAN: {
+    code: 'MERCHANT_UNNAMED_BY_HUMAN',
+    message: 'No merchant named by human; mandate allowlist applies.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: false,
+  },
+  MERCHANT_ANOMALY_THRESHOLD_EXCEEDED: {
+    code: 'MERCHANT_ANOMALY_THRESHOLD_EXCEEDED',
+    message: 'Merchant anomaly risk score exceeds the allowed threshold.',
+    stage: 'STAGE_3_MERCHANT_ANOMALY',
+    is_blocking: true,
+  },
+  CATEGORY_IN_SCOPE: {
+    code: 'CATEGORY_IN_SCOPE',
+    message: 'Every item falls in a category the human authorized.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: false,
+  },
+  CATEGORY_OUT_OF_SCOPE: {
+    code: 'CATEGORY_OUT_OF_SCOPE',
+    message: 'An item falls outside authorized merchandise categories.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+  MANDATE_SATISFIED: {
+    code: 'MANDATE_SATISFIED',
+    message: 'The spend is inside the authorized payment mandate.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: false,
+  },
+  MANDATE_TOTAL_EXCEEDED: {
+    code: 'MANDATE_TOTAL_EXCEEDED',
+    message: 'The spend exceeds the mandate lifetime ceiling.',
+    stage: 'STAGE_4_REDIS_LUA_PRE_RESERVATION',
+    is_blocking: true,
+  },
+  MANDATE_PER_TXN_EXCEEDED: {
+    code: 'MANDATE_PER_TXN_EXCEEDED',
+    message: 'The spend exceeds the mandate per-transaction cap.',
+    stage: 'STAGE_4_REDIS_LUA_PRE_RESERVATION',
+    is_blocking: true,
+  },
+  MANDATE_EXPIRED: {
+    code: 'MANDATE_EXPIRED',
+    message: 'The payment mandate has expired.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_NOT_YET_VALID: {
+    code: 'MANDATE_NOT_YET_VALID',
+    message: 'The payment mandate is not valid yet.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_REVOKED: {
+    code: 'MANDATE_REVOKED',
+    message: 'The payment mandate has been revoked by the owner.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_MERCHANT_NOT_ALLOWED: {
+    code: 'MANDATE_MERCHANT_NOT_ALLOWED',
+    message: 'The mandate does not authorize payment to this merchant.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_CATEGORY_NOT_ALLOWED: {
+    code: 'MANDATE_CATEGORY_NOT_ALLOWED',
+    message: 'The mandate does not cover this category of spending.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_CURRENCY_MISMATCH: {
+    code: 'MANDATE_CURRENCY_MISMATCH',
+    message: 'The mandate is denominated in a different currency.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_NOT_FOUND: {
+    code: 'MANDATE_NOT_FOUND',
+    message: 'The referenced spend mandate could not be found.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  ED25519_SIGNATURE_VERIFICATION_FAILED: {
+    code: 'ED25519_SIGNATURE_VERIFICATION_FAILED',
+    message: 'Ed25519 cryptographic signature verification failed.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  MANDATE_UNSIGNED_OR_TAMPERED: {
+    code: 'MANDATE_UNSIGNED_OR_TAMPERED',
+    message: 'The mandate payload is unsigned or has been tampered with.',
+    stage: 'STAGE_2_CRYPTOGRAPHIC',
+    is_blocking: true,
+  },
+  HARD_CONSTRAINT_VIOLATED: {
+    code: 'HARD_CONSTRAINT_VIOLATED',
+    message: 'A non-negotiable hard constraint was violated.',
+    stage: 'STAGE_1_SCHEMA',
+    is_blocking: true,
+  },
+};
 
 /**
  * Custodian AP2 Policy Evaluation Verdict Schema
@@ -317,7 +780,7 @@ export const PolicyEvaluationVerdictSchema = z.object({
   mandate_id: z.string(),
   outcome: z.enum(['APPROVE', 'HOLD', 'REJECT']),
   decision_id: z.string(),
-  total_score_bp: z.number().int().min(0).max(10000), // 0 to 10,000 basis points
+  total_score_bp: BasisPointsSchema, // float-rejected integer basis points
   reasons: z.array(CustodianReasonCodeSchema),
   dimensions: z.array(z.object({
     dimension: z.enum([
@@ -331,30 +794,35 @@ export const PolicyEvaluationVerdictSchema = z.object({
       'SANITIZATION'
     ]),
     status: z.enum(['PASS', 'FAIL', 'UNCERTAIN']),
-    score_bp: z.number().int().min(0).max(10000),
+    score_bp: BasisPointsSchema, // float-rejected integer basis points
     reason_codes: z.array(CustodianReasonCodeSchema).min(1, 'Dimension must provide at least one reason code'),
   })),
+  verified_total_cents: CentsSchema.optional(),
+  verified_total_paise: CentsSchema.optional(),
+  bindings: z.array(z.object({
+    cart_line_id: z.string(),
+    requested_line_id: z.string().nullable().optional(),
+    kind: z.enum(['EXACT', 'SUBSTITUTION', 'BUNDLE_MEMBER', 'UNBOUND']),
+    score_bp: BasisPointsSchema,
+    reason_codes: z.array(CustodianReasonCodeSchema).optional().default([]),
+  })).optional(),
+  snapshot_digest: z.string().length(64).optional(),
+  thresholds_version: z.string().optional(),
+  thresholds_digest: z.string().length(64).optional(),
+  escalated_line_ids: z.array(z.string()).optional(),
+  disposition_codes: z.array(CustodianReasonCodeSchema).optional(),
   audit_hash: z.string().length(64).optional(),
   evaluated_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
 }).refine(
   (data) => {
     // Invariant: An APPROVE outcome cannot contain any blocking violation codes
-    const blockingCodes: CustodianReasonCode[] = [
-      'LINE_ITEM_SUM_MISMATCH',
-      'BUDGET_EXCEEDED',
-      'INVALID_SPEND_AMOUNT',
-      'MERCHANT_ANOMALY_THRESHOLD_EXCEEDED',
-      'MANDATE_TOTAL_EXCEEDED',
-      'MANDATE_PER_TXN_EXCEEDED',
-      'MANDATE_EXPIRED',
-      'MANDATE_REVOKED',
-      'MANDATE_MERCHANT_NOT_ALLOWED',
-      'MANDATE_CATEGORY_NOT_ALLOWED',
-      'ED25519_SIGNATURE_VERIFICATION_FAILED',
-      'HARD_CONSTRAINT_VIOLATED',
-    ];
     if (data.outcome === 'APPROVE') {
-      return !data.reasons.some((r) => blockingCodes.includes(r));
+      const allReasons = [
+        ...data.reasons,
+        ...data.dimensions.flatMap((d) => d.reason_codes),
+        ...(data.disposition_codes || []),
+      ];
+      return !allReasons.some((r) => CUSTODIAN_BLOCKING_REASON_CODES.includes(r));
     }
     return true;
   },
@@ -364,6 +832,13 @@ export const PolicyEvaluationVerdictSchema = z.object({
 );
 
 export type PolicyEvaluationVerdict = z.infer<typeof PolicyEvaluationVerdictSchema>;
+
+/**
+ * CustodianVerdictSchema: Exported alongside PolicyEvaluationVerdictSchema
+ * Canonical representation of Custodian multi-dimensional alignment decision gate.
+ */
+export const CustodianVerdictSchema = PolicyEvaluationVerdictSchema;
+export type CustodianVerdict = z.infer<typeof CustodianVerdictSchema>;
 
 /**
  * Agentic Commerce Protocol (ACP) Interoperability Schemas

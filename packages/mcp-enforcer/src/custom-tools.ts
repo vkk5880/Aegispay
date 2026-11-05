@@ -159,6 +159,16 @@ export const AuthorizeEscrowOrderSchema = z.object({
   {
     message: 'requested_cents must strictly equal the sum of (price_cents * quantity) across all items'
   }
+).refine(
+  data => !data.mandate || data.requested_cents <= data.mandate.max_total_spend_cents,
+  {
+    message: 'ERR_EXCEEDS_TOTAL_MANDATE_BUDGET: requested_cents exceeds mandate total budget cap'
+  }
+).refine(
+  data => !data.mandate || data.requested_cents <= data.mandate.max_single_merchant_cents,
+  {
+    message: 'ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP: requested_cents exceeds mandate single merchant exposure cap'
+  }
 );
 
 // 3. broadcast_synthetic_intent_voucher
@@ -262,8 +272,34 @@ export const toolHandlers = {
     console.error('[MCP Enforcer] Authorizing escrow...', sanitizeForLogging(args));
 
     // Sequential 4-Stage Custodian Verification Gate:
-    // Stage 1: Strict Zod schema refinement ensuring requested_cents === sum(price_cents * quantity)
-    // (Validated upfront via AuthorizeEscrowOrderSchema)
+    // Stage 1: Line-item arithmetic integrity and budget cap enforcement (float-safe integer checks)
+    if (!Number.isSafeInteger(args.requested_cents) || args.requested_cents <= 0) {
+      throw new Error('ERR_INVALID_SPEND_AMOUNT: requested_cents must be a positive integer');
+    }
+    for (const item of args.items) {
+      if (
+        !Number.isSafeInteger(item.price_cents) ||
+        item.price_cents <= 0 ||
+        !Number.isSafeInteger(item.quantity) ||
+        item.quantity <= 0
+      ) {
+        throw new Error('ERR_INVALID_ITEM_ARITHMETIC: item price_cents and quantity must be positive safe integers');
+      }
+    }
+
+    const calculatedSum = args.items.reduce((sum, item) => sum + item.price_cents * item.quantity, 0);
+    if (args.requested_cents !== calculatedSum) {
+      throw new Error('requested_cents must strictly equal the sum of (price_cents * quantity) across all items');
+    }
+
+    if (args.mandate) {
+      if (args.requested_cents > args.mandate.max_total_spend_cents) {
+        throw new Error('ERR_EXCEEDS_TOTAL_MANDATE_BUDGET');
+      }
+      if (args.requested_cents > args.mandate.max_single_merchant_cents) {
+        throw new Error('ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP');
+      }
+    }
 
     // Stage 2: Ed25519 Cryptographic Signature Verification against buyer public key
     if (args.mandate) {
@@ -273,7 +309,7 @@ export const toolHandlers = {
       }
     }
 
-    // Stage 3: Merchant Anomaly Gate check (reject score > 300 / 1000)
+    // Stage 3: Merchant Anomaly Gate check (reject score > 300 / 1000 basis points threshold for risk)
     const anomalyScore = calculateMerchantAnomalyScore({
       domain: args.merchant_domain,
       disputeRate: args.merchant_dispute_rate ?? 0,

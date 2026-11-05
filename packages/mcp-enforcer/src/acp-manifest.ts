@@ -337,6 +337,12 @@ export const ACP_MANIFEST: ACPManifest = {
   ],
 };
 
+export const acp_version = '2026-01-30';
+
+export function generateACPManifest(): ACPManifest {
+  return ACP_MANIFEST;
+}
+
 /**
  * ACP Action Dispatcher
  * Bridges standard ACP action calls directly to AegisPay guarded tool handlers.

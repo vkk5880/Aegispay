@@ -249,3 +249,23 @@ export class AuditChain {
 }
 
 export const defaultAuditChain = new AuditChain();
+
+// Aliases matching Custodian reference repository audit specifications
+export { AuditChain as ImmutableAuditChain };
+
+export function appendVerdict(
+  chain: AuditChain,
+  requestId: string,
+  verdict: Record<string, unknown>
+): LedgerEvent {
+  return chain.append({
+    request_id: requestId,
+    event_type: LedgerEventType.DECISION_MADE,
+    observed: verdict,
+  });
+}
+
+export function verifyChainIntegrity(chain: AuditChain): boolean {
+  return chain.verifyChain();
+}
+
