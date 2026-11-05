@@ -263,7 +263,7 @@ export async function executeReverseShippingLabel(
 /**
  * Shipment Tracking v1 (/v1/shipping/trackers-batch) integration with fallback
  */
-async function syncTrackingToPayPal(tracker: {
+export async function syncTrackingToPayPal(tracker: {
   transaction_id: string;
   tracking_number: string;
   status: 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
