@@ -18,6 +18,8 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  Database,
+  Code2,
 } from 'lucide-react';
 
 interface TerminalOutput {
@@ -184,81 +186,27 @@ export default function JudgeChaosPortal() {
           </div>
         </div>
 
-        {/* 6 Chaos Triggers Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {/* Action 1: Adversarial Redis Lua budget exhaustion attack (<1ms block) */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-rose-300 dark:border-rose-500/40 hover:border-rose-500 dark:hover:border-rose-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
-            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 rounded text-[9px] font-mono font-bold">
-              &lt; 1ms LUA BLOCK
-            </div>
-            <div className="space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-500/20 border border-rose-300 dark:border-rose-500/40 flex items-center justify-center text-rose-700 dark:text-rose-400">
-                <ShieldAlert className="w-4 h-4" />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-rose-600 dark:text-rose-400">ATTACK 1</span>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-rose-200">Budget Exhaustion Attack</h3>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Adversarial AI attempts $5,000 spend over $500 cap. Demonstrates instant <strong>&lt; 1ms Redis Lua atomic block</strong> with 0 PayPal API calls.
-              </p>
-            </div>
-            <button
-              onClick={() => triggerChaos('TRIGGER_REDIS_LUA_ATTACK', '1. Adversarial Redis Lua Budget Exhaustion Attack ($5,000)')}
-              disabled={loadingAction !== null}
-              className="w-full py-2.5 px-3 bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-rose-500/20"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              {loadingAction === 'TRIGGER_REDIS_LUA_ATTACK' ? 'Injecting Attack...' : 'Trigger $5,000 Attack'}
-            </button>
-          </div>
-
-          {/* Action 2: Live Channel3 multi-modal search & Knapsack optimization with promo code */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-blue-300 dark:border-blue-500/40 hover:border-blue-500 dark:hover:border-blue-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
-            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded text-[9px] font-mono font-bold">
-              CHANNEL3 + PROMO
-            </div>
-            <div className="space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 flex items-center justify-center text-blue-700 dark:text-blue-400">
-                <ShoppingCart className="w-4 h-4" />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400">FLOW 2</span>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-blue-200">Channel3 Search & Knapsack</h3>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Applies promo <code>PAYPAL-HACKATHON-2026</code>, executes 2PC inventory hold, and runs mathematical multi-merchant Knapsack bundling.
-              </p>
-            </div>
-            <button
-              onClick={() => triggerChaos('TRIGGER_CHANNEL3_KNAPSACK', '2. Live Channel3 Search & Knapsack Optimization')}
-              disabled={loadingAction !== null}
-              className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-blue-500/20"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              {loadingAction === 'TRIGGER_CHANNEL3_KNAPSACK' ? 'Optimizing...' : 'Run Channel3 Knapsack'}
-            </button>
-          </div>
-
-          {/* Action 3: Real autonomous auto-buy checkout using PayPal Vault v3 token */}
+        {/* 7 Sponsor Tracks 1-Click Interactive Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Track 1: PayPal Core & Vault v3 */}
           <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-purple-300 dark:border-purple-500/40 hover:border-purple-500 dark:hover:border-purple-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
             <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-500/30 rounded text-[9px] font-mono font-bold">
-              VAULT v3 TOKEN
+              TRACK 1: VAULT v3
             </div>
             <div className="space-y-2">
               <div className="w-8 h-8 rounded-lg bg-purple-100 dark:bg-purple-500/20 border border-purple-300 dark:border-purple-500/40 flex items-center justify-center text-purple-700 dark:text-purple-400">
                 <Activity className="w-4 h-4" />
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-purple-600 dark:text-purple-400">FLOW 3</span>
+                <span className="text-[10px] font-mono font-bold text-purple-600 dark:text-purple-400">TRACK 1</span>
                 <h3 className="font-bold text-sm text-slate-900 dark:text-purple-200">Autonomous Vault Auto-Buy</h3>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Headless off-session execution: consumes Vault v3 payment token, executes Orders v2 multi-unit capture, and performs verified server read-back.
+                Headless auto-buy: consumes stored Vault v3 payment token, executes Orders v2 multi-unit capture, and verifies cryptographic server read-back.
               </p>
             </div>
             <button
-              onClick={() => triggerChaos('TRIGGER_AUTONOMOUS_VAULT_BUY', '3. Real Autonomous Auto-Buy via PayPal Vault v3')}
+              onClick={() => triggerChaos('TRIGGER_AUTONOMOUS_VAULT_BUY', 'Track 1: Real Autonomous Auto-Buy via PayPal Vault v3')}
               disabled={loadingAction !== null}
               className="w-full py-2.5 px-3 bg-purple-600 hover:bg-purple-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-purple-500/20"
             >
@@ -267,17 +215,98 @@ export default function JudgeChaosPortal() {
             </button>
           </div>
 
-          {/* Action 4: Instant Redis Lua rollback on simulated card decline (<1ms) */}
+          {/* Track 2: Channel3 Multi-Modal Catalog */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-blue-300 dark:border-blue-500/40 hover:border-blue-500 dark:hover:border-blue-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 rounded text-[9px] font-mono font-bold">
+              TRACK 2: CHANNEL3
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-500/20 border border-blue-300 dark:border-blue-500/40 flex items-center justify-center text-blue-700 dark:text-blue-400">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400">TRACK 2</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-blue-200">Channel3 Search & Knapsack</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Applies promo <code>PAYPAL-HACKATHON-2026</code>, executes 2PC pre-flight stock verification, and runs mathematical Knapsack bundling.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_CHANNEL3_KNAPSACK', 'Track 2: Live Channel3 Search & Knapsack Optimization')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-blue-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_CHANNEL3_KNAPSACK' ? 'Optimizing...' : 'Run Channel3 Knapsack'}
+            </button>
+          </div>
+
+          {/* Track 3: APIMatic SDK Validation */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-emerald-300 dark:border-emerald-500/40 hover:border-emerald-500 dark:hover:border-emerald-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 rounded text-[9px] font-mono font-bold">
+              TRACK 3: APIMATIC
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-300 dark:border-emerald-500/40 flex items-center justify-center text-emerald-700 dark:text-emerald-400">
+                <Code2 className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">TRACK 3</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-emerald-200">APIMatic SDK Validation</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Grounded PayPal REST client API request/response read-backs, cryptographic verification, and OAS 3.0 specification conformance audit.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_APIMATIC_VERIFY', 'Track 3: APIMatic SDK Request/Response Read-Backs')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_APIMATIC_VERIFY' ? 'Verifying...' : 'Audit APIMatic Read-Back'}
+            </button>
+          </div>
+
+          {/* Track 4: Redis Lua Security Gate */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-rose-300 dark:border-rose-500/40 hover:border-rose-500 dark:hover:border-rose-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 rounded text-[9px] font-mono font-bold">
+              TRACK 4: LUA GATE
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-rose-100 dark:bg-rose-500/20 border border-rose-300 dark:border-rose-500/40 flex items-center justify-center text-rose-700 dark:text-rose-400">
+                <ShieldAlert className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-rose-600 dark:text-rose-400">TRACK 4</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-rose-200">Budget Exhaustion Attack</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Adversarial AI attempts $5,000 spend over $500 cap. Demonstrates instant <strong>&lt; 1ms Redis Lua atomic block</strong> with 0 PayPal API calls.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_REDIS_LUA_ATTACK', 'Track 4: Adversarial Redis Lua Budget Exhaustion Attack ($5,000)')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-rose-600 hover:bg-rose-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-rose-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_REDIS_LUA_ATTACK' ? 'Injecting Attack...' : 'Trigger $5,000 Attack'}
+            </button>
+          </div>
+
+          {/* Track 5: x402 & Compensating Rollback */}
           <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-orange-300 dark:border-orange-500/40 hover:border-orange-500 dark:hover:border-orange-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
             <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-500/30 rounded text-[9px] font-mono font-bold">
-              &lt; 1ms ROLLBACK
+              TRACK 5: x402 ROLLBACK
             </div>
             <div className="space-y-2">
               <div className="w-8 h-8 rounded-lg bg-orange-100 dark:bg-orange-500/20 border border-orange-300 dark:border-orange-500/40 flex items-center justify-center text-orange-700 dark:text-orange-400">
                 <Undo2 className="w-4 h-4" />
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-orange-600 dark:text-orange-400">FLOW 4</span>
+                <span className="text-[10px] font-mono font-bold text-orange-600 dark:text-orange-400">TRACK 5</span>
                 <h3 className="font-bold text-sm text-slate-900 dark:text-orange-200">Decline Compensating Rollback</h3>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
@@ -285,7 +314,7 @@ export default function JudgeChaosPortal() {
               </p>
             </div>
             <button
-              onClick={() => triggerChaos('TRIGGER_REDIS_LUA_ROLLBACK', '4. Instant Redis Lua Rollback on Decline')}
+              onClick={() => triggerChaos('TRIGGER_REDIS_LUA_ROLLBACK', 'Track 5: Instant Redis Lua Rollback on Decline')}
               disabled={loadingAction !== null}
               className="w-full py-2.5 px-3 bg-orange-600 hover:bg-orange-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-orange-500/20"
             >
@@ -294,44 +323,71 @@ export default function JudgeChaosPortal() {
             </button>
           </div>
 
-          {/* Action 5: Multi-modal dispute evidence submission with EXIF check and PDF generation */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-emerald-300 dark:border-emerald-500/40 hover:border-emerald-500 dark:hover:border-emerald-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
-            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 rounded text-[9px] font-mono font-bold">
-              VISION FORENSICS + PDF
+          {/* Track 6: Multi-Modal Dispute Forensics & Return Label */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-teal-300 dark:border-teal-500/40 hover:border-teal-500 dark:hover:border-teal-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-500/30 rounded text-[9px] font-mono font-bold">
+              TRACK 6: FORENSICS
             </div>
             <div className="space-y-2">
-              <div className="w-8 h-8 rounded-lg bg-emerald-100 dark:bg-emerald-500/20 border border-emerald-300 dark:border-emerald-500/40 flex items-center justify-center text-emerald-700 dark:text-emerald-400">
+              <div className="w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-500/20 border border-teal-300 dark:border-teal-500/40 flex items-center justify-center text-teal-700 dark:text-teal-400">
                 <FileCheck className="w-4 h-4" />
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400">FLOW 5</span>
-                <h3 className="font-bold text-sm text-slate-900 dark:text-emerald-200">Dispute Evidence & PDF</h3>
+                <span className="text-[10px] font-mono font-bold text-teal-600 dark:text-teal-400">TRACK 6</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-teal-200">Dispute Forensics & Label</h3>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
-                Runs mobile-safe EXIF inspection, generates in-memory pdf-lib forensic dossier, submits to PayPal Disputes v1, and auto-adjudicates.
+                Mobile-safe EXIF inspection, defect bounding box, in-memory <code>pdf-lib</code> return label & QR code, and PayPal tracking synchronization.
               </p>
             </div>
             <button
-              onClick={() => triggerChaos('INJECT_SANDBOX_DISPUTE', '5. Multi-Modal Dispute Forensics & PDF Generation')}
+              onClick={() => triggerChaos('INJECT_SANDBOX_DISPUTE', 'Track 6: Multi-Modal Dispute Forensics & Return Label Generation')}
               disabled={loadingAction !== null}
-              className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-500/20"
+              className="w-full py-2.5 px-3 bg-teal-600 hover:bg-teal-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-teal-500/20"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               {loadingAction === 'INJECT_SANDBOX_DISPUTE' ? 'Adjudicating...' : 'Auto-Adjudicate Dispute'}
             </button>
           </div>
 
-          {/* Action 6: Knapsack Multi-Vendor + 72h Price Drop */}
+          {/* Track 7: DuckDB-WASM & Bryntum */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-indigo-300 dark:border-indigo-500/40 hover:border-indigo-500 dark:hover:border-indigo-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-500/30 rounded text-[9px] font-mono font-bold">
+              TRACK 7: DUCKDB + BRYNTUM
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-500/20 border border-indigo-300 dark:border-indigo-500/40 flex items-center justify-center text-indigo-700 dark:text-indigo-400">
+                <Database className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-indigo-600 dark:text-indigo-400">TRACK 7</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-indigo-200">DuckDB OLAP & Bryntum SLA</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Client-side DuckDB-WASM in-memory OLAP SQL queries (&lt;10ms) with lean Arrow projections & Bryntum SLA breach countdown scheduler.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_DUCKDB_BRYNTUM_ANALYTICS', 'Track 7: DuckDB-WASM In-Memory OLAP & Bryntum SLA Scheduler')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_DUCKDB_BRYNTUM_ANALYTICS' ? 'Querying...' : 'Run DuckDB & Bryntum'}
+            </button>
+          </div>
+
+          {/* Bonus Flow: Knapsack Multi-Vendor + 72h Price Drop */}
           <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-cyan-300 dark:border-cyan-500/40 hover:border-cyan-500 dark:hover:border-cyan-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
             <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/30 rounded text-[9px] font-mono font-bold">
-              72h PRICE DROP
+              RENDER WORKFLOW
             </div>
             <div className="space-y-2">
               <div className="w-8 h-8 rounded-lg bg-cyan-100 dark:bg-cyan-500/20 border border-cyan-300 dark:border-cyan-500/40 flex items-center justify-center text-cyan-700 dark:text-cyan-400">
                 <Layers className="w-4 h-4" />
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold text-cyan-600 dark:text-cyan-400">FLOW 6</span>
+                <span className="text-[10px] font-mono font-bold text-cyan-600 dark:text-cyan-400">DURABLE</span>
                 <h3 className="font-bold text-sm text-slate-900 dark:text-cyan-200">Knapsack + 72h Price Drop</h3>
               </div>
               <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
@@ -339,7 +395,7 @@ export default function JudgeChaosPortal() {
               </p>
             </div>
             <button
-              onClick={() => triggerChaos('TRIGGER_KNAPSACK_PRICE_DROP', '6. Knapsack + 72h Price-Drop Capture')}
+              onClick={() => triggerChaos('TRIGGER_KNAPSACK_PRICE_DROP', 'Durable Flow: Knapsack + 72h Price-Drop Capture')}
               disabled={loadingAction !== null}
               className="w-full py-2.5 px-3 bg-cyan-600 hover:bg-cyan-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-cyan-500/20"
             >

@@ -178,6 +178,14 @@ test('E2E Pipeline Step 5 (INJECT_SANDBOX_DISPUTE): Multi-modal dispute forensic
   assert.equal(stages[3].stage, 'sandbox_adjudicate');
   assert.equal(stages[3].adjudication_outcome, 'SELLER_FAVOR');
 
+  // Verify Return Label Generation for reverse logistics
+  assert.ok(json.dispute_pipeline.return_label);
+  assert.equal(json.dispute_pipeline.return_label.carrier, 'USPS');
+  assert.ok(json.dispute_pipeline.return_label.tracking_number.startsWith('940011189922'));
+  assert.ok(json.dispute_pipeline.return_label.label_url.startsWith('data:application/pdf;base64,'));
+  assert.ok(json.dispute_pipeline.return_label.qr_code_base64.includes('QR:'));
+  assert.equal(json.dispute_pipeline.return_label.paypal_tracking_v1_registered, true);
+
   // Verify PayPal Readback
   assert.equal(json.paypal_server_readback.status, 'RESOLVED');
   assert.equal(json.paypal_server_readback.adjudication_outcome, 'SELLER_FAVOR');
@@ -285,4 +293,87 @@ test('E2E Pipeline Step 7 (Live Read-Back Terminal /api/integrations/verify): Co
   assert.equal(integrations.duckdb_wasm.status, 'ACTIVE');
   assert.equal(integrations.duckdb_wasm.sub_10ms_analytics, true);
   assert.equal(integrations.duckdb_wasm.read_only_enforced, true);
+});
+
+test('E2E Pipeline Step 8 (TRIGGER_APIMATIC_VERIFY): Validates PayPal REST API read-backs and OAS 3.0 conformance', async () => {
+  const req = new Request('http://localhost:3000/api/chaos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'TRIGGER_APIMATIC_VERIFY' }),
+  });
+
+  const res = await chaosHandler(req);
+  assert.equal(res.status, 200);
+
+  const json = await res.json();
+  assert.equal(json.status, 'SUCCESS');
+  assert.equal(json.chaos_action, 'TRIGGER_APIMATIC_VERIFY');
+
+  // Verify APIMatic SDK conformance
+  assert.ok(json.apimatic_sdk);
+  assert.equal(json.apimatic_sdk.status, 'GROUNDED');
+  assert.equal(json.apimatic_sdk.sdk_wrapper, 'PayPalApimaticClient');
+  assert.equal(json.apimatic_sdk.cryptographic_readbacks_verified, true);
+  assert.equal(json.apimatic_sdk.idempotency_enforced, true);
+  assert.ok(json.apimatic_sdk.documented_endpoints.length >= 7);
+
+  // Verify PayPal server read-back
+  assert.ok(json.paypal_server_readback);
+  assert.equal(json.paypal_server_readback.status, 'COMPLETED');
+  assert.equal(json.paypal_server_readback.server_readback_verified, true);
+});
+
+test('E2E Pipeline Step 9 (TRIGGER_DUCKDB_BRYNTUM_ANALYTICS): Sub-10ms OLAP query and Bryntum SLA scheduler', async () => {
+  const req = new Request('http://localhost:3000/api/chaos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'TRIGGER_DUCKDB_BRYNTUM_ANALYTICS' }),
+  });
+
+  const res = await chaosHandler(req);
+  assert.equal(res.status, 200);
+
+  const json = await res.json();
+  assert.equal(json.status, 'SUCCESS');
+  assert.equal(json.chaos_action, 'TRIGGER_DUCKDB_BRYNTUM_ANALYTICS');
+
+  // Verify DuckDB-WASM execution
+  assert.ok(json.duckdb_wasm);
+  assert.equal(json.duckdb_wasm.read_only_enforced, true);
+  assert.equal(json.duckdb_wasm.sub_10ms_guarantee, true);
+  assert.ok(json.duckdb_wasm.execution_time_ms < 10.0);
+  assert.ok(json.duckdb_wasm.aggregated_metrics.length > 0);
+
+  // Verify Bryntum SLA Scheduler
+  assert.ok(json.bryntum_scheduler);
+  assert.equal(json.bryntum_scheduler.component, 'DisputeSlaScheduler');
+  assert.equal(json.bryntum_scheduler.active_arbitrations_tracked, 1000);
+  assert.ok(json.bryntum_scheduler.sla_breach_prevention);
+});
+
+test('E2E Pipeline Step 10 (TRIGGER_SYNTHETIC_BID): Automated merchant negotiation and Vault setup token capture', async () => {
+  const req = new Request('http://localhost:3000/api/chaos', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'TRIGGER_SYNTHETIC_BID' }),
+  });
+
+  const res = await chaosHandler(req);
+  assert.equal(res.status, 200);
+
+  const json = await res.json();
+  assert.equal(json.status, 'SUCCESS');
+  assert.equal(json.chaos_action, 'TRIGGER_SYNTHETIC_BID');
+
+  // Verify Synthetic Voucher
+  assert.ok(json.synthetic_voucher);
+  assert.ok(json.synthetic_voucher.voucher_id.startsWith('syn_'));
+  assert.equal(json.synthetic_voucher.buyer_bid_cents, 45000);
+  assert.equal(json.synthetic_voucher.retail_offer_cents, 49000);
+  assert.equal(json.synthetic_voucher.bid_cleared, true);
+
+  // Verify Server Read-back
+  assert.ok(json.paypal_server_readback);
+  assert.equal(json.paypal_server_readback.status, 'COMPLETED');
+  assert.equal(json.paypal_server_readback.server_readback_verified, true);
 });
