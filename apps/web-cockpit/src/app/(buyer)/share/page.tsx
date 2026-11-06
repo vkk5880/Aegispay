@@ -47,7 +47,7 @@ const DEFAULT_RUNNER_UP: SharedProduct = {
   reason: 'Breakthrough spatial audio and plush comfort, but carries a higher unit price and 40% lower battery duration compared to Sony.',
 };
 
-function ShareContent() {
+export function ShareContent() {
   const searchParams = useSearchParams();
   const [copied, setCopied] = useState<boolean>(false);
   const [winner, setWinner] = useState<SharedProduct>(DEFAULT_WINNER);

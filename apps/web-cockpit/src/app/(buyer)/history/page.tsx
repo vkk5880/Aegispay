@@ -342,7 +342,7 @@ export default function HistoryPage() {
                     >
                       {copiedHash === item.hash ? (
                         <>
-                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <Check className="w-3 h-3 text-emerald-400" />
                           <span className="text-emerald-400 font-bold">SHA-256 Copied!</span>
                         </>
                       ) : (

@@ -173,3 +173,115 @@ test('UnifiedCartDrawer: generateBundlingExplanation produces human-readable mul
   assert.ok(explanation.includes('Free Shipping'));
   assert.ok(explanation.endsWith('.'));
 });
+
+test('ChatFlow: VS pattern regex detection isolates comparative queries directly', () => {
+  const VS_PATTERN = /\s+(?:vs\.?|versus)\s+/i;
+  assert.equal(VS_PATTERN.test('Sony WH-1000XM5 vs Bose QC Ultra'), true);
+  assert.equal(VS_PATTERN.test('Sony WH-1000XM5 vs. Bose QC Ultra'), true);
+  assert.equal(VS_PATTERN.test('Mechanical Keyboard versus Membrane'), true);
+  assert.equal(VS_PATTERN.test('Desk mat for workspace'), false);
+  assert.equal(VS_PATTERN.test('versus'), false); // Requires surrounding whitespace
+});
+
+test('BattleArena: contender scoring metrics, percentage scaling, and winner determination', () => {
+  const contenderA = {
+    title: 'Sony WH-1000XM5',
+    price_cents: 29999,
+    composite_score: 9.4,
+    merchant_domain: 'bestbuy.com',
+  };
+  const contenderB = {
+    title: 'Bose QC Ultra',
+    price_cents: 34900,
+    composite_score: 8.8,
+    merchant_domain: 'bose.com',
+  };
+
+  const calculateScore = (p: typeof contenderA) =>
+    p.composite_score ? (p.composite_score <= 10 ? p.composite_score * 10 : p.composite_score) : 90;
+
+  assert.equal(calculateScore(contenderA), 94);
+  assert.equal(calculateScore(contenderB), 88);
+
+  const winner = calculateScore(contenderA) > calculateScore(contenderB) ? contenderA : contenderB;
+  assert.equal(winner.title, 'Sony WH-1000XM5');
+  assert.equal(winner.price_cents / 100, 299.99);
+});
+
+test('ExplainDrawer: deterministic SVG radar math, baseline normalization, and loser reason diagnostics', () => {
+  const winner = {
+    title: 'AudioPro Desk Amp',
+    price: 15000,
+    rating: 4.8,
+    review_count: 320,
+    score_breakdown: {
+      price_score: 0.95,
+      rating_score: 0.92,
+      review_score: 0.88,
+    },
+    relevance_score: 0.96,
+    trust_multiplier: 1.0,
+    trust_tier: 'tier1',
+    price_suspicious: false,
+  };
+
+  const expensiveLoser = {
+    title: 'Overpriced Amp',
+    price: 24000,
+    rating: 4.5,
+    review_count: 120,
+    score_breakdown: {
+      price_score: 0.6,
+      rating_score: 0.85,
+      review_score: 0.7,
+    },
+    relevance_score: 0.85,
+    trust_tier: 'tier2',
+  };
+
+  const suspiciousLoser = {
+    title: 'Scam Tier Amp',
+    price: 3000,
+    rating: 3.2,
+    review_count: 12,
+    score_breakdown: {
+      price_score: 0.9,
+      rating_score: 0.4,
+      review_score: 0.2,
+    },
+    relevance_score: 0.35,
+    trust_tier: 'tier3',
+    price_suspicious: true,
+  };
+
+  // Radar geometry invariants
+  const size = 260;
+  const center = size / 2;
+  const radius = size * 0.38;
+  const totalAxes = 5;
+
+  const getCoordinates = (index: number, normalizedValue: number) => {
+    const angle = ((Math.PI * 2) / totalAxes) * index - Math.PI / 2;
+    const r = radius * Math.min(Math.max(normalizedValue, 0.05), 1);
+    const x = center + r * Math.cos(angle);
+    const y = center + r * Math.sin(angle);
+    return { x, y, angle };
+  };
+
+  const coord0 = getCoordinates(0, 1.0);
+  assert.ok(Math.abs(coord0.x - center) < 0.001); // Top axis points straight up
+  assert.ok(coord0.y < center);
+
+  // Loser reason calculation
+  const getReason = (loser: typeof expensiveLoser, w: typeof winner) => {
+    const priceDiff = loser.price - w.price;
+    if (priceDiff > 5000) return `$${(priceDiff / 100).toFixed(2)} higher than winner`;
+    if ((loser.review_count ?? 0) < 50) return `Low confidence: only ${loser.review_count ?? 0} reviews`;
+    if ((loser.relevance_score ?? 0) < 0.4) return 'Poor semantic query match (< 40%)';
+    if (loser.trust_tier === 'tier3') return 'Unverified store trust tier';
+    return 'Lower overall composite score';
+  };
+
+  assert.equal(getReason(expensiveLoser, winner), '$90.00 higher than winner');
+  assert.equal(getReason(suspiciousLoser, winner), 'Low confidence: only 12 reviews');
+});

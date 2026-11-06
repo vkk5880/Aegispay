@@ -119,7 +119,7 @@ const MOCK_SEARCH_RESULTS: ProductCardData[] = [
   },
 ];
 
-function SearchContent() {
+export function SearchContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const queryParam = searchParams?.get('q') || '';
