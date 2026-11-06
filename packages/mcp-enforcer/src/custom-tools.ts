@@ -408,4 +408,164 @@ export const toolHandlers = {
       offer_id: `off_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`
     };
   }
+,
+
+  // =========================================================================
+  // ACP MCP 5-Tool Handlers (docs/mcp-binding.md)
+  // =========================================================================
+
+  async handleCreateCheckoutSession(args: any) {
+    console.error('[MCP Enforcer] Creating ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    const payload = args.payload || {};
+    const sessionId = `cs_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    
+    const items = (payload.items || []).map((it: any, idx: number) => {
+      const unitCents = it.unit_price_cents !== undefined ? it.unit_price_cents : 2500;
+      return {
+        id: it.id || `item_${idx + 1}`,
+        name: it.name || `Item ${it.id}`,
+        quantity: it.quantity || 1,
+        unit_price_cents: unitCents,
+        subtotal_cents: unitCents * (it.quantity || 1),
+      };
+    });
+
+    const subtotalCents = items.reduce((acc: number, it: any) => acc + it.subtotal_cents, 0);
+    const taxCents = Math.round(subtotalCents * 0.0825);
+    const shippingCents = subtotalCents >= 10000 ? 0 : 500;
+    const totalCents = subtotalCents + taxCents + shippingCents;
+
+    const auditEvent = defaultAuditChain.append({
+      request_id: args.meta?.request_id || sessionId,
+      event_type: 'ACP_MCP_SESSION_CREATED',
+      observed: {
+        session_id: sessionId,
+        items_count: items.length,
+        subtotal_cents: subtotalCents,
+        affiliate_provider: payload.affiliate_attribution?.provider || null,
+      },
+      inferred: {
+        total_cents: totalCents,
+        status: 'ready_for_payment',
+      },
+    });
+
+    return {
+      id: sessionId,
+      status: 'ready_for_payment',
+      currency: (payload.currency || 'USD').toLowerCase(),
+      line_items: items.map((it: any) => ({
+        id: `li_${it.id}`,
+        item: { id: it.id, name: it.name },
+        quantity: it.quantity,
+        base_amount: it.subtotal_cents,
+        discount_amount: 0,
+        subtotal: it.subtotal_cents,
+        total: it.subtotal_cents,
+      })),
+      totals: [
+        { type: 'subtotal', amount: subtotalCents },
+        { type: 'tax', amount: taxCents },
+        { type: 'shipping', amount: shippingCents },
+        { type: 'total', amount: totalCents },
+      ],
+      capabilities: {
+        payment_handlers: ['paypal_vault_v3', 'card_tokenized'],
+      },
+      messages: [],
+      links: [
+        { rel: 'self', href: `https://aegispay.dev/checkout_sessions/${sessionId}` },
+      ],
+      audit_hash: auditEvent.hash,
+    };
+  },
+
+  async handleGetCheckoutSession(args: any) {
+    console.error('[MCP Enforcer] Getting ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    if (!args.id || args.id === 'invalid' || args.id.includes('nonexistent')) {
+      const err: any = new Error('Checkout session not found');
+      err.code = -32000;
+      err.data = {
+        type: 'invalid_request',
+        code: 'session_not_found',
+        message: 'Checkout session not found',
+        param: 'id',
+      };
+      throw err;
+    }
+    return {
+      id: args.id,
+      status: 'ready_for_payment',
+      currency: 'usd',
+      line_items: [],
+      totals: [
+        { type: 'subtotal', amount: 5000 },
+        { type: 'tax', amount: 413 },
+        { type: 'total', amount: 5413 },
+      ],
+      messages: [],
+    };
+  },
+
+  async handleUpdateCheckoutSession(args: any) {
+    console.error('[MCP Enforcer] Updating ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    return {
+      id: args.id,
+      status: 'ready_for_payment',
+      currency: 'usd',
+      updated_at: new Date().toISOString(),
+      messages: [],
+    };
+  },
+
+  async handleCompleteCheckoutSession(args: any) {
+    console.error('[MCP Enforcer] Completing ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    const orderId = `ord_mcp_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    const auditEvent = defaultAuditChain.append({
+      request_id: args.id,
+      event_type: 'ACP_MCP_SESSION_COMPLETED',
+      observed: {
+        session_id: args.id,
+        payment_method_type: args.payload?.payment_method?.type || null,
+      },
+      inferred: {
+        order_id: orderId,
+        status: 'completed',
+      },
+    });
+
+    return {
+      id: args.id,
+      status: 'completed',
+      order: {
+        id: orderId,
+        order_id: orderId,
+        status: 'CREATED',
+        created_at: new Date().toISOString(),
+      },
+      audit_hash: auditEvent.hash,
+    };
+  },
+
+  async handleCancelCheckoutSession(args: any) {
+    console.error('[MCP Enforcer] Cancelling ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    const auditEvent = defaultAuditChain.append({
+      request_id: args.id,
+      event_type: 'ACP_MCP_SESSION_CANCELLED',
+      observed: {
+        session_id: args.id,
+        reason: args.payload?.reason || null,
+      },
+      inferred: {
+        status: 'cancelled',
+      },
+    });
+
+    return {
+      id: args.id,
+      status: 'cancelled',
+      cancellation_reason: args.payload?.reason || 'user_requested',
+      audit_hash: auditEvent.hash,
+    };
+  },
 };

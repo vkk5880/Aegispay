@@ -8,3 +8,5 @@ dist
 coverage
 .reference-repos/
 .task_prompt_tmp.txt
+paypal-agentic-cockpit-main/
+paypal-agentic-cockpit-original-backup/

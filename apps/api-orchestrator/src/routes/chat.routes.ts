@@ -1,3 +1,15 @@
+import {
+  addToWatchlist,
+  getWatchlist,
+  removeFromWatchlist,
+  loadUserPreferences,
+  saveUserPreference,
+  getPurchaseHistory,
+  checkAllWatchlists,
+  getWatchlistAlerts,
+  getReceipts,
+  updatePurchaseStatus,
+} from '../services/user-memory.js';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -39,6 +51,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
       available_models: AVAILABLE_COMMERCE_MODELS,
     };
   });
+
   /**
    * POST /api/buyer/chat
    * Conversational AI Shopping Concierge & Product Comparison Engine
@@ -78,5 +91,206 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
         ],
       });
     }
+  });
+
+  /**
+   * POST /api/buyer/clarify
+   * Evaluates if query is vague and returns targeted clarifying questions.
+   */
+  fastify.post('/api/buyer/clarify', async (request, reply) => {
+    const body = request.body as { query?: string };
+    const query = body?.query || '';
+    const needs = defaultShoppingAssistant.needsClarification(query);
+    const questions = needs ? await defaultShoppingAssistant.getClarifyingQuestions(query) : [];
+    return reply.send({
+      status: 'SUCCESS',
+      needs_clarification: needs,
+      questions,
+    });
+  });
+
+  /**
+   * POST /api/buyer/enrich
+   * Combines original query and answers into a refined search query.
+   */
+  fastify.post('/api/buyer/enrich', async (request, reply) => {
+    const body = request.body as { query?: string; answers?: Record<string, any> };
+    const enriched = defaultShoppingAssistant.buildEnrichedQuery(body?.query || '', body?.answers || {});
+    return reply.send({
+      status: 'SUCCESS',
+      original_query: body?.query || '',
+      enriched_query: enriched,
+    });
+  });
+
+  /**
+   * GET /api/buyer/community-sentiment
+   * Fetches community consensus sentiment for a specific product title.
+   */
+  fastify.get('/api/buyer/community-sentiment', async (request, reply) => {
+    const query = request.query as { title?: string };
+    const sentiment = await defaultShoppingAssistant.getCommunitySentiment(query?.title || '');
+    return reply.send({
+      status: 'SUCCESS',
+      title: query?.title || '',
+      community_sentiment: sentiment,
+    });
+  });
+
+  /**
+   * GET /api/buyer/social-proof
+   * Returns community social proof signals, sentiment emoji, highlights, and review links.
+   */
+  fastify.get('/api/buyer/social-proof', async (request, reply) => {
+    const query = request.query as { title?: string };
+    const proof = await defaultShoppingAssistant.getSocialProof(query?.title || '');
+    return reply.send({
+      status: 'SUCCESS',
+      title: query?.title || '',
+      social_proof: proof,
+    });
+  });
+
+  /**
+   * POST /api/buyer/battle-report
+   * Generates a head-to-head Tale of the Tape referee comparison report.
+   */
+  fastify.post('/api/buyer/battle-report', async (request, reply) => {
+    const body = request.body as { contender_a: any; contender_b: any };
+    if (!body?.contender_a || !body?.contender_b) {
+      return reply.status(400).send({ error: 'MISSING_CONTENDERS', message: 'Both contender_a and contender_b are required.' });
+    }
+    const report = await defaultShoppingAssistant.generateBattleReport(body.contender_a, body.contender_b);
+    return reply.send({
+      status: 'SUCCESS',
+      battle_report: report,
+    });
+  });
+
+  /**
+   * POST /api/buyer/watchlist
+   * Adds or replaces an item in the user's price-drop watchlist.
+   */
+  fastify.post('/api/buyer/watchlist', async (request, reply) => {
+    const body = request.body as {
+      user_id?: string;
+      title: string;
+      current_price_cents: number;
+      target_price_cents: number;
+      source: string;
+      link?: string;
+      query?: string;
+    };
+    if (!body?.title || !body?.target_price_cents) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'title and target_price_cents are required.' });
+    }
+    const item = addToWatchlist(body.user_id || 'demo', body);
+    return reply.send({ status: 'SUCCESS', watchlist_item: item });
+  });
+
+  /**
+   * GET /api/buyer/watchlist
+   * Fetches the user's price-drop watchlist.
+   */
+  fastify.get('/api/buyer/watchlist', async (request, reply) => {
+    const query = request.query as { user_id?: string };
+    const items = getWatchlist(query?.user_id || 'demo');
+    return reply.send({ status: 'SUCCESS', watchlist: items });
+  });
+
+  /**
+   * DELETE /api/buyer/watchlist
+   * Removes an item from the user's price-drop watchlist.
+   */
+  fastify.delete('/api/buyer/watchlist', async (request, reply) => {
+    const body = request.body as { user_id?: string; title?: string; item_id?: string };
+    const id = body?.item_id || body?.title || '';
+    const removed = removeFromWatchlist(body?.user_id || 'demo', id);
+    return reply.send({ status: 'SUCCESS', removed });
+  });
+
+  /**
+   * GET /api/buyer/prefs
+   * Fetches user preferences.
+   */
+  fastify.get('/api/buyer/prefs', async (request, reply) => {
+    const query = request.query as { user_id?: string };
+    const prefs = loadUserPreferences(query?.user_id || 'demo');
+    return reply.send({ status: 'SUCCESS', preferences: prefs });
+  });
+
+  /**
+   * POST /api/buyer/prefs
+   * Updates a user preference key.
+   */
+  fastify.post('/api/buyer/prefs', async (request, reply) => {
+    const body = request.body as { user_id?: string; key: any; value: any };
+    if (!body?.key) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'key is required' });
+    }
+    const updated = saveUserPreference(body?.user_id || 'demo', body.key, body.value);
+    return reply.send({ status: 'SUCCESS', preferences: updated });
+  });
+
+  /**
+   * GET /api/buyer/history
+   * Returns purchase transaction history.
+   */
+  fastify.get('/api/buyer/history', async (request, reply) => {
+    const query = request.query as { user_id?: string; limit?: string };
+    const limit = query?.limit ? parseInt(query.limit, 10) : 50;
+    const history = getPurchaseHistory(query?.user_id || 'demo', limit);
+    return reply.send({ status: 'SUCCESS', history });
+  });
+
+  /**
+   * POST /api/buyer/watchlist/check
+   * Scans all user watchlists and checks for price drop alerts.
+   */
+  fastify.post('/api/buyer/watchlist/check', async (request, reply) => {
+    const report = await checkAllWatchlists();
+    return reply.send({ status: 'SUCCESS', report });
+  });
+
+  /**
+   * GET /api/buyer/watchlist/alerts
+   * Returns price-drop alerts triggered by the watchlist job.
+   */
+  fastify.get('/api/buyer/watchlist/alerts', async (request, reply) => {
+    const query = request.query as { user_id?: string };
+    const alerts = getWatchlistAlerts(query?.user_id);
+    return reply.send({ status: 'SUCCESS', alerts });
+  });
+
+  /**
+   * GET /api/buyer/receipts
+   * Returns user receipts and cryptographic certificates.
+   */
+  fastify.get('/api/buyer/receipts', async (request, reply) => {
+    const query = request.query as { user_id?: string };
+    const receipts = getReceipts(query?.user_id || 'demo');
+    return reply.send({ status: 'SUCCESS', receipts });
+  });
+
+  /**
+   * POST /api/buyer/escrow/confirm
+   * Confirms order delivery, updating escrow hold status to CAPTURED.
+   */
+  fastify.post('/api/buyer/escrow/confirm', async (request, reply) => {
+    const body = request.body as { user_id?: string; order_id?: string };
+    const orderId = body?.order_id || 'demo_order';
+    const updated = updatePurchaseStatus(body?.user_id || 'demo', orderId, 'CAPTURED');
+    return reply.send({ status: 'SUCCESS', order_id: orderId, escrow_status: 'CAPTURED', updated });
+  });
+
+  /**
+   * POST /api/buyer/escrow/refund
+   * Refunds order hold, updating escrow status to REFUNDED.
+   */
+  fastify.post('/api/buyer/escrow/refund', async (request, reply) => {
+    const body = request.body as { user_id?: string; order_id?: string };
+    const orderId = body?.order_id || 'demo_order';
+    const updated = updatePurchaseStatus(body?.user_id || 'demo', orderId, 'REFUNDED');
+    return reply.send({ status: 'SUCCESS', order_id: orderId, escrow_status: 'REFUNDED', updated });
   });
 };

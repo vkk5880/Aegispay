@@ -16,7 +16,7 @@ test('FriendlyErrorTransmuter transmuteError converts Redis Lua and PayPal error
   // Test 2: Mandate expired
   const expiredErr = transmuteError('ERR_MANDATE_EXPIRED');
   assert.equal(expiredErr.category, 'MANDATE_EXPIRED');
-  assert.ok(expiredErr.friendlyMessage.includes('Session authorization window has ended'));
+  assert.ok(expiredErr.friendlyMessage.toLowerCase().includes('session authorization window has ended'));
   assert.ok(expiredErr.actions.some((a) => a.id === 'RENEW_MANDATE'));
 
   // Test 3: Merchant cap

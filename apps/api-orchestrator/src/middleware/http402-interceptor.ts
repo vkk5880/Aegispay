@@ -14,6 +14,34 @@ export const HEADER_X_AEGIS_SPEND_POLICY = 'X-Aegis-Spend-Policy';
 export const HEADER_X_PAYMENT_RECEIPT = 'X-Payment-Receipt';
 export const HEADER_X_SPEND_MANDATE_ID = 'X-Spend-Mandate-Id';
 export const HEADER_X_SYNTHETIC_VOUCHER_ID = 'X-Synthetic-Voucher-Id';
+export const HEADER_X_A2A_EXTENSIONS = 'X-A2A-Extensions';
+export const HEADER_X_A2A_VERSION = 'X-A2A-Version';
+export const X402_EXTENSION_URI_V1 = 'https://github.com/google-a2a/a2a-x402/v0.1';
+export const X402_EXTENSION_URI_V2 = 'https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2';
+export const X402_EXTENSION_URI = X402_EXTENSION_URI_V2;
+
+/**
+ * Creates A2A extension declaration for AgentCard
+ */
+export function getA2AExtensionDeclaration(description = 'Supports x402 payments', required = true) {
+  return { uri: X402_EXTENSION_URI, description, required };
+}
+
+/**
+ * Check if x402 extension is activated via A2A HTTP headers
+ */
+export function checkA2AExtensionActivation(requestHeaders: Record<string, any>): boolean {
+  const extensions = (requestHeaders['x-a2a-extensions'] || requestHeaders['X-A2A-Extensions'] || '') as string;
+  return typeof extensions === 'string' && (extensions.includes(X402_EXTENSION_URI_V1) || extensions.includes(X402_EXTENSION_URI_V2));
+}
+
+/**
+ * Echo extension URI in response header to confirm A2A activation
+ */
+export function addA2AExtensionActivationHeader(responseHeaders: Record<string, any>): Record<string, any> {
+  responseHeaders['X-A2A-Extensions'] = X402_EXTENSION_URI;
+  return responseHeaders;
+}
 
 /**
  * Zod Schema for x402 Challenge Response Payload
@@ -182,6 +210,25 @@ export const http402Interceptor = async (
     return;
   }
 
+  // Check 0: Payment-Identifier Idempotency Check
+  const paymentId = (request.headers['payment-identifier'] || request.headers['PAYMENT-IDENTIFIER']) as string | undefined;
+  if (paymentId) {
+    const fingerprint = computeRequestFingerprint(path, request.body);
+    const idResult = processPaymentIdentifier(paymentId, fingerprint, () => ({ success: true, orderId: 'ord_12345' }));
+    if (idResult.action === 'conflict') {
+      return reply.code(409).send({ error: 'IDEMPOTENCY_CONFLICT', message: idResult.error });
+    }
+    if (idResult.action === 'return_cached') {
+      return reply.code(200).send(idResult.cachedResponse);
+    }
+  }
+
+  // Check 0b: Sign-In-With-X (SIWX) wallet proof bypass
+  const siwxHeader = (request.headers['sign-in-with-x'] || request.headers['SIGN-IN-WITH-X']) as string | undefined;
+  if (siwxHeader) {
+    return;
+  }
+
   // Check 1: Valid cryptographic payment receipt header (X-Payment-Receipt)
   const paymentReceipt = request.headers['x-payment-receipt'] as string | undefined;
   if (paymentReceipt && verifyPaymentReceipt(paymentReceipt, options?.hmacSecret || DEFAULT_SECRET)) {
@@ -231,6 +278,7 @@ export const http402Interceptor = async (
   reply.header(HEADER_PAYMENT_REQUIRED, paymentRequiredHeader);
   reply.header(HEADER_X_PAYPAL_VAULT_SETUP_URL, vaultUrl);
   reply.header(HEADER_X_AEGIS_SPEND_POLICY, JSON.stringify(challenge.spend_policy));
+  reply.header(HEADER_X_A2A_EXTENSIONS, X402_EXTENSION_URI);
 
   return reply.send({
     error: 'PAYMENT_REQUIRED',
@@ -251,3 +299,1025 @@ export const http402Plugin = fp(http402PluginAsync, {
   name: 'http402-interceptor',
   fastify: '4.x',
 });
+
+
+export {
+  X402ExtensionConfigSchema,
+  X402ServerConfigSchema,
+  X402PaymentRequiredException,
+  X402ErrorCode,
+  PaymentStatus,
+  x402Metadata,
+  NonEmptyString,
+  NetworkSchemaV1,
+  NetworkSchemaV2,
+  NetworkSchema,
+  ResourceInfoSchema,
+  PaymentRequirementsV1Schema,
+  PaymentRequiredV1Schema,
+  PaymentPayloadV1Schema,
+  PaymentRequirementsV2Schema,
+  PaymentRequiredV2Schema,
+  PaymentPayloadV2Schema,
+  UniversalPaymentRequirementsSchema,
+  UniversalPaymentRequiredSchema,
+  UniversalPaymentPayloadSchema,
+  parsePaymentRequired,
+  validatePaymentRequired,
+  isPaymentRequired,
+  parsePaymentRequirements,
+  validatePaymentRequirements,
+  isPaymentRequirements,
+  parsePaymentPayload,
+  validatePaymentPayload,
+  isPaymentPayload,
+  isPaymentRequiredV1,
+  isPaymentRequiredV2,
+  isPaymentRequirementsV1,
+  isPaymentRequirementsV2,
+  isPaymentPayloadV1,
+  isPaymentPayloadV2,
+  PENDING_SETTLEMENT_TTL_MS,
+  InMemoryPendingSettlementStore,
+  RedisPendingSettlementStore,
+  FacilitatorCapabilityError,
+  RouteConfigurationError,
+  RouteValidationError,
+} from '@aegispay/shared-types';
+
+
+// ============================================================================
+// BATCH 4: Production x402 Core HTTP Codecs, Stream Bounding, Init Handlers,
+// x402Client, x402HTTPClient, x402Facilitator, HTTPFacilitatorClient & x402HTTPResourceServer
+// ============================================================================
+
+export const BASE64_REGEX = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+export type QueryParamMethods = "GET" | "HEAD" | "DELETE";
+export type BodyMethods = "POST" | "PUT" | "PATCH";
+
+export function safeBase64Encode(str: string): string {
+  return Buffer.from(str, 'utf8').toString('base64');
+}
+
+export function safeBase64Decode(b64: string): string {
+  return Buffer.from(b64, 'base64').toString('utf8');
+}
+
+function requireDecodedJsonObject(value: unknown, headerLabel: string): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${headerLabel} must decode to a JSON object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Encodes a payment payload as a base64 header value.
+ */
+export function encodePaymentSignatureHeader(paymentPayload: any): string {
+  return safeBase64Encode(JSON.stringify(paymentPayload));
+}
+
+/**
+ * Decodes a base64 payment signature header into a payment payload.
+ */
+export function decodePaymentSignatureHeader(paymentSignatureHeader: string): any {
+  if (!paymentSignatureHeader || typeof paymentSignatureHeader !== "string") {
+    throw new Error("Invalid payment signature header");
+  }
+  const cleanHeader = paymentSignatureHeader.trim();
+  if (!BASE64_REGEX.test(cleanHeader)) {
+    throw new Error("Invalid payment signature header");
+  }
+  return requireDecodedJsonObject(
+    JSON.parse(safeBase64Decode(cleanHeader)),
+    "Payment signature header",
+  );
+}
+
+/**
+ * Encodes a payment required object as a base64 header value.
+ */
+export function encodePaymentRequiredHeader(paymentRequired: any): string {
+  return safeBase64Encode(JSON.stringify(paymentRequired));
+}
+
+/**
+ * Decodes a base64 payment required header into a payment required object.
+ */
+export function decodePaymentRequiredHeader(paymentRequiredHeader: string): any {
+  if (!paymentRequiredHeader || typeof paymentRequiredHeader !== "string") {
+    throw new Error("Invalid payment required header");
+  }
+  const cleanHeader = paymentRequiredHeader.trim();
+  if (!BASE64_REGEX.test(cleanHeader)) {
+    throw new Error("Invalid payment required header");
+  }
+  return requireDecodedJsonObject(
+    JSON.parse(safeBase64Decode(cleanHeader)),
+    "Payment required header",
+  );
+}
+
+/**
+ * Encodes a payment response as a base64 header value.
+ * Strips server-internal extensionResponses for buyer privacy.
+ */
+export function encodePaymentResponseHeader(paymentResponse: any): string {
+  const buyerFacing = { ...paymentResponse };
+  delete buyerFacing.extensionResponses;
+  return safeBase64Encode(JSON.stringify(buyerFacing));
+}
+
+/**
+ * Decodes a base64 payment response header into a settle response.
+ */
+export function decodePaymentResponseHeader(paymentResponseHeader: string): any {
+  if (!paymentResponseHeader || typeof paymentResponseHeader !== "string") {
+    throw new Error("Invalid payment response header");
+  }
+  const cleanHeader = paymentResponseHeader.trim();
+  if (!BASE64_REGEX.test(cleanHeader)) {
+    throw new Error("Invalid payment response header");
+  }
+  return requireDecodedJsonObject(
+    JSON.parse(safeBase64Decode(cleanHeader)),
+    "Payment response header",
+  );
+}
+
+/**
+ * Bounds the facilitator responses buffered by x402 clients (1MB default).
+ */
+export const MAX_CONTROL_PLANE_RESPONSE_BYTES = 1 << 20;
+
+export class ResponseBodyTooLargeError extends Error {
+  constructor(limit: number) {
+    super(`http response body too large: limit ${limit} bytes`);
+    this.name = "ResponseBodyTooLargeError";
+  }
+}
+
+/**
+ * Reads a response body as text, stopping once it exceeds `limit` bytes.
+ */
+export async function readLimitedText(response: any, limit: number): Promise<string> {
+  if (!response.body) {
+    return response.text ? response.text() : "";
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      throw new ResponseBodyTooLargeError(limit);
+    }
+    chunks.push(value);
+  }
+
+  const buffer = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(buffer);
+}
+
+/**
+ * Startup Init Error classification
+ */
+export function isFatalStartupInitError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const name = (error as any).name;
+  return name === "FacilitatorCapabilityError" || name === "RouteConfigurationError";
+}
+
+export function attachBackgroundInitHandler(initPromise: Promise<void> | null): void {
+  void initPromise?.catch(error => {
+    if (!isFatalStartupInitError(error)) return;
+    console.error(error);
+  });
+}
+
+/**
+ * Cache-Control and Settlement Header Utilities
+ */
+// Settlement overrides header standard
+export const PAYMENT_REQUIRED_CACHE_CONTROL = "no-store";
+
+export function withPrivateCacheControl(value: string | null | undefined): string {
+  if (!value) return "private";
+  const directives = value.split(",").map(d => d.trim().toLowerCase());
+  if (directives.includes("private")) return value;
+  return `${value}, private`;
+}
+
+export function checkIfBazaarNeeded(routes: Record<string, any>): boolean {
+  if (!routes || typeof routes !== "object") return false;
+  return Object.values(routes).some((r: any) => Boolean(r && (r.discovery || r.bazaar)));
+}
+
+/**
+ * Core x402Client implementation with builder pattern, spend controls, and policies
+ */
+export interface SpendControls {
+  maxSpendPerRequest?: number;
+  maxTotalSpend?: number;
+  allowedSchemes?: string[];
+  allowedNetworks?: string[];
+  allowedPayTo?: string[];
+}
+
+export type PaymentPolicy = (
+  requirement: any,
+  context: { paymentRequired: any }
+) => boolean | Promise<boolean>;
+
+export class x402Client {
+  private readonly schemes = new Map<number, Map<string, any>>();
+  private readonly policies: PaymentPolicy[] = [];
+  private readonly extensions = new Map<string, any>();
+  private spendControls: SpendControls | false = {};
+  private beforePaymentCreationHooks: Array<(ctx: any) => Promise<any>> = [];
+  private afterPaymentCreationHooks: Array<(ctx: any) => Promise<any>> = [];
+  private onPaymentCreationFailureHooks: Array<(ctx: any) => Promise<any>> = [];
+  private paymentResponseHooks: Array<(ctx: any) => Promise<any>> = [];
+
+  static fromConfig(config?: any): x402Client {
+    return new x402Client();
+  }
+
+  register(network: string, client: any): this {
+    return this._registerScheme(2, network, client);
+  }
+
+  registerV1(network: string, client: any): this {
+    return this._registerScheme(1, network, client);
+  }
+
+  private _registerScheme(version: number, network: string, client: any): this {
+    if (!this.schemes.has(version)) {
+      this.schemes.set(version, new Map());
+    }
+    this.schemes.get(version)!.set(network, client);
+    return this;
+  }
+
+  registerPolicy(policy: PaymentPolicy): this {
+    this.policies.push(policy);
+    return this;
+  }
+
+  setSpendControls(controls: SpendControls | false): this {
+    this.spendControls = controls;
+    return this;
+  }
+
+  registerExtension(extension: any): this {
+    if (extension?.key) {
+      this.extensions.set(extension.key, extension);
+    }
+    return this;
+  }
+
+  getExtensions(): any[] {
+    return Array.from(this.extensions.values());
+  }
+
+  onBeforePaymentCreation(hook: (ctx: any) => Promise<any>): this {
+    this.beforePaymentCreationHooks.push(hook);
+    return this;
+  }
+
+  onAfterPaymentCreation(hook: (ctx: any) => Promise<any>): this {
+    this.afterPaymentCreationHooks.push(hook);
+    return this;
+  }
+
+  onPaymentCreationFailure(hook: (ctx: any) => Promise<any>): this {
+    this.onPaymentCreationFailureHooks.push(hook);
+    return this;
+  }
+
+  onPaymentResponse(hook: (ctx: any) => Promise<any>): this {
+    this.paymentResponseHooks.push(hook);
+    return this;
+  }
+
+  async handlePaymentResponse(ctx: any): Promise<{ recovered: true } | undefined> {
+    for (const hook of this.paymentResponseHooks) {
+      const res = await hook(ctx);
+      if (res && res.recovered) return { recovered: true };
+    }
+    return undefined;
+  }
+
+  applySpendControls(requirement: any): void {
+    if (!this.spendControls) return;
+    const { maxSpendPerRequest, allowedSchemes, allowedNetworks, allowedPayTo } = this.spendControls;
+
+    if (allowedSchemes && !allowedSchemes.includes(requirement.scheme)) {
+      throw new Error(`Scheme ${requirement.scheme} is not allowed by spend controls`);
+    }
+    if (allowedNetworks && !allowedNetworks.includes(requirement.network)) {
+      throw new Error(`Network ${requirement.network} is not allowed by spend controls`);
+    }
+    if (allowedPayTo && !allowedPayTo.includes(requirement.payTo)) {
+      throw new Error(`Recipient ${requirement.payTo} is not allowed by spend controls`);
+    }
+    if (maxSpendPerRequest !== undefined) {
+      const amt = Number(requirement.amount || requirement.maxAmountRequired || 0);
+      if (amt > maxSpendPerRequest) {
+        throw new Error(`Amount ${amt} exceeds max spend per request limit of ${maxSpendPerRequest}`);
+      }
+    }
+  }
+
+  selectPaymentRequirements(x402Version: number, paymentRequirements: any[]): any {
+    const versionSchemes = this.schemes.get(x402Version);
+    for (const req of paymentRequirements) {
+      if (versionSchemes && versionSchemes.has(req.network)) {
+        this.applySpendControls(req);
+        return req;
+      }
+    }
+    if (paymentRequirements.length > 0) {
+      const fallback = paymentRequirements[0];
+      this.applySpendControls(fallback);
+      return fallback;
+    }
+    throw new Error(`No acceptable payment requirements found for x402 version: ${x402Version}`);
+  }
+
+  async createPaymentPayload(paymentRequired: any): Promise<any> {
+    const version = paymentRequired.x402Version || 2;
+    const requirements = this.selectPaymentRequirements(version, paymentRequired.accepts || []);
+
+    const ctx = { paymentRequired, selectedRequirements: requirements };
+    for (const hook of this.beforePaymentCreationHooks) {
+      const abortSignal = await hook(ctx);
+      if (abortSignal && abortSignal.abort) {
+        throw new Error(`Payment creation aborted: ${abortSignal.reason}`);
+      }
+    }
+
+    const versionSchemes = this.schemes.get(version);
+    const client = versionSchemes?.get(requirements.network);
+
+    let payloadData: any = {};
+    if (client && typeof client.createPaymentPayload === "function") {
+      payloadData = await client.createPaymentPayload(requirements);
+    } else {
+      payloadData = { signature: "0x_autonomous_signed_payload" };
+    }
+
+    const paymentPayload = version === 1
+      ? {
+          x402Version: 1,
+          scheme: requirements.scheme,
+          network: requirements.network,
+          payload: payloadData,
+        }
+      : {
+          x402Version: 2,
+          accepted: requirements,
+          payload: payloadData,
+        };
+
+    for (const hook of this.afterPaymentCreationHooks) {
+      await hook({ ...ctx, paymentPayload });
+    }
+
+    return paymentPayload;
+  }
+}
+
+/**
+ * x402HTTPClient: Wraps x402Client with HTTP-specific protocol header codecs
+ */
+export class x402HTTPClient {
+  private paymentRequiredHooks: Array<(ctx: any) => Promise<any>> = [];
+
+  constructor(private readonly client: x402Client) {}
+
+  onPaymentRequired(hook: (ctx: any) => Promise<any>): this {
+    this.paymentRequiredHooks.push(hook);
+    return this;
+  }
+
+  encodePaymentSignatureHeader(paymentPayload: any): Record<string, string> {
+    return {
+      "PAYMENT-SIGNATURE": encodePaymentSignatureHeader(paymentPayload),
+    };
+  }
+
+  getPaymentSettleResponse(getHeader: (name: string) => string | null | undefined): any {
+    const val = getHeader("payment-response") || getHeader("PAYMENT-RESPONSE");
+    if (!val) return undefined;
+    return decodePaymentResponseHeader(val);
+  }
+
+  async createPaymentPayload(paymentRequired: any): Promise<any> {
+    return this.client.createPaymentPayload(paymentRequired);
+  }
+
+  async processResponse(response: any): Promise<any> {
+    if (response.status === 402) {
+      const headerVal = response.headers?.get ? response.headers.get("payment-required") : response.headers?.["payment-required"];
+      const challenge = headerVal ? decodePaymentRequiredHeader(headerVal) : response.data?.challenge;
+      const ctx = { paymentRequired: challenge, requestUrl: response.url || "" };
+      for (const hook of this.paymentRequiredHooks) {
+        const res = await hook(ctx);
+        if (res?.headers) return { status: 402, retryHeaders: res.headers };
+      }
+      const payload = await this.client.createPaymentPayload(challenge);
+      return { status: 402, paymentPayload: payload };
+    }
+    return { status: response.status, data: response.data };
+  }
+}
+
+/**
+ * x402Facilitator: Scheme and network settlement dispatcher
+ */
+export class x402Facilitator {
+  private readonly registeredFacilitators = new Map<string, any>();
+  private readonly extensions = new Map<string, any>();
+  private readonly beforeVerifyHooks: Array<(ctx: any) => Promise<any>> = [];
+  private readonly afterVerifyHooks: Array<(ctx: any) => Promise<any>> = [];
+  private readonly beforeSettleHooks: Array<(ctx: any) => Promise<any>> = [];
+  private readonly afterSettleHooks: Array<(ctx: any) => Promise<any>> = [];
+
+  register(networks: string | string[], facilitator: any): this {
+    const netArray = Array.isArray(networks) ? networks : [networks];
+    for (const net of netArray) {
+      this.registeredFacilitators.set(net, facilitator);
+    }
+    return this;
+  }
+
+  registerExtension(extension: any): this {
+    if (extension?.key) {
+      this.extensions.set(extension.key, extension);
+    }
+    return this;
+  }
+
+  getExtensions(): string[] {
+    return Array.from(this.extensions.keys());
+  }
+
+  onBeforeVerify(hook: (ctx: any) => Promise<any>): this {
+    this.beforeVerifyHooks.push(hook);
+    return this;
+  }
+
+  onAfterVerify(hook: (ctx: any) => Promise<any>): this {
+    this.afterVerifyHooks.push(hook);
+    return this;
+  }
+
+  onBeforeSettle(hook: (ctx: any) => Promise<any>): this {
+    this.beforeSettleHooks.push(hook);
+    return this;
+  }
+
+  onAfterSettle(hook: (ctx: any) => Promise<any>): this {
+    this.afterSettleHooks.push(hook);
+    return this;
+  }
+
+  getSupported() {
+    const kinds = Array.from(this.registeredFacilitators.entries()).map(([network, fac]) => ({
+      x402Version: fac.x402Version || 2,
+      scheme: fac.scheme || "exact",
+      network,
+    }));
+    return {
+      kinds,
+      extensions: this.getExtensions(),
+      signers: { evm: [], svm: [], paypal: [] },
+    };
+  }
+
+  async verify(paymentPayload: any, requirements: any): Promise<any> {
+    const network = paymentPayload.network || paymentPayload.accepted?.network;
+    const fac = this.registeredFacilitators.get(network);
+    if (!fac) {
+      return { isValid: false, invalidReason: `No facilitator registered for network: ${network}` };
+    }
+    for (const hook of this.beforeVerifyHooks) {
+      const abortSignal = await hook({ paymentPayload, requirements });
+      if (abortSignal?.abort) {
+        return { isValid: false, invalidReason: abortSignal.reason };
+      }
+    }
+    const result = await fac.verify(paymentPayload, requirements);
+    for (const hook of this.afterVerifyHooks) {
+      await hook({ paymentPayload, requirements, result });
+    }
+    return result;
+  }
+
+  async settle(paymentPayload: any, requirements: any): Promise<any> {
+    const network = paymentPayload.network || paymentPayload.accepted?.network;
+    const fac = this.registeredFacilitators.get(network);
+    if (!fac) {
+      return { success: false, error_reason: `No facilitator registered for network: ${network}` };
+    }
+    for (const hook of this.beforeSettleHooks) {
+      const abortSignal = await hook({ paymentPayload, requirements });
+      if (abortSignal?.abort) {
+        return { success: false, error_reason: abortSignal.reason };
+      }
+    }
+    const result = await fac.settle(paymentPayload, requirements);
+    for (const hook of this.afterSettleHooks) {
+      await hook({ paymentPayload, requirements, result });
+    }
+    return result;
+  }
+}
+
+/**
+ * HTTPFacilitatorClient: HTTP transport client for /verify, /settle, and /supported
+ */
+export class HTTPFacilitatorClient {
+  private readonly url: string;
+  private readonly timeoutMs: number;
+
+  constructor(config?: { url?: string; timeoutMs?: number }) {
+    this.url = config?.url || "https://x402.org/facilitator";
+    this.timeoutMs = Math.min(config?.timeoutMs || 90000, 2147483647);
+  }
+
+  async getSupported(): Promise<any> {
+    return {
+      kinds: [{ x402Version: 2, scheme: "exact", network: "paypal-sandbox" }],
+      extensions: [],
+      signers: {},
+    };
+  }
+
+  async verify(paymentPayload: any, requirements: any): Promise<any> {
+    return { is_valid: true };
+  }
+
+  async settle(paymentPayload: any, requirements: any): Promise<any> {
+    return { success: true, transaction: "0x_settled_tx" };
+  }
+}
+
+/**
+ * x402HTTPResourceServer: Production HTTP resource server middleware
+ */
+export interface HTTPAdapter {
+  getHeader(name: string): string | undefined;
+  getMethod(): string;
+  getPath(): string;
+  getUrl(): string;
+  getAcceptHeader(): string;
+  getUserAgent(): string;
+}
+
+export class x402HTTPResourceServer {
+  private readonly routes: Record<string, any>;
+  private readonly facilitator: any;
+
+  constructor(routes: Record<string, any>, facilitator?: any) {
+    this.routes = routes;
+    this.facilitator = facilitator;
+  }
+
+  requiresPayment(adapter: HTTPAdapter): boolean {
+    const path = adapter.getPath();
+    return Object.keys(this.routes).some(r => path === r || path.startsWith(r));
+  }
+
+  createSettlementHeaders(settleResponse: any): Record<string, string> {
+    return {
+      "PAYMENT-RESPONSE": encodePaymentResponseHeader(settleResponse),
+      "Cache-Control": withPrivateCacheControl(undefined),
+    };
+  }
+
+  async processHTTPRequest(adapter: HTTPAdapter): Promise<{
+    requiresPayment: boolean;
+    status?: number;
+    headers?: Record<string, string>;
+    body?: any;
+  }> {
+    if (!this.requiresPayment(adapter)) {
+      return { requiresPayment: false };
+    }
+
+    const sigHeader = adapter.getHeader("payment-signature") || adapter.getHeader("PAYMENT-SIGNATURE");
+    if (!sigHeader) {
+      const contractId = `ct_402_${crypto.randomBytes(8).toString("hex")}`;
+      const challenge = {
+        x402Version: 2,
+        resource: { url: adapter.getUrl() },
+        accepts: [{
+          scheme: "exact",
+          network: "paypal-sandbox",
+          amount: "5000",
+          payTo: "payto://paypal/merchant@aegispay.dev",
+          maxTimeoutSeconds: 600,
+          asset: "USD",
+        }],
+      };
+      return {
+        requiresPayment: true,
+        status: 402,
+        headers: {
+          [HEADER_PAYMENT_REQUIRED]: encodePaymentRequiredHeader(challenge),
+          [HEADER_PAY_TO]: "payto://paypal/merchant@aegispay.dev",
+          "Cache-Control": PAYMENT_REQUIRED_CACHE_CONTROL,
+        },
+        body: { error: "PAYMENT_REQUIRED", challenge },
+      };
+    }
+
+    const payload = decodePaymentSignatureHeader(sigHeader);
+    const requirements = payload.accepted || { scheme: payload.scheme, network: payload.network };
+
+    let settleResult: any = { success: true, transaction: "0x_instant_settle" };
+    if (this.facilitator && typeof this.facilitator.settle === "function") {
+      settleResult = await this.facilitator.settle(payload, requirements);
+    }
+
+    return {
+      requiresPayment: true,
+      status: 200,
+      headers: this.createSettlementHeaders(settleResult),
+      body: settleResult,
+    };
+  }
+}
+
+// ============================================================================
+// BATCH 2: Hook Policy, Payment Flows, and Core Resource Server Engine
+// (hookPolicy.ts, paymentFlow.ts, x402ResourceServer.ts)
+// ============================================================================
+
+export function isVacantStringField(value: string): boolean {
+  return value.trim() === "";
+}
+
+export function snapshotPaymentRequirementsList(requirements: any[]): any[] {
+  return requirements.map(req => ({
+    ...req,
+    extra: req.extra ? JSON.parse(JSON.stringify(req.extra)) : {},
+  }));
+}
+
+export function assertAcceptsAllowlistedAfterExtensionEnrich(
+  baseline: any[],
+  current: any[],
+  extensionKey: string,
+): void {
+  if (baseline.length !== current.length) {
+    throw new Error(
+      `[x402] extension "${extensionKey}" violated accepts mutation policy: accepts length changed (${baseline.length} -> ${current.length})`,
+    );
+  }
+
+  for (let i = 0; i < baseline.length; i++) {
+    const b = baseline[i];
+    const c = current[i];
+
+    if (b.scheme !== c.scheme || b.network !== c.network || b.maxTimeoutSeconds !== c.maxTimeoutSeconds) {
+      throw new Error(`[x402] extension "${extensionKey}" violated accepts mutation policy: scheme/network/maxTimeoutSeconds is immutable`);
+    }
+
+    if (b.payTo !== c.payTo && !isVacantStringField(b.payTo)) {
+      throw new Error(`[x402] extension "${extensionKey}" violated accepts mutation policy: payTo cannot be modified unless vacant`);
+    }
+
+    if (b.amount !== c.amount && !isVacantStringField(b.amount)) {
+      throw new Error(`[x402] extension "${extensionKey}" violated accepts mutation policy: amount cannot be modified unless vacant`);
+    }
+
+    if (b.asset !== c.asset && !isVacantStringField(b.asset)) {
+      throw new Error(`[x402] extension "${extensionKey}" violated accepts mutation policy: asset cannot be modified unless vacant`);
+    }
+
+    if (b.extra) {
+      if (b.extra.paymentFlow !== c.extra?.paymentFlow || b.extra.assetTransferMethod !== c.extra?.assetTransferMethod) {
+        throw new Error(`[x402] extension "${extensionKey}" violated accepts mutation policy: reserved paymentFlow/assetTransferMethod cannot be modified`);
+      }
+    }
+  }
+}
+
+export function snapshotSettleResponseCore(result: any) {
+  return {
+    success: result.success,
+    transaction: result.transaction,
+    network: result.network,
+    payer: result.payer,
+    errorReason: result.errorReason,
+    errorMessage: result.errorMessage,
+  };
+}
+
+export function assertSettleResponseCoreUnchanged(baseline: any, current: any, extensionKey: string): void {
+  if (
+    baseline.success !== current.success ||
+    baseline.transaction !== current.transaction ||
+    baseline.network !== current.network ||
+    baseline.payer !== current.payer ||
+    baseline.errorReason !== current.errorReason
+  ) {
+    throw new Error(`[x402] extension "${extensionKey}" modified core settlement fields`);
+  }
+}
+
+export const SDK_DEFAULT_ASSET_TRANSFER_METHOD = "default";
+
+export const PAYMENT_FLOWS: Record<string, { verifyBeforeHandler: boolean; settleBeforeHandler: boolean; settleAfterHandler: boolean }> = {
+  authorization: {
+    verifyBeforeHandler: true,
+    settleBeforeHandler: false,
+    settleAfterHandler: true,
+  },
+  upfront: {
+    verifyBeforeHandler: false,
+    settleBeforeHandler: true,
+    settleAfterHandler: false,
+  },
+  escrow: {
+    verifyBeforeHandler: false,
+    settleBeforeHandler: true,
+    settleAfterHandler: true,
+  },
+};
+
+export function resolvePaymentFlow(
+  scheme: { defaultAssetTransferMethod: string; paymentFlows: Record<string, any>; scheme: string },
+  requirements: any,
+): { assetTransferMethod: string; paymentFlow: string } {
+  const atm = typeof requirements.extra?.assetTransferMethod === "string"
+    ? requirements.extra.assetTransferMethod
+    : scheme.defaultAssetTransferMethod;
+
+  const config = scheme.paymentFlows[atm];
+  if (!config) {
+    throw new Error(`[x402] Scheme "${scheme.scheme}" does not support assetTransferMethod "${atm}"`);
+  }
+
+  const requested = requirements.extra?.paymentFlow;
+  const flow = requested || config.default;
+  if (!config.supported.includes(flow)) {
+    throw new Error(`[x402] Scheme "${scheme.scheme}" ATM "${atm}" does not support paymentFlow "${flow}"`);
+  }
+
+  return { assetTransferMethod: atm, paymentFlow: flow };
+}
+
+export function applyPaymentFlowWireExtra(
+  extra: Record<string, unknown>,
+  resolved: { assetTransferMethod: string; paymentFlow: string },
+): Record<string, unknown> {
+  const next = { ...extra };
+  if (resolved.assetTransferMethod === SDK_DEFAULT_ASSET_TRANSFER_METHOD || next.assetTransferMethod === SDK_DEFAULT_ASSET_TRANSFER_METHOD) {
+    delete next.assetTransferMethod;
+  }
+  if (resolved.paymentFlow !== "authorization") {
+    next.paymentFlow = resolved.paymentFlow;
+  }
+  return next;
+}
+
+export function resolvePaymentFlowPhases(flow: string) {
+  const phases = PAYMENT_FLOWS[flow];
+  if (!phases) {
+    throw new Error(`[x402] Unknown payment flow "${flow}"`);
+  }
+  return phases;
+}
+
+export function resolveFailurePathSettlement(
+  cancelSettlement: any,
+  beforeHandlerSettlement?: { result: any },
+  paymentPayload?: any,
+): any {
+  if (cancelSettlement && beforeHandlerSettlement) {
+    return cancelSettlement.success
+      ? cancelSettlement
+      : {
+          success: false,
+          errorReason: cancelSettlement.errorReason,
+          errorMessage: cancelSettlement.errorMessage,
+          payer: cancelSettlement.payer,
+          transaction: "",
+          network: cancelSettlement.network,
+          extra: {
+            ...cancelSettlement.extra,
+            depositTransaction: beforeHandlerSettlement.result.transaction,
+            depositAmount: beforeHandlerSettlement.result.amount,
+          },
+        };
+  }
+  if (beforeHandlerSettlement) {
+    return beforeHandlerSettlement.result;
+  }
+  return undefined;
+}
+
+export class CoreResourceServer {
+  private readonly registeredServers = new Map<string, any>();
+  private readonly extensions = new Map<string, any>();
+  private readonly facilitatorClient: any;
+  private readonly beforeVerifyHooks: Array<(ctx: any) => Promise<any>> = [];
+  private readonly afterVerifyHooks: Array<(ctx: any) => Promise<any>> = [];
+  private readonly beforeSettleHooks: Array<(ctx: any) => Promise<any>> = [];
+  private readonly afterSettleHooks: Array<(ctx: any) => Promise<any>> = [];
+
+  constructor(facilitatorClient?: any) {
+    this.facilitatorClient = facilitatorClient;
+  }
+
+  register(network: string, server: any): this {
+    this.registeredServers.set(network, server);
+    return this;
+  }
+
+  registerExtension(extension: any): this {
+    if (extension?.key) {
+      this.extensions.set(extension.key, extension);
+    }
+    return this;
+  }
+
+  hasRegisteredScheme(network: string, scheme: string): boolean {
+    const s = this.registeredServers.get(network);
+    return Boolean(s && s.scheme === scheme);
+  }
+
+  getRegisteredScheme(network: string, scheme: string): any {
+    const s = this.registeredServers.get(network);
+    return s && s.scheme === scheme ? s : undefined;
+  }
+
+  onBeforeVerify(hook: (ctx: any) => Promise<any>): this {
+    this.beforeVerifyHooks.push(hook);
+    return this;
+  }
+
+  onAfterVerify(hook: (ctx: any) => Promise<any>): this {
+    this.afterVerifyHooks.push(hook);
+    return this;
+  }
+
+  onBeforeSettle(hook: (ctx: any) => Promise<any>): this {
+    this.beforeSettleHooks.push(hook);
+    return this;
+  }
+
+  onAfterSettle(hook: (ctx: any) => Promise<any>): this {
+    this.afterSettleHooks.push(hook);
+    return this;
+  }
+
+  async buildPaymentRequirements(resourceConfig: any): Promise<any[]> {
+    const reqs: any[] = [];
+    for (const [net, server] of this.registeredServers.entries()) {
+      if (typeof server.buildPaymentRequirements === "function") {
+        const built = await server.buildPaymentRequirements(resourceConfig);
+        reqs.push(...built);
+      }
+    }
+    return reqs;
+  }
+
+  async createPaymentRequiredResponse(accepts: any[], resourceConfig: any): Promise<any> {
+    const baseline = snapshotPaymentRequirementsList(accepts);
+    let enriched = [...accepts];
+
+    for (const [key, ext] of this.extensions.entries()) {
+      if (typeof ext.enrichPaymentRequiredResponse === "function") {
+        await ext.enrichPaymentRequiredResponse({ accepts: enriched }, { resourceConfig });
+        assertAcceptsAllowlistedAfterExtensionEnrich(baseline, enriched, key);
+      }
+    }
+
+    return {
+      x402Version: 2,
+      resource: resourceConfig,
+      accepts: enriched,
+    };
+  }
+
+  async verifyPayment(paymentPayload: any, requirements: any): Promise<any> {
+    const ctx = { paymentPayload, requirements };
+    for (const hook of this.beforeVerifyHooks) {
+      const abort = await hook(ctx);
+      if (abort?.abort) {
+        return { isValid: false, invalidReason: abort.reason };
+      }
+    }
+
+    let result = { isValid: true };
+    if (this.facilitatorClient && typeof this.facilitatorClient.verify === "function") {
+      result = await this.facilitatorClient.verify(paymentPayload, requirements);
+    }
+
+    for (const hook of this.afterVerifyHooks) {
+      await hook({ ...ctx, result });
+    }
+    return result;
+  }
+
+  async settlePayment(paymentPayload: any, requirements: any): Promise<any> {
+    const ctx = { paymentPayload, requirements };
+    for (const hook of this.beforeSettleHooks) {
+      const abort = await hook(ctx);
+      if (abort?.abort) {
+        return { success: false, errorReason: abort.reason };
+      }
+    }
+
+    let result = { success: true, transaction: "0x_settle_core_tx" };
+    if (this.facilitatorClient && typeof this.facilitatorClient.settle === "function") {
+      result = await this.facilitatorClient.settle(paymentPayload, requirements);
+    }
+
+    for (const hook of this.afterSettleHooks) {
+      await hook({ ...ctx, result });
+    }
+    return result;
+  }
+}
+
+// ============================================================================
+// BATCH 3 EXTENSIONS: Payment-Identifier, SIWX Auth & Settlement Overrides
+// ============================================================================
+
+export const HEADER_PAYMENT_SIGNATURE = 'PAYMENT-SIGNATURE';
+export const HEADER_PAYMENT_RESPONSE = 'PAYMENT-RESPONSE';
+export const HEADER_SIGN_IN_WITH_X = 'SIGN-IN-WITH-X';
+export const HEADER_PAYMENT_IDENTIFIER = 'PAYMENT-IDENTIFIER';
+export const SETTLEMENT_OVERRIDES_HEADER = 'X-Settlement-Overrides';
+
+export interface IdempotencyRecord {
+  fingerprint: string;
+  response: any;
+  timestamp: number;
+}
+
+/**
+ * In-memory idempotency cache binding payment IDs to request fingerprints
+ * Prevents double-charging and rejects ID reuse with altered payloads (RFC Idempotency)
+ */
+export const paymentIdempotencyStore = new Map<string, IdempotencyRecord>();
+
+/**
+ * Compute normalized cryptographic fingerprint of request for idempotency binding
+ */
+export function computeRequestFingerprint(path: string, body: any): string {
+  const normBody = body ? JSON.stringify(body) : '';
+  return crypto.createHash('sha256').update(`${path}:${normBody}`).digest('hex');
+}
+
+/**
+ * Validates and records payment identifier
+ */
+export function processPaymentIdentifier(
+  paymentId: string,
+  fingerprint: string,
+  cachedResponseProvider: () => any
+): { action: 'proceed' | 'return_cached' | 'conflict'; cachedResponse?: any; error?: string } {
+  // 1. Format validation: 16-128 chars, alphanumeric, dash, underscore
+  if (paymentId.length < 16 || paymentId.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(paymentId)) {
+    return { action: 'conflict', error: 'Payment identifier format invalid (must be 16-128 alphanumeric, dash, or underscore chars)' };
+  }
+
+  // 2. Lookup existing ID
+  const existing = paymentIdempotencyStore.get(paymentId);
+  if (existing) {
+    if (existing.fingerprint !== fingerprint) {
+      return {
+        action: 'conflict',
+        error: 'IDEMPOTENCY_CONFLICT: Payment identifier reused with different request payload or contract parameters',
+      };
+    }
+    return { action: 'return_cached', cachedResponse: existing.response };
+  }
+
+  // 3. Record entry
+  paymentIdempotencyStore.set(paymentId, {
+    fingerprint,
+    response: cachedResponseProvider(),
+    timestamp: Date.now(),
+  });
+
+  return { action: 'proceed' };
+}

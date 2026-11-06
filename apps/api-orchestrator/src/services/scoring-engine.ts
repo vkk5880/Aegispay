@@ -56,6 +56,7 @@ export const DEFAULT_SCORING_WEIGHTS: ScoringWeights = SCORING_WEIGHT_PRESETS.DE
 export interface ScoringQueryContext {
   query: string;
   target_price_cents?: number;
+  max_price_cents?: number;
   category_id?: string;
   preset?: ScoringPreset;
   weights?: Partial<ScoringWeights>;
@@ -82,10 +83,21 @@ export interface DealVerdict {
 }
 
 export interface ProductBadge {
-  label: 'Best Value' | 'Fastest Delivery' | 'Top Rated Merchant' | 'Price Leader' | string;
+  label: 'Best Value' | 'Fastest Delivery' | 'Top Rated Merchant' | 'Price Leader' | 'Most Reviewed' | 'Top Rated' | 'Budget Pick' | 'Premium Pick' | 'Preferred Brand' | 'Low Confidence' | 'Penalized Rating' | string;
   color: string;
   description?: string;
   note?: string;
+}
+
+export interface PrimaryBadge {
+  tier: 'tier1' | 'tier2' | 'tier3' | 'tier4' | 'eliminated';
+  label: string;
+  color: string;
+  icon: string;
+  description: string;
+  trust_multiplier: number;
+  suspicious_override: boolean;
+  original_tier?: string;
 }
 
 export interface RankedProductItem {
@@ -97,7 +109,11 @@ export interface RankedProductItem {
   score: number; // Final deterministic composite utility score [0.0000, 1.0000]
   deal_verdict: DealVerdict;
   score_breakdown: ScoreBreakdown;
+  primary_badge?: PrimaryBadge;
   badges?: ProductBadge[];
+  secondary_badges?: ProductBadge[];
+  adjusted_rating?: number;
+  rating_verified?: boolean;
   price_anomaly: {
     is_suspicious: boolean;
     deviation_pct: number;
@@ -108,31 +124,159 @@ export interface RankedProductItem {
 }
 
 // Store Trust Configuration adapted from autonomous-commerce-agent
+export const OFFICIAL_STORE_KEYWORDS = [
+  'oneplus', 'samsung', 'apple', 'xiaomi', 'realme', 'oppo',
+  'vivo', 'sony', 'motorola', 'nothing', 'iqoo', 'boat',
+  'noise', 'hp', 'dell', 'lenovo', 'asus', 'acer', 'canon',
+  'nikon', 'dyson', 'official', 'brand store', 'authorized',
+  'bose', 'anker', 'google', 'nomad'
+];
+
+export const HIGH_TRUST_RETAILERS = ['amazon', 'flipkart'];
+
+export const TRUSTED_RETAILER_KEYWORDS = [
+  'croma', 'reliance digital', 'reliance', 'vijay sales', 'tatacliq',
+  'meesho', 'jiomart', 'snapdeal', 'paytm mall', 'bestbuy', 'walmart',
+  'target', 'bhphotovideo', 'newegg', 'adorama', 'techmerchant.com', 'powerhub.net'
+];
+
 export const STORE_TRUST_TIERS = {
   tier1: {
     multiplier: 1.12,
     base_reputation: 0.95,
-    keywords: [
-      'official', 'brand store', 'authorized', 'apple', 'samsung', 'sony',
-      'bose', 'anker', 'google', 'lenovo', 'dell', 'hp', 'asus', 'nomad',
-      'oneplus', 'xiaomi', 'realme', 'oppo', 'vivo', 'motorola', 'nothing'
-    ],
+    keywords: OFFICIAL_STORE_KEYWORDS,
   },
   tier2_high: {
     multiplier: 1.06,
     base_reputation: 0.85,
-    keywords: ['amazon', 'flipkart', 'bestbuy', 'walmart', 'target'],
+    keywords: HIGH_TRUST_RETAILERS,
   },
   tier2_low: {
     multiplier: 1.03,
     base_reputation: 0.75,
-    keywords: ['croma', 'reliance', 'bhphotovideo', 'newegg', 'adorama', 'techmerchant.com', 'powerhub.net'],
+    keywords: TRUSTED_RETAILER_KEYWORDS,
   },
   unknown: {
     multiplier: 0.88,
     base_reputation: 0.50,
   },
 };
+
+export function classifyStoreTier(source: string): 'tier1' | 'tier2_high' | 'tier2_low' | 'tier3' {
+  const s = (source || '').toLowerCase();
+  if (OFFICIAL_STORE_KEYWORDS.some(kw => s.includes(kw))) {
+    return 'tier1';
+  }
+  if (HIGH_TRUST_RETAILERS.some(kw => s.includes(kw))) {
+    return 'tier2_high';
+  }
+  if (TRUSTED_RETAILER_KEYWORDS.some(kw => s.includes(kw))) {
+    return 'tier2_low';
+  }
+  return 'tier3';
+}
+
+export function buildPrimaryBadge(product: {
+  domain?: string;
+  source?: string;
+  eliminated?: boolean;
+  elimination_reason?: string;
+  price_suspicious?: boolean;
+  anomaly_deviation_pct?: number;
+  anomaly_median_price_cents?: number;
+  trust_multiplier?: number;
+}): PrimaryBadge {
+  const source = product.domain || product.source || '';
+  const eliminated = Boolean(product.eliminated);
+  const suspicious = Boolean(product.price_suspicious);
+
+  if (eliminated) {
+    return {
+      tier: 'eliminated',
+      label: 'Eliminated',
+      color: '#3a3a3a',
+      icon: 'block',
+      description: product.elimination_reason || 'Removed by policy or constraint',
+      trust_multiplier: 0.0,
+      suspicious_override: false,
+    };
+  }
+
+  const storeTier = classifyStoreTier(source);
+
+  if (suspicious) {
+    return {
+      tier: 'tier4',
+      label: 'Suspicious Listing',
+      color: '#ef4444',
+      icon: 'alert_circle',
+      description: `Price is ${product.anomaly_deviation_pct?.toFixed(1) || '35.0'}% below median $${(((product.anomaly_median_price_cents || 0)) / 100).toFixed(2)}. Verify before purchasing.`,
+      trust_multiplier: product.trust_multiplier ?? 0.88,
+      suspicious_override: true,
+      original_tier: storeTier,
+    };
+  }
+
+  if (storeTier === 'tier1') {
+    return {
+      tier: 'tier1',
+      label: 'Official Store',
+      color: '#00d4aa',
+      icon: 'shield',
+      description: 'Full official warranty guaranteed.',
+      trust_multiplier: product.trust_multiplier ?? 1.12,
+      suspicious_override: false,
+    };
+  }
+
+  if (storeTier === 'tier2_high' || storeTier === 'tier2_low') {
+    return {
+      tier: 'tier2',
+      label: 'Trusted Retailer',
+      color: '#7c3aed',
+      icon: 'seal',
+      description: 'Established retailer with buyer protection.',
+      trust_multiplier: product.trust_multiplier ?? (storeTier === 'tier2_high' ? 1.06 : 1.03),
+      suspicious_override: false,
+    };
+  }
+
+  return {
+    tier: 'tier3',
+    label: 'Unverified Seller',
+    color: '#e8a045',
+    icon: 'warning_triangle',
+    description: 'Check seller ratings before purchasing.',
+    trust_multiplier: product.trust_multiplier ?? 0.88,
+    suspicious_override: false,
+  };
+}
+
+export const NEUTRAL_RATING = 2.5;
+export const CONFIDENCE_FLOOR = 100;
+
+export function computeConfidenceAdjustedRating(
+  rating: number,
+  reviewCount: number
+): { adjusted_rating: number; rating_verified: boolean } {
+  if (rating <= 0.0) {
+    return { adjusted_rating: NEUTRAL_RATING, rating_verified: false };
+  }
+  const confidence = Math.min(Math.max(0, reviewCount), CONFIDENCE_FLOOR) / CONFIDENCE_FLOOR;
+  const adjusted = Math.round((confidence * rating + (1 - confidence) * NEUTRAL_RATING) * 10000) / 10000;
+  return { adjusted_rating: adjusted, rating_verified: true };
+}
+
+export function logNormalize(values: number[]): number[] {
+  if (!values || values.length === 0) return [];
+  const logged = values.map(v => Math.log1p(Math.max(0, v)));
+  const min = Math.min(...logged);
+  const max = Math.max(...logged);
+  if (min === max) {
+    return values.map(() => 1.0);
+  }
+  return logged.map(v => (v - min) / (max - min));
+}
 
 // Deal Verdict mapping thresholds
 const VERDICT_THRESHOLDS: Array<{ min_score: number; text: string; colour: string }> = [
@@ -419,9 +563,35 @@ export function assignProductBadges(
     const activeCandidates = input.filter(item => !item.eliminated);
     for (const item of input) {
       item.badges = item.badges || [];
+      // Always attach primary badge to every item
+      item.primary_badge = buildPrimaryBadge({
+        domain: item.selected_offer.domain,
+        eliminated: item.eliminated,
+        elimination_reason: item.elimination_reason,
+        price_suspicious: item.price_anomaly.is_suspicious,
+        anomaly_deviation_pct: item.price_anomaly.deviation_pct,
+        anomaly_median_price_cents: item.price_anomaly.median_price_cents,
+        trust_multiplier: item.score_breakdown.brand_boost_multiplier,
+      });
+    }
+
+    // Eliminated items must receive ZERO secondary positive badges
+    for (const item of input) {
+      if (item.eliminated) {
+        item.badges = [];
+        item.secondary_badges = [];
+      }
     }
 
     if (activeCandidates.length > 0) {
+      // Helper to push unique badge
+      const pushBadge = (target: RankedProductItem, badge: ProductBadge) => {
+        target.badges = target.badges || [];
+        if (!target.badges.some(b => b.label === badge.label)) {
+          target.badges.push(badge);
+        }
+      };
+
       // 1. Price Leader: Lowest price among active items
       let minPriceItem = activeCandidates[0];
       for (const item of activeCandidates) {
@@ -429,14 +599,11 @@ export function assignProductBadges(
           minPriceItem = item;
         }
       }
-      minPriceItem.badges = minPriceItem.badges || [];
-      if (!minPriceItem.badges.some(b => b.label === 'Price Leader')) {
-        minPriceItem.badges.push({
-          label: 'Price Leader',
-          color: '#e8a045',
-          description: 'Lowest upfront price among verified offerings',
-        });
-      }
+      pushBadge(minPriceItem, {
+        label: 'Price Leader',
+        color: '#e8a045',
+        description: 'Lowest upfront price among verified offerings',
+      });
 
       // 2. Best Value: Highest utility score to price ratio
       let bestValueItem = activeCandidates[0];
@@ -448,14 +615,11 @@ export function assignProductBadges(
           bestValueItem = item;
         }
       }
-      bestValueItem.badges = bestValueItem.badges || [];
-      if (!bestValueItem.badges.some(b => b.label === 'Best Value')) {
-        bestValueItem.badges.push({
-          label: 'Best Value',
-          color: '#00d4aa',
-          description: 'Optimal balance of utility score, features, and price',
-        });
-      }
+      pushBadge(bestValueItem, {
+        label: 'Best Value',
+        color: '#00d4aa',
+        description: 'Optimal balance of utility score, features, and price',
+      });
 
       // 3. Top Rated Merchant: Highest merchant reputation score
       let topMerchantItem = activeCandidates[0];
@@ -464,14 +628,11 @@ export function assignProductBadges(
           topMerchantItem = item;
         }
       }
-      topMerchantItem.badges = topMerchantItem.badges || [];
-      if (!topMerchantItem.badges.some(b => b.label === 'Top Rated Merchant')) {
-        topMerchantItem.badges.push({
-          label: 'Top Rated Merchant',
-          color: '#7c3aed',
-          description: 'Official brand or highest trust tier retailer',
-        });
-      }
+      pushBadge(topMerchantItem, {
+        label: 'Top Rated Merchant',
+        color: '#7c3aed',
+        description: 'Official brand or highest trust tier retailer',
+      });
 
       // 4. Fastest Delivery: Lowest shipping penalty (lowest shipping days)
       let fastestDeliveryItem = activeCandidates[0];
@@ -480,13 +641,56 @@ export function assignProductBadges(
           fastestDeliveryItem = item;
         }
       }
-      fastestDeliveryItem.badges = fastestDeliveryItem.badges || [];
-      if (!fastestDeliveryItem.badges.some(b => b.label === 'Fastest Delivery')) {
-        fastestDeliveryItem.badges.push({
-          label: 'Fastest Delivery',
-          color: '#38bdf8',
-          description: 'Priority expedited shipping with minimal latency',
+      pushBadge(fastestDeliveryItem, {
+        label: 'Fastest Delivery',
+        color: '#38bdf8',
+        description: 'Priority expedited shipping with minimal latency',
+      });
+
+      // 5. Budget Pick: Lowest price among trusted stores only
+      const trustedCandidates = activeCandidates.filter(item => {
+        const tier = classifyStoreTier(item.selected_offer.domain);
+        return tier === 'tier1' || tier === 'tier2_high' || tier === 'tier2_low';
+      });
+      if (trustedCandidates.length > 0) {
+        const budgetPickItem = trustedCandidates.reduce((min, cur) =>
+          cur.selected_offer.price < min.selected_offer.price ? cur : min, trustedCandidates[0]
+        );
+        pushBadge(budgetPickItem, {
+          label: 'Budget Pick',
+          color: '#e8a045',
+          description: 'Lowest price from a verified trusted merchant',
         });
+      }
+
+      // 6. Premium Pick: Highest price AND in top 2 scores
+      const sortedByScore = [...activeCandidates].sort((a, b) => b.score - a.score);
+      const top2 = sortedByScore.slice(0, 2);
+      const highestPriceItem = activeCandidates.reduce((max, cur) =>
+        cur.selected_offer.price > max.selected_offer.price ? cur : max, activeCandidates[0]
+      );
+      if (top2.some(t => t.product_id === highestPriceItem.product_id)) {
+        pushBadge(highestPriceItem, {
+          label: 'Premium Pick',
+          color: '#f5f5f5',
+          description: 'High-end flagship tier with premier performance',
+        });
+      }
+
+      // 7. Preferred Brand
+      for (const item of activeCandidates) {
+        if (item.score_breakdown.brand_boost_multiplier && item.score_breakdown.brand_boost_multiplier > 1.0) {
+          pushBadge(item, {
+            label: 'Preferred Brand',
+            color: '#e8a045',
+            description: 'Matches user brand preference',
+          });
+        }
+      }
+
+      // Synchronize secondary_badges
+      for (const item of activeCandidates) {
+        item.secondary_badges = [...(item.badges || [])];
       }
     }
 
@@ -586,6 +790,9 @@ export class MurthyroshanScoringEngine {
       } else if (selectedOffer.price <= 0) {
         eliminated = true;
         eliminationReason = 'Invalid non-positive price';
+      } else if (context.max_price_cents && selectedOffer.price > context.max_price_cents) {
+        eliminated = true;
+        eliminationReason = `Exceeds max price $${(context.max_price_cents / 100).toFixed(2)}`;
       }
 
       // Step 2: Cosine Semantic Relevance
@@ -644,6 +851,8 @@ export class MurthyroshanScoringEngine {
       const boundedScore = Math.max(0.0, Math.min(1.0, Math.round(finalScore * 10000) / 10000));
       const verdict = computeDealVerdict(boundedScore);
 
+      const ratingConf = computeConfidenceAdjustedRating((product as any).rating ?? 4.8, (product as any).review_count ?? 120);
+
       scoredItems.push({
         product_id: product.product_id,
         title: product.title,
@@ -652,6 +861,8 @@ export class MurthyroshanScoringEngine {
         selected_offer: selectedOffer,
         score: boundedScore,
         deal_verdict: verdict,
+        adjusted_rating: ratingConf.adjusted_rating,
+        rating_verified: ratingConf.rating_verified,
         score_breakdown: {
           cosine_similarity: Math.round(cosineSim * 10000) / 10000,
           price_affinity: Math.round(priceAffinity * 10000) / 10000,

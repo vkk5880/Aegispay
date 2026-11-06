@@ -38,6 +38,8 @@ export interface MerchantCartGroup {
 
 export interface KnapsackOptimizationResult {
   assigned_merchants: MerchantCartGroup[];
+  affiliate_attribution?: any;
+  total_affiliate_rebate_cents?: number;
   gross_subtotal_cents: number;
   total_commission_rebate_cents: number;
   total_shipping_cents: number;
@@ -87,6 +89,7 @@ export interface KnapsackOptions {
   lambdaAnomaly?: number; // Weight penalty for merchant anomaly, default 5000 cents ($50 penalty for 1.0 anomaly)
   budgetCapCents?: number;
   zipCode?: string;
+  affiliate_attribution?: any;
 }
 
 export class CartSolver {

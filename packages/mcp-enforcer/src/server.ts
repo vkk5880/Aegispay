@@ -13,6 +13,7 @@ import {
   ProposeDisputeSettlementSchema,
   toolHandlers
 } from './custom-tools.js';
+import { executeACPAction } from './acp-manifest.js';
 
 export function createMCPServer() {
   const server = new Server(
@@ -113,6 +114,69 @@ export function createMCPServer() {
             },
             required: ['paypal_dispute_id', 'compromise_amount_cents']
           }
+        },
+        {
+          name: 'create_checkout_session',
+          description: 'ACP MCP Tool: Creates an agentic checkout session with optional affiliate attribution and item validations.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              meta: { type: 'object' },
+              payload: { type: 'object' }
+            },
+            required: ['meta', 'payload']
+          }
+        },
+        {
+          name: 'get_checkout_session',
+          description: 'ACP MCP Tool: Retrieves active checkout session state and pricing lines.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              meta: { type: 'object' },
+              id: { type: 'string' }
+            },
+            required: ['meta', 'id']
+          }
+        },
+        {
+          name: 'update_checkout_session',
+          description: 'ACP MCP Tool: Updates items, buyer info, or fulfillment on an active checkout session.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              meta: { type: 'object' },
+              id: { type: 'string' },
+              payload: { type: 'object' }
+            },
+            required: ['meta', 'id', 'payload']
+          }
+        },
+        {
+          name: 'complete_checkout_session',
+          description: 'ACP MCP Tool: Executes payment and captures the checkout session order.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              meta: { type: 'object' },
+              id: { type: 'string' },
+              payload: { type: 'object' }
+            },
+            required: ['meta', 'id', 'payload']
+          }
+        },
+        {
+          name: 'cancel_checkout_session',
+          description: 'ACP MCP Tool: Cancels an active checkout session with optional intent trace.',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              meta: { type: 'object' },
+              id: { type: 'string' },
+              payload: { type: 'object' }
+            },
+            required: ['meta', 'id']
+          }
         }
       ],
     };
@@ -167,6 +231,26 @@ export function createMCPServer() {
         }
         const result = await toolHandlers.handleProposeSettlement(parsed.data);
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+      }
+      case 'create_checkout_session': {
+        const result = await executeACPAction('create_checkout_session', request.params.arguments || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result.result || result) }] };
+      }
+      case 'get_checkout_session': {
+        const result = await executeACPAction('get_checkout_session', request.params.arguments || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result.result || result) }] };
+      }
+      case 'update_checkout_session': {
+        const result = await executeACPAction('update_checkout_session', request.params.arguments || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result.result || result) }] };
+      }
+      case 'complete_checkout_session': {
+        const result = await executeACPAction('complete_checkout_session', request.params.arguments || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result.result || result) }] };
+      }
+      case 'cancel_checkout_session': {
+        const result = await executeACPAction('cancel_checkout_session', request.params.arguments || {});
+        return { content: [{ type: 'text', text: JSON.stringify(result.result || result) }] };
       }
       default:
         throw new Error('Unknown tool');

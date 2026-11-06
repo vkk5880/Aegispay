@@ -34,6 +34,7 @@ export interface ACPPaymentHandlerConfig {
   supports_3ds?: boolean;
   environment?: 'sandbox' | 'production';
   display_name?: string;
+  [key: string]: any;
 }
 
 export interface ACPPaymentHandlerDescriptor {
@@ -59,6 +60,8 @@ export interface ACPDiscoveryCapabilities {
   interventions?: {
     supported: string[];
   };
+  extensions?: any[];
+  [key: string]: any;
 }
 
 export interface ACPManifest {
@@ -82,7 +85,7 @@ export interface ACPActionDescriptor {
   name: string;
   description: string;
   parameters: Record<string, any>;
-  returns: Record<string, any>;
+  returns?: Record<string, any>;
   guarded_aegis_action: string;
 }
 
@@ -173,6 +176,94 @@ export const ACPPaymentHandlerExecuteSchema = z.object({
   idempotency_key: z.string().optional(),
 });
 
+
+/**
+ * Canonical ACP MCP Checkout Tool Schemas (docs/mcp-binding.md)
+ * Strict JSON-RPC 2.0 argument validation with { meta, id, payload } envelope
+ */
+export const ACPMCPCreateCheckoutSessionSchema = z.object({
+  meta: z.object({
+    api_version: z.string().min(1),
+    idempotency_key: z.string().optional(),
+    request_id: z.string().optional(),
+    user_agent: z.string().optional(),
+    accept_language: z.string().optional(),
+    signature: z.string().optional(),
+    timestamp: z.string().optional(),
+  }).passthrough(),
+  payload: z.object({
+    currency: z.string().default('usd'),
+    items: z.array(z.object({
+      id: z.string(),
+      quantity: z.number().int().positive(),
+      unit_price_cents: z.number().int().nonnegative().optional(),
+      name: z.string().optional(),
+    })).min(1),
+    buyer: z.object({
+      email: z.string().email().optional(),
+      name: z.string().optional(),
+    }).optional(),
+    fulfillment_details: z.any().optional(),
+    affiliate_attribution: z.any().optional(),
+    order_notes: z.string().optional(),
+    mandate_id: z.string().optional(),
+  }),
+});
+
+export const ACPMCPGetCheckoutSessionSchema = z.object({
+  meta: z.object({
+    api_version: z.string().min(1),
+    request_id: z.string().optional(),
+  }).passthrough(),
+  id: z.string().min(1),
+});
+
+export const ACPMCPUpdateCheckoutSessionSchema = z.object({
+  meta: z.object({
+    api_version: z.string().min(1),
+    idempotency_key: z.string().optional(),
+    request_id: z.string().optional(),
+  }).passthrough(),
+  id: z.string().min(1),
+  payload: z.object({
+    items: z.array(z.any()).optional(),
+    buyer: z.any().optional(),
+    fulfillment_details: z.any().optional(),
+    order_notes: z.string().optional(),
+  }),
+});
+
+export const ACPMCPCompleteCheckoutSessionSchema = z.object({
+  meta: z.object({
+    api_version: z.string().min(1),
+    idempotency_key: z.string().optional(),
+    request_id: z.string().optional(),
+  }).passthrough(),
+  id: z.string().min(1),
+  payload: z.object({
+    payment_method: z.object({
+      type: z.string(),
+      token: z.string().optional(),
+      mandate_signature: z.string().optional(),
+      public_key_hex: z.string().optional(),
+    }),
+    affiliate_attribution: z.any().optional(),
+    mandate_id: z.string().optional(),
+  }),
+});
+
+export const ACPMCPCancelCheckoutSessionSchema = z.object({
+  meta: z.object({
+    api_version: z.string().min(1),
+    request_id: z.string().optional(),
+  }).passthrough(),
+  id: z.string().min(1),
+  payload: z.object({
+    reason: z.string().optional(),
+    intent_trace: z.record(z.string(), z.any()).optional(),
+  }).optional(),
+});
+
 export const ACP_STANDARD_PAYMENT_HANDLERS: ACPPaymentHandlerDescriptor[] = [
   {
     id: 'paypal_vault_v3',
@@ -217,6 +308,132 @@ export const ACP_STANDARD_PAYMENT_HANDLERS: ACPPaymentHandlerDescriptor[] = [
     },
     display_order: 2,
   },
+  {
+    id: 'seller_saved_card',
+    name: 'dev.acp.seller_backed.saved_card',
+    display_name: 'Saved Card at Seller',
+    version: '2026-02-05',
+    spec: 'https://acp.dev/handlers/seller_backed/saved_card',
+    requires_delegate_payment: true,
+    requires_pci_compliance: false,
+    psp: 'seller_managed',
+    config: {
+      merchant_id: 'aegispay_clearinghouse',
+      psp: 'seller_managed',
+      payment_method_id: 'wmt_pm_123',
+      display_name: 'Visa ending in 4242',
+      display_metadata: {
+        brand: 'visa',
+        last4: '4242',
+      },
+      supports_3ds: true,
+    },
+    display_order: 3,
+  },
+  {
+    id: 'seller_gift_card',
+    name: 'dev.acp.seller_backed.gift_card',
+    display_name: 'Merchant Gift Card',
+    version: '2026-02-05',
+    spec: 'https://acp.dev/handlers/seller_backed/gift_card',
+    requires_delegate_payment: true,
+    requires_pci_compliance: false,
+    psp: 'seller_managed',
+    config: {
+      merchant_id: 'aegispay_clearinghouse',
+      psp: 'seller_managed',
+      display_name: 'Aegis Gift Card',
+      required_fields: [
+        {
+          name: 'card_number',
+          label: 'Gift Card Number',
+          type: 'text',
+          required: true,
+          pattern: '^[0-9]{16}$',
+        },
+        {
+          name: 'pin',
+          label: 'PIN',
+          type: 'text',
+          required: true,
+          pattern: '^[0-9]{4}$',
+          secure: true,
+        },
+      ],
+    },
+    display_order: 4,
+  },
+  {
+    id: 'seller_points',
+    name: 'dev.acp.seller_backed.points',
+    display_name: 'Loyalty Rewards Points',
+    version: '2026-02-05',
+    spec: 'https://acp.dev/handlers/seller_backed/points',
+    requires_delegate_payment: true,
+    requires_pci_compliance: false,
+    psp: 'seller_managed',
+    config: {
+      merchant_id: 'aegispay_clearinghouse',
+      psp: 'seller_managed',
+      display_name: 'Aegis Rewards Points',
+      display_metadata: {
+        balance: 25000,
+        balance_display: '25,000 points ($250.00)',
+        conversion_rate: '100 points = $1.00',
+      },
+    },
+    display_order: 5,
+  },
+  {
+    id: 'seller_store_credit',
+    name: 'dev.acp.seller_backed.store_credit',
+    display_name: 'Aegis Store Credit',
+    version: '2026-02-05',
+    spec: 'https://acp.dev/handlers/seller_backed/store_credit',
+    requires_delegate_payment: true,
+    requires_pci_compliance: false,
+    psp: 'seller_managed',
+    config: {
+      merchant_id: 'aegispay_clearinghouse',
+      psp: 'seller_managed',
+      display_name: 'Store Credit Balance',
+      display_metadata: {
+        balance: 50000,
+        balance_display: '$500.00 Store Credit',
+      },
+    },
+    display_order: 6,
+  },
+  // original store credit replaced above
+  /*
+    display_name: 'Aegis Store Credit',
+    version: '2026-02-05',
+    spec: 'https://aegispay.dev/specs/handlers/seller_backed',
+    requires_delegate_payment: true,
+    requires_pci_compliance: false,
+    psp: 'seller_managed',
+    config: {
+      merchant_id: 'aegispay_clearinghouse',
+      supports_partial_redemption: true,
+    },
+    display_order: 3,
+  },
+  {
+    id: 'seller_gift_card',
+    name: 'dev.acp.seller_backed.gift_card',
+    display_name: 'Merchant Gift Card',
+    version: '2026-02-05',
+    spec: 'https://aegispay.dev/specs/handlers/seller_backed',
+    requires_delegate_payment: true,
+    requires_pci_compliance: false,
+    psp: 'seller_managed',
+    config: {
+      merchant_id: 'aegispay_clearinghouse',
+    },
+    display_order: 4,
+  },
+  */
+
 ];
 
 export const ACP_MANIFEST: ACPManifest = {
@@ -234,16 +451,26 @@ export const ACP_MANIFEST: ACPManifest = {
   discovery_protocol: {
     name: 'acp',
     version: '2026-01-30',
-    supported_versions: ['2025-09-29', '2025-12-12', '2026-01-16', '2026-01-30'],
+    supported_versions: ['2025-09-29', '2025-12-12', '2026-01-16', '2026-01-30', '2026-04-17'],
     documentation_url: 'https://aegispay.dev/docs/acp',
   },
   api_base_url: process.env.API_BASE_URL || 'https://aegispay.dev/acp',
   transports: ['rest', 'mcp'],
   capabilities: {
-    services: ['checkout', 'delegate_payment', 'orders', 'actions'],
+    services: ['checkout', 'delegate_payment', 'orders', 'actions', 'carts', 'delegate_authentication'],
     payment_handlers: ACP_STANDARD_PAYMENT_HANDLERS,
     supported_currencies: ['USD'],
     supported_locales: ['en-US'],
+    extensions: [
+      {
+        name: 'discount',
+        extends: [
+          '$.CheckoutSessionCreateRequest.discounts',
+          '$.CheckoutSessionUpdateRequest.discounts',
+          '$.CheckoutSession.discounts',
+        ],
+      },
+    ],
     interventions: {
       supported: ['3ds', 'address_verification'],
     },
@@ -297,6 +524,74 @@ export const ACP_MANIFEST: ACPManifest = {
         },
       },
       guarded_aegis_action: 'broadcast_synthetic_intent_voucher',
+    },
+    {
+      name: 'create_checkout_session',
+      description: 'ACP MCP Tool: Creates a checkout session with authoritative cart totals and fulfillment options.',
+      parameters: {
+        type: 'object',
+        properties: {
+          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          payload: { type: 'object', properties: { currency: { type: 'string' }, items: { type: 'array' } }, required: ['items'] },
+        },
+        required: ['meta', 'payload'],
+      },
+      guarded_aegis_action: 'create_checkout_session',
+    },
+    {
+      name: 'get_checkout_session',
+      description: 'ACP MCP Tool: Retrieves the authoritative state of an active checkout session.',
+      parameters: {
+        type: 'object',
+        properties: {
+          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          id: { type: 'string', description: 'Checkout session ID' },
+        },
+        required: ['meta', 'id'],
+      },
+      guarded_aegis_action: 'get_checkout_session',
+    },
+    {
+      name: 'update_checkout_session',
+      description: 'ACP MCP Tool: Full replacement update of line items, fulfillment details, or buyer in checkout session.',
+      parameters: {
+        type: 'object',
+        properties: {
+          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          id: { type: 'string', description: 'Checkout session ID' },
+          payload: { type: 'object' },
+        },
+        required: ['meta', 'id', 'payload'],
+      },
+      guarded_aegis_action: 'update_checkout_session',
+    },
+    {
+      name: 'complete_checkout_session',
+      description: 'ACP MCP Tool: Submits payment instrument or vaulted token and finalizes order on merchant rails.',
+      parameters: {
+        type: 'object',
+        properties: {
+          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          id: { type: 'string', description: 'Checkout session ID' },
+          payload: { type: 'object', properties: { payment_method: { type: 'object' } }, required: ['payment_method'] },
+        },
+        required: ['meta', 'id', 'payload'],
+      },
+      guarded_aegis_action: 'complete_checkout_session',
+    },
+    {
+      name: 'cancel_checkout_session',
+      description: 'ACP MCP Tool: Cancels an active checkout session with optional intent trace.',
+      parameters: {
+        type: 'object',
+        properties: {
+          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          id: { type: 'string', description: 'Checkout session ID' },
+          payload: { type: 'object', properties: { reason: { type: 'string' } } },
+        },
+        required: ['meta', 'id'],
+      },
+      guarded_aegis_action: 'cancel_checkout_session',
     },
     {
       name: 'confirm_payment_hold',
@@ -365,6 +660,31 @@ export async function executeACPAction(actionName: string, params: Record<string
       const res = await toolHandlers.handleBroadcastIntent(parsed);
       return { action: 'request_purchase_quote', result: res };
     }
+    case 'create_checkout_session': {
+      const parsed = ACPMCPCreateCheckoutSessionSchema.parse(params);
+      const res = await toolHandlers.handleCreateCheckoutSession(parsed);
+      return { action: 'create_checkout_session', result: res };
+    }
+    case 'get_checkout_session': {
+      const parsed = ACPMCPGetCheckoutSessionSchema.parse(params);
+      const res = await toolHandlers.handleGetCheckoutSession(parsed);
+      return { action: 'get_checkout_session', result: res };
+    }
+    case 'update_checkout_session': {
+      const parsed = ACPMCPUpdateCheckoutSessionSchema.parse(params);
+      const res = await toolHandlers.handleUpdateCheckoutSession(parsed);
+      return { action: 'update_checkout_session', result: res };
+    }
+    case 'complete_checkout_session': {
+      const parsed = ACPMCPCompleteCheckoutSessionSchema.parse(params);
+      const res = await toolHandlers.handleCompleteCheckoutSession(parsed);
+      return { action: 'complete_checkout_session', result: res };
+    }
+    case 'cancel_checkout_session': {
+      const parsed = ACPMCPCancelCheckoutSessionSchema.parse(params);
+      const res = await toolHandlers.handleCancelCheckoutSession(parsed);
+      return { action: 'cancel_checkout_session', result: res };
+    }
     case 'confirm_payment_hold': {
       const parsed = ACPConfirmPaymentHoldSchema.parse(params);
       const res = await toolHandlers.handleAuthorizeEscrow(parsed);
@@ -373,4 +693,128 @@ export async function executeACPAction(actionName: string, params: Record<string
     default:
       throw new Error(`Unsupported ACP action: ${actionName}. Supported actions: discover_products, request_purchase_quote, confirm_payment_hold`);
   }
+}
+
+// ============================================================================
+// BAZAAR DISCOVERY EXTENSION INTEGRATION (Stream 4: ACP & Mastra Workflow DAG)
+// Dynamic cataloging & discovery manifests for HTTP endpoints & MCP tools
+// ============================================================================
+
+export interface BazaarRouteExtensionConfig {
+  path: string;
+  method?: string;
+  bazaar?: {
+    input?: Record<string, unknown>;
+    output?: Record<string, unknown>;
+    toolName?: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+  };
+}
+
+export interface BazaarDiscoveryManifest {
+  version: '2';
+  timestamp: string;
+  origin: string;
+  catalogUrl: string;
+  resources: Array<{
+    type: 'http' | 'mcp';
+    url?: string;
+    method?: string;
+    toolName?: string;
+    description?: string;
+    inputSchema?: Record<string, unknown>;
+    output?: Record<string, unknown>;
+  }>;
+}
+
+/**
+ * Validates route configuration to check whether Bazaar discovery metadata is present
+ */
+export function checkIfBazaarNeeded(routes: Record<string, any>): boolean {
+  if (!routes || typeof routes !== 'object') return false;
+  return Object.values(routes).some(r => r && (r.bazaar || (r.extensions && r.extensions['bazaar'])));
+}
+
+/**
+ * Validates route templates and parameter schemas for Bazaar routes
+ */
+export function validateBazaarRouteExtensions(routes: Record<string, any>): { isValid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (!routes || typeof routes !== 'object') return { isValid: true, errors };
+
+  for (const [path, config] of Object.entries(routes)) {
+    // Validate path template syntax: {param}
+    const matches = path.match(/\{[^}]*\}/g) || [];
+    for (const m of matches) {
+      if (m === '{}' || m.includes(' ') || m.includes('/')) {
+        errors.push(`Invalid route parameter syntax in path "${path}": ${m}`);
+      }
+    }
+
+    const bazaarConfig = config?.bazaar || config?.extensions?.['bazaar'];
+    if (bazaarConfig?.input?.type === 'mcp' && !bazaarConfig.input.toolName) {
+      errors.push(`Bazaar MCP route "${path}" missing required toolName`);
+    }
+  }
+
+  return { isValid: errors.length === 0, errors };
+}
+
+/**
+ * Generates dynamic Bazaar discovery manifest (/discovery/bazaar.json)
+ * enabling facilitators to catalog and index x402-enabled HTTP endpoints and MCP tools
+ */
+export function generateBazaarDiscoveryManifest(options: {
+  origin: string;
+  routes?: Record<string, any>;
+  customTools?: any[];
+}): BazaarDiscoveryManifest {
+  const { origin, routes = {}, customTools = [] } = options;
+  const manifest: BazaarDiscoveryManifest = {
+    version: '2',
+    timestamp: new Date().toISOString(),
+    origin,
+    catalogUrl: `${origin.replace(/\/+$/, '')}/.well-known/bazaar.json`,
+    resources: [],
+  };
+
+  // 1. Index HTTP endpoints
+  for (const [path, cfg] of Object.entries(routes)) {
+    const bz = cfg?.bazaar || cfg?.extensions?.['bazaar'];
+    if (bz) {
+      if (bz.input?.type === 'mcp' || bz.toolName) {
+        manifest.resources.push({
+          type: 'mcp',
+          toolName: bz.toolName || bz.input?.toolName,
+          description: bz.description || bz.input?.description,
+          inputSchema: bz.inputSchema || bz.input?.inputSchema || {},
+          output: bz.output,
+        });
+      } else {
+        manifest.resources.push({
+          type: 'http',
+          url: `${origin.replace(/\/+$/, '')}${path}`,
+          method: (cfg.method || bz.input?.method || 'GET').toUpperCase(),
+          inputSchema: bz.input?.bodySchema || bz.input?.queryParams || {},
+          output: bz.output,
+        });
+      }
+    }
+  }
+
+  // 2. Index MCP custom tools
+  for (const tool of customTools) {
+    if (tool && tool.name) {
+      manifest.resources.push({
+        type: 'mcp',
+        toolName: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema || {},
+        output: { type: 'application/json' },
+      });
+    }
+  }
+
+  return manifest;
 }

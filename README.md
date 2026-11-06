@@ -47,7 +47,74 @@ AegisPay is a production-grade dual-sided agentic commerce platform that bridges
 
 ---
 
-## 3. Monorepo Architecture & Directory Topology
+## 3. Agentic Commerce Protocol (ACP) Specification & Architecture
+
+AegisPay natively implements the **Agentic Commerce Protocol (ACP)** specification maintained by OpenAI & Stripe, serving as an autonomous dual-sided clearinghouse connecting AI shopping agents with PayPal v2/v3 commerce rails.
+
+### 3.1 Supported Protocol Versions & Discovery
+- **Discovery Endpoint**: `GET /.well-known/acp.json`
+- **Supported API Versions**: `2025-09-29`, `2025-12-12`, `2026-01-16`, `2026-01-30`, `2026-04-17` (Active Standard)
+- **Advertised Transports**: `rest` (HTTPS REST endpoints) and `mcp` (Streamable HTTP JSON-RPC 2.0)
+- **Advertised Services**: `checkout`, `delegate_payment`, `orders`, `actions`, `carts`
+
+### 3.2 Protocol Endpoints & Capabilities
+| Area | Path / Method | Spec Reference | Description |
+| :--- | :--- | :--- | :--- |
+| **Discovery** | `GET /.well-known/acp.json` | `rfcs/rfc.discovery.md` | Manifest advertising capabilities, versions, and payment handlers |
+| **Checkout Session** | `POST /checkout_sessions` | `rfcs/rfc.agentic_checkout.md` | Initiates checkout session with tax estimation and shipping calculation |
+| **Authoritative State** | `GET /checkout_sessions/{id}` | `rfcs/rfc.agentic_checkout.md` | Retrieves authoritative cart state and line item totals |
+| **Session Update** | `POST /checkout_sessions/{id}` | `rfcs/rfc.agentic_checkout.md` | Full replacement update of line items, fulfillment, or buyer data |
+| **Session Completion**| `POST /checkout_sessions/{id}/complete`| `rfcs/rfc.agentic_checkout.md` | Finalizes payment via Vault v3 or Ed25519 mandate and creates order |
+| **Session Cancel** | `POST /checkout_sessions/{id}/cancel` | `rfcs/rfc.agentic_checkout.md` | Cancels session with optional intent trace data |
+| **Pre-Checkout Cart** | `POST /carts` | `docs/sep-cart-capability.md` (SEP #187) | Lightweight basket building with non-authoritative estimated pricing |
+| **Cart Operations** | `GET / PUT / POST /carts/{id}` | `docs/sep-cart-capability.md` (SEP #187) | Cart exploration, session persistence (7-day TTL), and handoff URLs |
+| **MCP Streamable** | `POST /mcp` | `docs/mcp-binding.md` | JSON-RPC 2.0 binding exposing the 5 canonical ACP checkout tools |
+| **Attribution** | `affiliate_attribution` payload | `rfcs/rfc.affiliate_attribution.md` | Privacy-preserving token attribution (first-touch and last-touch) |
+| **Delegate Auth** | `POST /delegate_authentication` | `rfcs/rfc.delegate_authentication.md` | 3DS2 browser authentication session initiation and challenge |
+| **Auth Result** | `GET /delegate_authentication/{id}` | `rfcs/rfc.delegate_authentication.md` | Retrieves 3DS authentication cryptogram and ECI indicators |
+| **Delegate Payment**| `POST /agentic_commerce/delegate_payment`| `rfcs/rfc.delegate_payment.md`| Tokenizes credential into allowance-constrained Vault token (vt_...) |
+| **Capability Neg.** | `capabilities` exchange | `rfcs/rfc.capability_negotiation.md` | Single-roundtrip server-side intersection of supported interventions |
+| **Discount Ext.** | `discounts.codes` payload | `rfcs/rfc.discount_extension.md` | Rich applied promotions, priority stacking, and allocation breakdowns |
+| **Order Tracking** | `GET /orders/{id}` | `rfcs/rfc.orders.md` | Rich post-purchase order tracking with 3-field quantity, fulfillments & adjustments |
+| **Intent Tracing** | `intent_trace` on cancel | `rfcs/rfc.intent_traces.md` | Structured abandonment telemetry enabling programmatic Dutch auction bidding |
+| **Marketing Consent**| `marketing_consents` payload | `rfcs/rfc.marketing_consent.md` | Three-phase consent capture (declare options, render UI, capture opt-in) |
+| **Product Feeds** | `POST / GET /feeds` | `rfcs/rfc.product_feeds.md` | Product catalog ingestion, variant indexing, and merchandising surface |
+| **Feed Items** | `POST / GET /feeds/{id}/items` | `rfcs/rfc.product_feeds.md` | Incremental catalog upserts, stock updates, and item lookup |
+| **Payment Handlers** | `capabilities.payment_handlers` | `rfcs/rfc.payment_handlers.md` | Standardized payment method handlers with explicit credential delegation |
+| **Seller-Backed Handlers**| `dev.acp.seller_backed.*` | `rfcs/rfc.seller_backed_payment_handler.md`| Zero-credential store credit, gift cards, and loyalty balance execution |
+| **Active Schemas** | `spec/2026-04-17/json-schema/` | `spec/2026-04-17/` | Official 2026-04-17 JSON Schema bundles (checkout, cart, auth, payment, feed) |
+| **ACP Webhooks** | `POST /api/webhooks/acp` | `spec/2026-04-17/openapi/openapi.agentic_checkout_webhook.yaml` | Order lifecycle webhooks (order_create, order_update) with signature verification |
+| **OpenRPC Metadata** | `GET /.well-known/openrpc.json`| `spec/2026-04-17/openrpc/openrpc.agentic_checkout.json` | OpenRPC 1.3 schema describing MCP Streamable HTTP JSON-RPC 2.0 checkout tools |
+| **OpenAPI 3.1 Specs**| `spec/2026-04-17/openapi/` | `spec/2026-04-17/` | Official OpenAPI 3.1 contracts (checkout, webhooks, cart, auth, payment, feeds) |
+| **Unreleased Specs** | `spec/unreleased/json-schema/` | `spec/unreleased/` | Next-generation unreleased active development JSON Schema snapshots |
+
+### 3.3 MCP Transport Binding for Checkout
+Per `docs/mcp-binding.md`, AegisPay exposes 5 checkout tools over MCP:
+1. `create_checkout_session`: `{ meta: { api_version, ... }, payload: { ... } }`
+2. `get_checkout_session`: `{ meta: { api_version }, id: "cs_..." }`
+3. `update_checkout_session`: `{ meta: { api_version }, id: "cs_...", payload: { ... } }`
+4. `complete_checkout_session`: `{ meta: { api_version }, id: "cs_...", payload: { payment_method: { ... } } }`
+5. `cancel_checkout_session`: `{ meta: { api_version }, id: "cs_...", payload?: { reason?: string } }`
+
+**Uniform Error Codes**: ACP MCP errors uniformly return JSON-RPC `-32000` with detailed domain error data (`data: { type, code, message, param }`), and `-32602` for malformed envelope requests.
+
+### 3.4 Fraud-Resistant Affiliate Attribution
+Per `rfcs/rfc.affiliate_attribution.md`, attribution signals are captured at:
+- **First-Touch**: `POST /checkout_sessions`
+- **Last-Touch**: `POST /checkout_sessions/{id}/complete`
+- **Write-Only Security Guarantee**: Attribution tokens and publisher identifiers are stored securely in internal session records and never echoed in public responses, preventing token leaks or competitor scraping.
+- **Algorithmic Knapsack Integration**: In `cart-solver.ts`, affiliate commission rebates ($\alpha = 0.75$) directly subsidize multi-vendor cart splits before checkout authorization.
+
+### 3.5 Full Protocol Migration Completion & Verification
+The complete Agentic Commerce Protocol (ACP) specification across all releases has been 100% migrated, tested, and verified into AegisPay:
+- **Core Protocol RFCs**: Capability Negotiation, Pre-Checkout Cart (SEP #187), Delegate Authentication (3DS2), Delegate Payment (Vault v3), Discount Extension, Discovery (`/.well-known/acp.json`), Extensions Framework, Intent Tracing, Marketing Consent, Enhanced Orders, Payment Handlers, Product Feeds, Seller-Backed Handlers, and Affiliate Attribution.
+- **Active Release Specification (`spec/2026-04-17/`)**: Complete JSON Schema bundles, OpenAPI 3.1 contracts, and OpenRPC 1.3 MCP bindings.
+- **Active Development Specification (`spec/unreleased/`)**: Complete next-generation JSON Schema bundles, OpenAPI 3.1 contracts, and OpenRPC 1.3 bindings.
+- **Security & Integrity**: 4-Stage Custodian Security Gate (`packages/mcp-enforcer`), Redis Lua atomic spend limiter, and Ed25519 cryptographic session verifier actively protecting all commerce transactions.
+
+---
+
+## 4. Monorepo Architecture & Directory Topology
 
 ```
 aegispay/
@@ -59,6 +126,7 @@ aegispay/
 │   ├── database/               # Drizzle ORM + PostgreSQL 16 schema & 1,000-row sandbox seeder
 │   ├── mcp-enforcer/           # Standalone Proxy MCP Server + Redis Lua atomic spend limiter
 │   └── shared-types/           # Canonical Zod schemas and TypeScript shared types
+├── spec/                       # Official ACP 2026-04-17 & unreleased specifications
 ├── docs/
 │   └── APIMATIC.md             # APIMatic Context Plugin audit log
 └── render.yaml                 # Declarative Render Blueprint
@@ -66,13 +134,13 @@ aegispay/
 
 ---
 
-## 4. Quickstart & Local Verification
+## 5. Quickstart & Local Verification
 
-### 4.1 Prerequisites
+### 5.1 Prerequisites
 - Node.js >= 20.x (Node 22 recommended)
 - `pnpm` >= 9.x (`npm install -g pnpm`)
 
-### 4.2 Setup & Dependencies
+### 5.2 Setup & Dependencies
 ```bash
 # 1. Install all monorepo workspace dependencies
 pnpm install
@@ -81,7 +149,7 @@ pnpm install
 pnpm --filter @aegispay/database db:seed
 ```
 
-### 4.3 Run Test Suites
+### 5.3 Run Test Suites
 ```bash
 # Run tests across all workspace packages
 pnpm test
@@ -90,12 +158,12 @@ pnpm test
 pnpm --filter @aegispay/web-cockpit test
 ```
 
-### 4.4 Build Entire Monorepo
+### 5.4 Build Entire Monorepo
 ```bash
 pnpm build
 ```
 
-### 4.5 Start Applications
+### 5.5 Start Applications
 ```bash
 # Start Web Cockpit (Port 3000)
 pnpm --filter @aegispay/web-cockpit dev
@@ -106,7 +174,7 @@ pnpm --filter @aegispay/api-orchestrator start
 
 ---
 
-## 5. Devpost 3-Minute Video Demo Presentation Script
+## 6. Devpost 3-Minute Video Demo Presentation Script
 
 Visit **`http://localhost:3000/judge`** for the pre-authenticated, zero-friction 3-minute video presentation cockpit.
 
@@ -132,5 +200,5 @@ Visit **`http://localhost:3000/judge`** for the pre-authenticated, zero-friction
 
 ---
 
-## 6. License
+## 7. License
 MIT License • Built with pride for Build What's Next with PayPal and AI Global Hackathon.

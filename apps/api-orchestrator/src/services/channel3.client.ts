@@ -301,6 +301,132 @@ export class Channel3Client {
           height: 1,
         },
       },
+      {
+        product_id: 'ch3_prod_laptop_01',
+        title: 'Lenovo IdeaPad Gaming 3 (Intel Core i5-12450H, 16GB RAM, 512GB SSD, RTX 3050)',
+        description: '15.6-inch FHD 120Hz IPS gaming laptop with high-performance cooling and dual-channel memory.',
+        category_id: 'laptops',
+        offers: [
+          {
+            id: 'off_lenovo_1',
+            product_id: 'ch3_prod_laptop_01',
+            domain: 'bestbuy.com',
+            price: 74900, // $749.00
+            compare_at_price: 89900,
+            max_commission_rate: 0.10,
+            shipping_fee_cents: 0,
+            merchant_anomaly_score: 0.03,
+            stock_status: 'IN_STOCK',
+          },
+          {
+            id: 'off_lenovo_2',
+            product_id: 'ch3_prod_laptop_01',
+            domain: 'amazon.com',
+            price: 72900, // $729.00
+            compare_at_price: 89900,
+            max_commission_rate: 0.08,
+            shipping_fee_cents: 0,
+            merchant_anomaly_score: 0.04,
+            stock_status: 'IN_STOCK',
+          },
+        ],
+        images: [
+          {
+            url: 'https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=1024',
+            cleaned_url: 'https://images.unsplash.com/photo-1603302576837-37561b2e2302?w=1024&bg=white',
+          },
+        ],
+        dimensions: { weight: 2200, length: 36, width: 26, height: 2 },
+      },
+      {
+        product_id: 'ch3_prod_phone_01',
+        title: 'OnePlus 12R (16GB RAM, 256GB Storage - Cool Blue)',
+        description: 'Snapdragon 8 Gen 2 flagship processor with 1.5K 120Hz ProXDR display and 100W SUPERVOOC charging.',
+        category_id: 'smartphones',
+        offers: [
+          {
+            id: 'off_oneplus_1',
+            product_id: 'ch3_prod_phone_01',
+            domain: 'oneplus.com',
+            price: 49900, // $499.00
+            compare_at_price: 54900,
+            max_commission_rate: 0.12,
+            shipping_fee_cents: 0,
+            merchant_anomaly_score: 0.01,
+            stock_status: 'IN_STOCK',
+          },
+          {
+            id: 'off_oneplus_2',
+            product_id: 'ch3_prod_phone_01',
+            domain: 'amazon.com',
+            price: 48900, // $489.00
+            compare_at_price: 54900,
+            max_commission_rate: 0.09,
+            shipping_fee_cents: 0,
+            merchant_anomaly_score: 0.03,
+            stock_status: 'IN_STOCK',
+          },
+        ],
+        images: [
+          {
+            url: 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=1024',
+            cleaned_url: 'https://images.unsplash.com/photo-1598327105666-5b89351aff97?w=1024&bg=white',
+          },
+        ],
+        dimensions: { weight: 207, length: 16, width: 7, height: 1 },
+      },
+      {
+        product_id: 'ch3_prod_keyboard_01',
+        title: 'Keychron K2 Wireless Mechanical Keyboard (Version 2 - Gateron Brown)',
+        description: '75% layout compact Bluetooth wireless mechanical keyboard with Mac & Windows compatibility.',
+        category_id: 'keyboards',
+        offers: [
+          {
+            id: 'off_keychron_1',
+            product_id: 'ch3_prod_keyboard_01',
+            domain: 'techmerchant.com',
+            price: 7900, // $79.00
+            compare_at_price: 9900,
+            max_commission_rate: 0.15,
+            shipping_fee_cents: 500,
+            merchant_anomaly_score: 0.02,
+            stock_status: 'IN_STOCK',
+          },
+        ],
+        images: [
+          {
+            url: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=1024',
+            cleaned_url: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=1024&bg=white',
+          },
+        ],
+        dimensions: { weight: 875, length: 31, width: 12, height: 4 },
+      },
+      {
+        product_id: 'ch3_prod_mouse_01',
+        title: 'Logitech MX Master 3S Wireless Performance Mouse',
+        description: 'Quiet clicks and 8K DPI track-on-glass sensor with MagSpeed electromagnetic scrolling.',
+        category_id: 'mice',
+        offers: [
+          {
+            id: 'off_logitech_1',
+            product_id: 'ch3_prod_mouse_01',
+            domain: 'bestbuy.com',
+            price: 9900, // $99.00
+            compare_at_price: 10900,
+            max_commission_rate: 0.12,
+            shipping_fee_cents: 0,
+            merchant_anomaly_score: 0.02,
+            stock_status: 'IN_STOCK',
+          },
+        ],
+        images: [
+          {
+            url: 'https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?w=1024',
+            cleaned_url: 'https://images.unsplash.com/photo-1615663245857-ac93bb7c39e7?w=1024&bg=white',
+          },
+        ],
+        dimensions: { weight: 141, length: 12, width: 8, height: 5 },
+      },
     ];
 
     let filtered = [...mockProducts];
