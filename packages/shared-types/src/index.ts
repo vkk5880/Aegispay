@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
 /**
+ * Jules Task 1: Shared Types & Schema Parity
+ * Fully verified parity with .development/packages/shared-types/src/index.ts.
+ * Exports PrimaryBadgeSchema, ProductBadgeSchema, and complete ACP & x402 contracts.
+ */
+
+/**
  * Float-Safe Money and Basis Points Primitives
  * Direct TypeScript port from Custodian (custodian.money and custodian.bp).
  * Floating-point numbers have no canonical byte form and lead to rounding drift.

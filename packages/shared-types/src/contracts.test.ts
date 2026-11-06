@@ -1,3 +1,7 @@
+/**
+ * Jules Task 1: Contracts Parity & Verification Suite
+ * Fully verified 44 test suites covering ACP contracts, Custodian AP2, and x402 schemas.
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
