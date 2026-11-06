@@ -53,6 +53,15 @@ export function TerrainBackground({
     resize();
     window.addEventListener('resize', resize);
 
+    const onVisibilityChange = () => {
+      isVisible = !document.hidden;
+      if (isVisible) {
+        lastTime = performance.now();
+        animationFrameId = requestAnimationFrame(render);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     let lastTime = performance.now();
 
     const render = (now: number) => {
@@ -176,15 +185,6 @@ export function TerrainBackground({
 
       animationFrameId = requestAnimationFrame(render);
     };
-
-    const onVisibilityChange = () => {
-      isVisible = !document.hidden;
-      if (isVisible) {
-        lastTime = performance.now();
-        animationFrameId = requestAnimationFrame(render);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
 
     animationFrameId = requestAnimationFrame(render);
 

@@ -69,6 +69,15 @@ export function WarpBackground({
     resize();
     window.addEventListener('resize', resize);
 
+    const onVisibilityChange = () => {
+      isVisible = !document.hidden;
+      if (isVisible) {
+        lastTime = performance.now();
+        animationFrameId = requestAnimationFrame(render);
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     let lastTime = performance.now();
 
     const render = (now: number) => {
@@ -129,11 +138,13 @@ export function WarpBackground({
         ctx.fillStyle = `rgba(167, 139, 250, ${alpha})`;
 
         if (isWarping && Math.hypot(px - prevPx, py - prevPy) > 1) {
+          // Hyperspace streak line
           ctx.beginPath();
           ctx.moveTo(prevPx, prevPy);
           ctx.lineTo(px, py);
           ctx.stroke();
         } else {
+          // Cruising point star
           const size = Math.max(0.8, depthRatio * 2.2);
           ctx.beginPath();
           ctx.arc(px, py, size, 0, Math.PI * 2);
@@ -143,15 +154,6 @@ export function WarpBackground({
 
       animationFrameId = requestAnimationFrame(render);
     };
-
-    const onVisibilityChange = () => {
-      isVisible = !document.hidden;
-      if (isVisible) {
-        lastTime = performance.now();
-        animationFrameId = requestAnimationFrame(render);
-      }
-    };
-    document.addEventListener('visibilitychange', onVisibilityChange);
 
     animationFrameId = requestAnimationFrame(render);
 

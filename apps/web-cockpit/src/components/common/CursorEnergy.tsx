@@ -8,6 +8,7 @@ export function CursorEnergy() {
   const [isTouch, setIsTouch] = useState(true);
 
   useEffect(() => {
+    // Check for SSR and touch / mobile device
     if (typeof window === 'undefined') return;
     if (window.matchMedia('(pointer: coarse)').matches) {
       return;
@@ -28,6 +29,7 @@ export function CursorEnergy() {
     };
 
     const updatePhysics = () => {
+      // Spring lerp easing
       currentX += (targetX - currentX) * 0.15;
       currentY += (targetY - currentY) * 0.15;
       setPos({ x: currentX, y: currentY });
@@ -47,6 +49,7 @@ export function CursorEnergy() {
 
   return (
     <div className="hidden md:block pointer-events-none fixed inset-0 z-40 overflow-hidden">
+      {/* Outer soft ambient radial glow */}
       <div
         className="absolute rounded-full blur-3xl mix-blend-screen transition-transform duration-300"
         style={{

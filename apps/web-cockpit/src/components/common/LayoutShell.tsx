@@ -10,6 +10,10 @@ export interface LayoutShellProps {
   children: React.ReactNode;
 }
 
+/**
+ * LayoutShell — isolates route transitions and conditionally mounts ambient cursor layers.
+ * On /share routes, heavy cursor layers are bypassed to prevent state resets.
+ */
 export function LayoutShell({ children }: LayoutShellProps) {
   const pathname = usePathname();
   const isShare = pathname?.startsWith('/share');

@@ -10,6 +10,7 @@ export function CustomCursor() {
   const [isTouch, setIsTouch] = useState(true);
 
   useEffect(() => {
+    // Check for SSR and touch / mobile device
     if (typeof window === 'undefined') return;
     if (window.matchMedia('(pointer: coarse)').matches) {
       return;
