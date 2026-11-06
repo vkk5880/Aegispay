@@ -81,3 +81,161 @@ test('HitlApprovalModal renders 60s countdown ring and counter-bid details', () 
   assert.ok(html.includes('Decline Counter'));
   assert.ok(html.includes('60s'));
 });
+
+test('ProductCard renders AI match score, merchant trust, badges, and pricing', async () => {
+  const { ProductCard } = await import('./ProductCard.js');
+  const mockProduct = {
+    product_id: 'prod_123',
+    title: 'Sony WH-1000XM5 Wireless Headphones',
+    description: 'Industry-leading noise canceling headphones with dual processors.',
+    price_cents: 34999,
+    compare_at_price_cents: 39999,
+    merchant_domain: 'bestbuy.com',
+    composite_score: 9.6,
+    delivery_window_days: 2,
+    commission_rebate_cents: 1050,
+    stock_status: true,
+    badges: [
+      { label: 'Top Value', badge_color: '#06b6d4' },
+      { label: 'Fast Shipping', badge_color: '#10b981' },
+    ],
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(ProductCard, {
+      product: mockProduct as any,
+      isWinner: true,
+    })
+  );
+
+  assert.ok(html.includes('Top Algorithmic Pick'));
+  assert.ok(html.includes('Sony WH-1000XM5'));
+  assert.ok(html.includes('96% Match'));
+  assert.ok(html.includes('bestbuy.com'));
+  assert.ok(html.includes('2PC Stock Verified'));
+  assert.ok(html.includes('$349.99'));
+  assert.ok(html.includes('$399.99'));
+  assert.ok(html.includes('Top Value'));
+  assert.ok(html.includes('+$10.50 Rebate'));
+  assert.ok(html.includes('Escrow Protected'));
+});
+
+test('ProductGrid renders empty state and sorted items', async () => {
+  const { ProductGrid } = await import('./ProductGrid.js');
+
+  // Empty state
+  const emptyHtml = renderToStaticMarkup(
+    React.createElement(ProductGrid, { products: [] })
+  );
+  assert.ok(emptyHtml.includes('No matching products found'));
+
+  // With products
+  const products = [
+    {
+      product_id: 'p1',
+      title: 'Item A',
+      price_cents: 10000,
+      merchant_domain: 'store.com',
+      composite_score: 8.5,
+    },
+    {
+      product_id: 'p2',
+      title: 'Item B',
+      price_cents: 5000,
+      merchant_domain: 'shop.com',
+      composite_score: 9.2,
+    },
+  ];
+
+  const gridHtml = renderToStaticMarkup(
+    React.createElement(ProductGrid, { products: products as any })
+  );
+  assert.ok(gridHtml.includes('Showing 2 Algorithmic Recommendations'));
+  assert.ok(gridHtml.includes('Item A'));
+  assert.ok(gridHtml.includes('Item B'));
+});
+
+test('SearchBar renders form with suggestions', async () => {
+  const { SearchBar } = await import('./SearchBar.js');
+  const html = renderToStaticMarkup(
+    React.createElement(SearchBar, {
+      onSearch: () => {},
+      suggestions: ['Test Suggestion 1', 'Test Suggestion 2'],
+    })
+  );
+
+  assert.ok(html.includes('Test Suggestion 1'));
+  assert.ok(html.includes('Test Suggestion 2'));
+  assert.ok(html.includes('Search products, compare models'));
+});
+
+test('PriceLockCard renders timer, escrow protection info, and action buttons', async () => {
+  const { PriceLockCard } = await import('./PriceLockCard.js');
+  const future = new Date(Date.now() + 72 * 3600 * 1000).toISOString();
+  const html = renderToStaticMarkup(
+    React.createElement(PriceLockCard, {
+      priceLock: {
+        lock_id: 'lock_abc1234567890xyz',
+        title: 'Sony XM5 Lock',
+        locked_price_cents: 32000,
+        original_price_cents: 39900,
+        merchant_domain: 'bestbuy.com',
+        expires_at: future,
+      },
+    })
+  );
+
+  assert.ok(html.includes('Cryptographic Price Lock'));
+  assert.ok(html.includes('Voucher #lock_abc12345678'));
+  assert.ok(html.includes('$320.00'));
+  assert.ok(html.includes('$399.00'));
+  assert.ok(html.includes('Save $79.00 (20%)'));
+  assert.ok(html.includes('1-Click Vaulted Auto-Buy'));
+  assert.ok(html.includes('Void'));
+});
+
+test('SocialProofPanel renders community sentiment and forum links', async () => {
+  const { SocialProofPanel } = await import('./SocialProofPanel.js');
+  const html = renderToStaticMarkup(
+    React.createElement(SocialProofPanel, {
+      productTitle: 'Sony XM5',
+      defaultExpanded: true,
+      initialData: {
+        sentiment: 'positive',
+        sentiment_emoji: '🔥',
+        highlights: [
+          'Unrivaled ANC performance in loud environments',
+          'Comfortable headband padding for all-day listening',
+        ],
+        source_count: 12,
+        reddit_url: 'https://reddit.com/r/headphones',
+        youtube_url: 'https://youtube.com',
+      },
+    })
+  );
+
+  assert.ok(html.includes('Community Consensus &amp; Sentiment'));
+  assert.ok(html.includes('POSITIVE'));
+  assert.ok(html.includes('Unrivaled ANC performance'));
+  assert.ok(html.includes('Aggregated across 12+ communities'));
+  assert.ok(html.includes('Reddit ↗'));
+  assert.ok(html.includes('YouTube ↗'));
+});
+
+test('ShareButton renders share trigger and aria attributes', async () => {
+  const { ShareButton } = await import('./ShareButton.js');
+  const html = renderToStaticMarkup(
+    React.createElement(ShareButton, {
+      query: 'best wireless headphones',
+      recommendation: {
+        title: 'Sony WH-1000XM5',
+        price: 349.99,
+        source: 'bestbuy.com',
+      },
+      totalCompared: 5,
+    })
+  );
+
+  assert.ok(html.includes('Share Result'));
+  assert.ok(html.includes('aria-label="Share comparison decision link"'));
+});
