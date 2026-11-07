@@ -16,7 +16,10 @@ import {
   ShoppingBag,
   Bell,
   Check,
+  Search,
 } from 'lucide-react';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { useMounted } from '@/hooks/useMounted';
 
 export interface WatchlistItem {
   id: string;
@@ -32,6 +35,11 @@ export interface WatchlistItem {
   triggered: boolean;
 }
 
+const STATIC_WATCHLIST_TIMESTAMP_1 = '2026-11-06T10:00:00.000Z';
+const STATIC_WATCHLIST_TIMESTAMP_2 = '2026-11-05T10:00:00.000Z';
+const STATIC_WATCHLIST_TIMESTAMP_3 = '2026-11-04T10:00:00.000Z';
+const STATIC_CHECKED_TIMESTAMP = '2026-11-07T08:00:00.000Z';
+
 const MOCK_WATCHLIST_ITEMS: WatchlistItem[] = [
   {
     id: 'wch_1730810400_a1',
@@ -42,8 +50,8 @@ const MOCK_WATCHLIST_ITEMS: WatchlistItem[] = [
     source: 'bestbuy.com',
     link: 'https://bestbuy.com',
     query: 'Sony WH-1000XM5 under 320',
-    added_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-    last_checked: new Date(Date.now() - 3600000 * 2).toISOString(),
+    added_at: STATIC_WATCHLIST_TIMESTAMP_1,
+    last_checked: STATIC_CHECKED_TIMESTAMP,
     triggered: false,
   },
   {
@@ -55,8 +63,8 @@ const MOCK_WATCHLIST_ITEMS: WatchlistItem[] = [
     source: 'target.com',
     link: 'https://target.com',
     query: 'AirPods Pro 2 under 189',
-    added_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-    last_checked: new Date(Date.now() - 3600000 * 1).toISOString(),
+    added_at: STATIC_WATCHLIST_TIMESTAMP_2,
+    last_checked: STATIC_CHECKED_TIMESTAMP,
     triggered: true,
   },
   {
@@ -68,14 +76,19 @@ const MOCK_WATCHLIST_ITEMS: WatchlistItem[] = [
     source: 'keychron.com',
     link: 'https://keychron.com',
     query: 'Keychron Q1 Pro',
-    added_at: new Date(Date.now() - 3600000 * 72).toISOString(),
-    last_checked: new Date(Date.now() - 3600000 * 5).toISOString(),
+    added_at: STATIC_WATCHLIST_TIMESTAMP_3,
+    last_checked: STATIC_CHECKED_TIMESTAMP,
     triggered: false,
   },
 ];
 
-export default function WatchlistPage() {
-  const [items, setItems] = useState<WatchlistItem[]>(MOCK_WATCHLIST_ITEMS);
+export function WatchlistContent({
+  initialItems = MOCK_WATCHLIST_ITEMS,
+}: {
+  initialItems?: WatchlistItem[];
+}) {
+  const mounted = useMounted();
+  const [items, setItems] = useState<WatchlistItem[]>(initialItems);
   const [loading, setLoading] = useState<boolean>(true);
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
@@ -152,10 +165,13 @@ export default function WatchlistPage() {
     const targCents = Math.round(parseFloat(newTargetPrice || '0') * 100);
 
     if (!newTitle || targCents <= 0) {
-      alert('Please provide a valid product title and target price.');
+      if (typeof window !== 'undefined') {
+        alert('Please provide a valid product title and target price.');
+      }
       return;
     }
 
+    const nowIso = new Date().toISOString();
     const newItem: WatchlistItem = {
       id: `wch_${Date.now()}`,
       user_id: 'demo',
@@ -163,8 +179,8 @@ export default function WatchlistPage() {
       current_price_cents: currCents > 0 ? currCents : targCents * 1.15,
       target_price_cents: targCents,
       source: newSource,
-      added_at: new Date().toISOString(),
-      last_checked: new Date().toISOString(),
+      added_at: nowIso,
+      last_checked: nowIso,
       triggered: false,
     };
 
@@ -293,13 +309,13 @@ export default function WatchlistPage() {
                 <button
                   type="button"
                   onClick={() => setIsAddOpen(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-700"
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-700 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold"
+                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold cursor-pointer"
                 >
                   Save Watch Item
                 </button>
@@ -309,72 +325,106 @@ export default function WatchlistPage() {
         </div>
       )}
 
-      {/* Items List */}
-      <div className="space-y-4">
-        {items.map((item) => {
-          const savings = item.current_price_cents - item.target_price_cents;
-          return (
-            <div
-              key={item.id}
-              className={`p-5 rounded-2xl bg-slate-900/70 border ${
-                item.triggered ? 'border-emerald-500 bg-emerald-950/15' : 'border-slate-800'
-              } flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all card-hover`}
+      {/* Items List or Empty State */}
+      {items.length === 0 ? (
+        <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center">
+          <Bookmark className="w-12 h-12 text-slate-600 mb-3" />
+          <h3 className="text-lg font-bold text-white mb-1">Your Watchlist is Empty</h3>
+          <p className="text-xs text-slate-400 max-w-md mb-6">
+            Add products you are tracking to receive autonomous price-drop alerts and enable 1-click escrow auto-execution.
+          </p>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsAddOpen(true)}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all shadow-lg cursor-pointer"
             >
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                  <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/20">
-                    {item.source}
-                  </span>
-                  {item.triggered ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2.5 py-0.5 rounded-full animate-pulse">
-                      <TrendingDown className="w-3 h-3" />
-                      Target Price Drop Triggered!
+              <Plus className="w-4 h-4" />
+              <span>Add First Item</span>
+            </button>
+            <Link
+              href="/search"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition-all border border-slate-700"
+            >
+              <Search className="w-4 h-4" />
+              <span>Browse Catalog</span>
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {items.map((item) => {
+            const savings = item.current_price_cents - item.target_price_cents;
+            return (
+              <div
+                key={item.id}
+                className={`p-5 rounded-2xl bg-slate-900/70 border ${
+                  item.triggered ? 'border-emerald-500 bg-emerald-950/15' : 'border-slate-800'
+                } flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 transition-all card-hover`}
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/20">
+                      {item.source}
                     </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded-full">
-                      <Clock className="w-3 h-3 text-cyan-400" />
-                      Watching Catalog
+                    {item.triggered ? (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2.5 py-0.5 rounded-full animate-pulse">
+                        <TrendingDown className="w-3 h-3" />
+                        Target Price Drop Triggered!
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-slate-400 bg-slate-800/60 px-2 py-0.5 rounded-full">
+                        <Clock className="w-3 h-3 text-cyan-400" />
+                        Watching Catalog
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base font-bold text-white mb-1 leading-snug">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Target Price: <strong className="text-white font-mono">{formatPrice(item.target_price_cents)}</strong> ·{' '}
+                    Potential Savings: <strong className="text-emerald-400 font-mono">{formatPrice(savings)}</strong>
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-4 flex-shrink-0">
+                  <div className="text-right">
+                    <span className="text-xs text-slate-500 block">Current Price</span>
+                    <span className="text-xl font-black text-white font-mono">
+                      {formatPrice(item.current_price_cents)}
                     </span>
+                  </div>
+
+                  {item.triggered && (
+                    <Link
+                      href="/"
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ShoppingBag className="w-3.5 h-3.5" />
+                      <span>Auto-Buy Now</span>
+                    </Link>
                   )}
-                </div>
-                <h3 className="text-base font-bold text-white mb-1 leading-snug">
-                  {item.title}
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Target Price: <strong className="text-white font-mono">{formatPrice(item.target_price_cents)}</strong> ·{' '}
-                  Potential Savings: <strong className="text-emerald-400 font-mono">{formatPrice(savings)}</strong>
-                </p>
-              </div>
 
-              <div className="flex items-center gap-4 flex-shrink-0">
-                <div className="text-right">
-                  <span className="text-xs text-slate-500 block">Current Price</span>
-                  <span className="text-xl font-black text-white font-mono">
-                    {formatPrice(item.current_price_cents)}
-                  </span>
-                </div>
-
-                {item.triggered && (
-                  <Link
-                    href="/"
-                    className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5"
+                  <button
+                    onClick={() => handleRemove(item.id, item.title)}
+                    className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-xl transition-colors cursor-pointer"
                   >
-                    <ShoppingBag className="w-3.5 h-3.5" />
-                    <span>Auto-Buy Now</span>
-                  </Link>
-                )}
-
-                <button
-                  onClick={() => handleRemove(item.id, item.title)}
-                  className="p-2 text-slate-500 hover:text-red-400 hover:bg-red-950/30 rounded-xl transition-colors"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function WatchlistPage() {
+  return (
+    <ErrorBoundary>
+      <WatchlistContent />
+    </ErrorBoundary>
   );
 }

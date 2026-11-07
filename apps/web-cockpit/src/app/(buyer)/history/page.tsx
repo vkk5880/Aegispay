@@ -17,7 +17,11 @@ import {
   Sparkles,
   ShoppingBag,
   Check,
+  Inbox,
+  Search,
 } from 'lucide-react';
+import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
+import { useMounted } from '@/hooks/useMounted';
 
 export interface PurchaseHistoryItem {
   order_id: string;
@@ -45,6 +49,10 @@ export interface NFTReceiptItem {
   timestamp: string;
 }
 
+const STATIC_BASE_TIMESTAMP_1 = '2026-11-07T10:00:00.000Z';
+const STATIC_BASE_TIMESTAMP_2 = '2026-11-06T20:00:00.000Z';
+const STATIC_BASE_TIMESTAMP_3 = '2026-11-05T14:00:00.000Z';
+
 const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
   {
     order_id: 'ord_pp_884920491',
@@ -57,7 +65,7 @@ const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
     tx_id: 'PAYID-M884920491XAU',
     reservation_id: 'vch_9f8a7d6c5b4e3a21',
     escrow_status: 'CAPTURED',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+    timestamp: STATIC_BASE_TIMESTAMP_1,
     receipt_number: 1042,
     hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   },
@@ -72,7 +80,7 @@ const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
     tx_id: 'PAYID-M104928502YTB',
     reservation_id: 'vch_4d3c2b1a8e7f6g5h',
     escrow_status: 'HELD',
-    timestamp: new Date(Date.now() - 3600000 * 18).toISOString(),
+    timestamp: STATIC_BASE_TIMESTAMP_2,
     receipt_number: 1043,
     hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
   },
@@ -87,7 +95,7 @@ const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
     tx_id: 'PAYID-M395829104ZTC',
     reservation_id: 'vch_2a4c6e8f0b1d3f5a',
     escrow_status: 'CAPTURED',
-    timestamp: new Date(Date.now() - 3600000 * 48).toISOString(),
+    timestamp: STATIC_BASE_TIMESTAMP_3,
     receipt_number: 1044,
     hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4',
   },
@@ -101,7 +109,7 @@ const MOCK_INITIAL_RECEIPTS: NFTReceiptItem[] = [
     merchant_domain: 'bestbuy.com',
     tx_id: 'PAYID-M884920491XAU',
     chain_hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    timestamp: new Date(Date.now() - 3600000 * 4).toISOString(),
+    timestamp: STATIC_BASE_TIMESTAMP_1,
   },
   {
     receipt_number: 1043,
@@ -110,7 +118,7 @@ const MOCK_INITIAL_RECEIPTS: NFTReceiptItem[] = [
     merchant_domain: 'target.com',
     tx_id: 'PAYID-M104928502YTB',
     chain_hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
-    timestamp: new Date(Date.now() - 3600000 * 18).toISOString(),
+    timestamp: STATIC_BASE_TIMESTAMP_2,
   },
   {
     receipt_number: 1044,
@@ -119,13 +127,20 @@ const MOCK_INITIAL_RECEIPTS: NFTReceiptItem[] = [
     merchant_domain: 'anker.com',
     tx_id: 'PAYID-M395829104ZTC',
     chain_hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4',
-    timestamp: new Date(Date.now() - 3600000 * 48).toISOString(),
+    timestamp: STATIC_BASE_TIMESTAMP_3,
   },
 ];
 
-export default function HistoryPage() {
-  const [items, setItems] = useState<PurchaseHistoryItem[]>(MOCK_INITIAL_ORDERS);
-  const [receipts, setReceipts] = useState<NFTReceiptItem[]>(MOCK_INITIAL_RECEIPTS);
+export function HistoryContent({
+  initialItems = MOCK_INITIAL_ORDERS,
+  initialReceipts = MOCK_INITIAL_RECEIPTS,
+}: {
+  initialItems?: PurchaseHistoryItem[];
+  initialReceipts?: NFTReceiptItem[];
+}) {
+  const mounted = useMounted();
+  const [items, setItems] = useState<PurchaseHistoryItem[]>(initialItems);
+  const [receipts, setReceipts] = useState<NFTReceiptItem[]>(initialReceipts);
   const [loading, setLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'orders' | 'receipts'>('orders');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -167,7 +182,7 @@ export default function HistoryPage() {
     setActionLoading(orderId);
     try {
       const endpoint = action === 'confirm' ? '/api/buyer/escrow/confirm' : '/api/buyer/escrow/refund';
-      const res = await fetch(endpoint, {
+      await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: 'demo', order_id: orderId }),
@@ -177,7 +192,7 @@ export default function HistoryPage() {
       setItems((prev) =>
         prev.map((item) => (item.order_id === orderId ? { ...item, escrow_status: newStatus } : item))
       );
-    } catch (err) {
+    } catch {
       // Local fallback for offline evaluation
       const newStatus = action === 'confirm' ? 'CAPTURED' : 'REFUNDED';
       setItems((prev) =>
@@ -189,9 +204,11 @@ export default function HistoryPage() {
   };
 
   const handleCopyHash = (hash: string) => {
-    navigator.clipboard?.writeText(hash);
-    setCopiedHash(hash);
-    setTimeout(() => setCopiedHash(null), 2500);
+    if (typeof window !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(hash);
+      setCopiedHash(hash);
+      setTimeout(() => setCopiedHash(null), 2500);
+    }
   };
 
   const formatPrice = (cents: number) => {
@@ -202,6 +219,9 @@ export default function HistoryPage() {
   };
 
   const formatDate = (isoString: string) => {
+    if (!mounted) {
+      return isoString.split('T')[0] || isoString;
+    }
     try {
       const d = new Date(isoString);
       return d.toLocaleDateString('en-US', {
@@ -261,195 +281,230 @@ export default function HistoryPage() {
       {/* Orders Tab Content */}
       {activeTab === 'orders' && (
         <div className="space-y-4">
-          {items.map((item) => {
-            const isHeld = item.escrow_status === 'HELD';
-            const isCaptured = item.escrow_status === 'CAPTURED';
-            const isRefunded = item.escrow_status === 'REFUNDED';
-            const isDisputed = item.escrow_status === 'DISPUTED';
-
-            return (
-              <div
-                key={item.order_id}
-                className="p-5 sm:p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/40 transition-all card-hover shadow-xl flex flex-col gap-4"
+          {items.length === 0 ? (
+            <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center">
+              <Inbox className="w-12 h-12 text-slate-600 mb-3" />
+              <h3 className="text-lg font-bold text-white mb-1">No Orders or Escrow Holds Found</h3>
+              <p className="text-xs text-slate-400 max-w-md mb-6">
+                Your autonomous 2PC escrow purchase history and cryptographic holds will appear here once executed.
+              </p>
+              <Link
+                href="/search"
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all shadow-lg"
               >
-                {/* Top Row: Merchant, Title, Price, Status */}
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/20">
-                        {item.merchant_domain}
-                      </span>
-                      <span className="text-xs text-slate-500">·</span>
-                      <span className="text-xs text-slate-400">{formatDate(item.timestamp)}</span>
+                <Search className="w-4 h-4" />
+                <span>Discover Products to Purchase</span>
+              </Link>
+            </div>
+          ) : (
+            items.map((item) => {
+              const isHeld = item.escrow_status === 'HELD';
+              const isCaptured = item.escrow_status === 'CAPTURED';
+              const isRefunded = item.escrow_status === 'REFUNDED';
+              const isDisputed = item.escrow_status === 'DISPUTED';
+
+              return (
+                <div
+                  key={item.order_id}
+                  className="p-5 sm:p-6 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/40 transition-all card-hover shadow-xl flex flex-col gap-4"
+                >
+                  {/* Top Row: Merchant, Title, Price, Status */}
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                        <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/20">
+                          {item.merchant_domain}
+                        </span>
+                        <span className="text-xs text-slate-500">·</span>
+                        <span className="text-xs text-slate-400">{formatDate(item.timestamp)}</span>
+                      </div>
+                      <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
+                        {item.title}
+                      </h2>
                     </div>
-                    <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug">
-                      {item.title}
-                    </h2>
+
+                    <div className="flex flex-col sm:items-end flex-shrink-0">
+                      <span className="text-2xl font-black text-white font-mono tracking-tight">
+                        {formatPrice(item.price_cents)}
+                      </span>
+                      <div className="mt-1">
+                        {isHeld && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
+                            <Clock className="w-3 h-3 animate-spin" />
+                            72h Escrow Hold
+                          </span>
+                        )}
+                        {isCaptured && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Captured & Settled
+                          </span>
+                        )}
+                        {isRefunded && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/30">
+                            <RotateCcw className="w-3 h-3" />
+                            Refunded / Voided
+                          </span>
+                        )}
+                        {isDisputed && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/10 text-purple-400 border border-purple-500/30">
+                            <AlertTriangle className="w-3 h-3" />
+                            Under Arbitration
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex flex-col sm:items-end flex-shrink-0">
-                    <span className="text-2xl font-black text-white font-mono tracking-tight">
-                      {formatPrice(item.price_cents)}
-                    </span>
-                    <div className="mt-1">
+                  {/* Middle Row: Identifiers & Ledger Proof */}
+                  <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {item.tx_id && (
+                        <span className="font-mono text-slate-400 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
+                          PayPal ID: <strong className="text-slate-200">{item.tx_id}</strong>
+                        </span>
+                      )}
+                      {item.reservation_id && (
+                        <span className="font-mono text-cyan-400/90 bg-cyan-950/30 px-2.5 py-1 rounded border border-cyan-800/40">
+                          Mandate: <strong>{item.reservation_id}</strong>
+                        </span>
+                      )}
+                    </div>
+
+                    {item.hash && (
+                      <button
+                        onClick={() => handleCopyHash(item.hash!)}
+                        className="inline-flex items-center gap-1.5 text-slate-400 hover:text-cyan-300 font-mono text-[11px] transition-colors bg-slate-950 px-2.5 py-1 rounded border border-slate-800 cursor-pointer"
+                      >
+                        {copiedHash === item.hash ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-400 font-bold">SHA-256 Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Hash: {item.hash.slice(0, 12)}...</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Bottom Row: Actions */}
+                  <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs text-slate-500 flex items-center gap-1">
+                      <Lock className="w-3.5 h-3.5 text-cyan-500" />
+                      <span>Protected by AegisPay Zero-Trust Custodian Gate</span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
                       {isHeld && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                          <Clock className="w-3 h-3 animate-spin" />
-                          72h Escrow Hold
-                        </span>
+                        <>
+                          <button
+                            disabled={actionLoading === item.order_id}
+                            onClick={() => handleEscrowAction(item.order_id, 'refund')}
+                            className="px-3.5 py-1.5 text-xs font-bold rounded-lg border border-red-500/30 bg-red-950/20 text-red-400 hover:bg-red-900/40 transition-all disabled:opacity-50 cursor-pointer"
+                          >
+                            {actionLoading === item.order_id ? 'Voiding...' : 'Cancel & Void'}
+                          </button>
+                          <button
+                            disabled={actionLoading === item.order_id}
+                            onClick={() => handleEscrowAction(item.order_id, 'confirm')}
+                            className="px-3.5 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/30 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/50 transition-all shadow-md shadow-emerald-950/40 disabled:opacity-50 cursor-pointer"
+                          >
+                            {actionLoading === item.order_id ? 'Confirming...' : 'Confirm Delivery & Release'}
+                          </button>
+                        </>
                       )}
-                      {isCaptured && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                          <CheckCircle2 className="w-3 h-3" />
-                          Captured & Settled
-                        </span>
-                      )}
-                      {isRefunded && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/30">
-                          <RotateCcw className="w-3 h-3" />
-                          Refunded / Voided
-                        </span>
-                      )}
-                      {isDisputed && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-500/10 text-purple-400 border border-purple-500/30">
-                          <AlertTriangle className="w-3 h-3" />
-                          Under Arbitration
-                        </span>
-                      )}
+
+                      <Link
+                        href="/judge"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800/80 text-slate-300 hover:text-white hover:border-slate-600 transition-all"
+                      >
+                        <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        Dispute Forensics ↗
+                      </Link>
                     </div>
                   </div>
                 </div>
-
-                {/* Middle Row: Identifiers & Ledger Proof */}
-                <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex flex-wrap items-center gap-2">
-                    {item.tx_id && (
-                      <span className="font-mono text-slate-400 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
-                        PayPal ID: <strong className="text-slate-200">{item.tx_id}</strong>
-                      </span>
-                    )}
-                    {item.reservation_id && (
-                      <span className="font-mono text-cyan-400/90 bg-cyan-950/30 px-2.5 py-1 rounded border border-cyan-800/40">
-                        Mandate: <strong>{item.reservation_id}</strong>
-                      </span>
-                    )}
-                  </div>
-
-                  {item.hash && (
-                    <button
-                      onClick={() => handleCopyHash(item.hash!)}
-                      className="inline-flex items-center gap-1.5 text-slate-400 hover:text-cyan-300 font-mono text-[11px] transition-colors bg-slate-950 px-2.5 py-1 rounded border border-slate-800"
-                    >
-                      {copiedHash === item.hash ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400 font-bold">SHA-256 Copied!</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3" />
-                          <span>Hash: {item.hash.slice(0, 12)}...</span>
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-
-                {/* Bottom Row: Actions */}
-                <div className="pt-2 flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-xs text-slate-500 flex items-center gap-1">
-                    <Lock className="w-3.5 h-3.5 text-cyan-500" />
-                    <span>Protected by AegisPay Zero-Trust Custodian Gate</span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {isHeld && (
-                      <>
-                        <button
-                          disabled={actionLoading === item.order_id}
-                          onClick={() => handleEscrowAction(item.order_id, 'refund')}
-                          className="px-3.5 py-1.5 text-xs font-bold rounded-lg border border-red-500/30 bg-red-950/20 text-red-400 hover:bg-red-900/40 transition-all disabled:opacity-50"
-                        >
-                          {actionLoading === item.order_id ? 'Voiding...' : 'Cancel & Void'}
-                        </button>
-                        <button
-                          disabled={actionLoading === item.order_id}
-                          onClick={() => handleEscrowAction(item.order_id, 'confirm')}
-                          className="px-3.5 py-1.5 text-xs font-bold rounded-lg border border-emerald-500/30 bg-emerald-950/30 text-emerald-300 hover:bg-emerald-900/50 transition-all shadow-md shadow-emerald-950/40 disabled:opacity-50"
-                        >
-                          {actionLoading === item.order_id ? 'Confirming...' : 'Confirm Delivery & Release'}
-                        </button>
-                      </>
-                    )}
-
-                    <Link
-                      href="/judge"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-700 bg-slate-800/80 text-slate-300 hover:text-white hover:border-slate-600 transition-all"
-                    >
-                      <AlertTriangle className="w-3 h-3 text-amber-400" />
-                      Dispute Forensics ↗
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
       )}
 
       {/* Receipts Tab Content */}
       {activeTab === 'receipts' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {receipts.map((rcpt) => (
-            <div
-              key={rcpt.receipt_number}
-              className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all shadow-xl flex flex-col justify-between gap-4"
-            >
-              <div>
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800/40 px-2.5 py-0.5 rounded">
-                    <FileText className="w-3.5 h-3.5" />
-                    CERTIFICATE #{rcpt.receipt_number}
-                  </div>
-                  <span className="text-xl font-black text-white font-mono">
-                    {formatPrice(rcpt.amount_cents)}
-                  </span>
-                </div>
-
-                <h3 className="text-sm font-bold text-white mb-2 leading-snug">
-                  {rcpt.product_title}
-                </h3>
-                <p className="text-xs text-slate-400 mb-3">
-                  Merchant: <strong className="text-slate-300">{rcpt.merchant_domain}</strong> · {formatDate(rcpt.timestamp)}
-                </p>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 font-mono text-[11px] space-y-1.5">
-                <div className="flex justify-between text-slate-400">
-                  <span>Tx ID:</span>
-                  <span className="text-slate-200">{rcpt.tx_id}</span>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-slate-500 text-[10px]">SHA-256 Block Hash:</span>
-                  <span className="text-cyan-400/90 break-all select-all">{rcpt.chain_hash}</span>
-                </div>
-              </div>
-
-              <div className="flex justify-between items-center pt-2 text-xs">
-                <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> RFC 8785 Verified
-                </span>
-                <button
-                  onClick={() => handleCopyHash(rcpt.chain_hash)}
-                  className="text-slate-400 hover:text-white font-semibold transition-colors flex items-center gap-1"
-                >
-                  <Copy className="w-3 h-3" /> Copy Proof
-                </button>
-              </div>
+          {receipts.length === 0 ? (
+            <div className="col-span-full p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center">
+              <Inbox className="w-12 h-12 text-slate-600 mb-3" />
+              <h3 className="text-lg font-bold text-white mb-1">No Cryptographic Proofs Generated</h3>
+              <p className="text-xs text-slate-400 max-w-md">
+                Settled orders automatically yield RFC 8785 canonical hash receipts anchored to the AegisPay ledger.
+              </p>
             </div>
-          ))}
+          ) : (
+            receipts.map((rcpt) => (
+              <div
+                key={rcpt.receipt_number}
+                className="p-5 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-cyan-500/40 transition-all shadow-xl flex flex-col justify-between gap-4"
+              >
+                <div>
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-cyan-400 bg-cyan-950/50 border border-cyan-800/40 px-2.5 py-0.5 rounded">
+                      <FileText className="w-3.5 h-3.5" />
+                      CERTIFICATE #{rcpt.receipt_number}
+                    </div>
+                    <span className="text-xl font-black text-white font-mono">
+                      {formatPrice(rcpt.amount_cents)}
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm font-bold text-white mb-2 leading-snug">
+                    {rcpt.product_title}
+                  </h3>
+                  <p className="text-xs text-slate-400 mb-3">
+                    Merchant: <strong className="text-slate-300">{rcpt.merchant_domain}</strong> · {formatDate(rcpt.timestamp)}
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800/80 font-mono text-[11px] space-y-1.5">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Tx ID:</span>
+                    <span className="text-slate-200">{rcpt.tx_id}</span>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="text-slate-500 text-[10px]">SHA-256 Block Hash:</span>
+                    <span className="text-cyan-400/90 break-all select-all">{rcpt.chain_hash}</span>
+                  </div>
+                </div>
+
+                <div className="flex justify-between items-center pt-2 text-xs">
+                  <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> RFC 8785 Verified
+                  </span>
+                  <button
+                    onClick={() => handleCopyHash(rcpt.chain_hash)}
+                    className="text-slate-400 hover:text-white font-semibold transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <Copy className="w-3 h-3" /> Copy Proof
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+export default function HistoryPage() {
+  return (
+    <ErrorBoundary>
+      <HistoryContent />
+    </ErrorBoundary>
   );
 }
