@@ -16,6 +16,8 @@ import {
   CreditCard,
   Lock,
   ExternalLink,
+  KeyRound,
+  DollarSign,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -40,6 +42,10 @@ export interface TransmutedError {
     | '3D_SECURE_REQUIRED'
     | 'RATE_LIMIT'
     | 'IDEMPOTENCY_CONFLICT'
+    | 'AUTHENTICATION'
+    | 'VAULT_TOKEN'
+    | 'ORDER_STATE'
+    | 'VALIDATION'
     | 'UNKNOWN';
   title: string;
   friendlyMessage: string;
@@ -62,15 +68,10 @@ export interface FriendlyErrorTransmuterProps {
 }
 
 /**
- * Transmutes cryptic Redis Lua enforcer error codes and PayPal API errors
- * into structured, empathetic, user-friendly recovery instructions with 1-click resolution buttons.
- * Grounded in PayPal Doctor & Explain-Error diagnostic specifications.
- */
-/**
  * Safely extracts a meaningful error string from any arbitrary payload (strings, Error instances,
  * Axios/Fetch error responses, nested API response objects, circular references, null/undefined).
  */
-function extractErrorString(rawInput: unknown): string {
+export function extractErrorString(rawInput: unknown): string {
   if (rawInput === null || rawInput === undefined) {
     return '';
   }
@@ -123,7 +124,7 @@ function extractErrorString(rawInput: unknown): string {
 /**
  * Transmutes cryptic Redis Lua enforcer error codes and PayPal API errors
  * into structured, empathetic, user-friendly recovery instructions with 1-click resolution buttons.
- * Grounded in PayPal Doctor & Explain-Error diagnostic specifications.
+ * Grounded in PayPal Doctor & Explain-Error diagnostic specifications (.development/AI-Toolkit/reference/commands/explain-error.md).
  */
 export function transmuteError(rawInput: string | Error | any): TransmutedError {
   const errString = extractErrorString(rawInput);
@@ -261,7 +262,7 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
     };
   }
 
-  // 6. INSTRUMENT_DECLINED — PayPal card / funding source decline
+  // 6. INSTRUMENT_DECLINED — PayPal card / funding source decline (422)
   if (errString.includes('INSTRUMENT_DECLINED')) {
     return {
       rawCode: 'INSTRUMENT_DECLINED',
@@ -288,8 +289,12 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
     };
   }
 
-  // 7. PAYER_ACTION_REQUIRED & 3D Secure verification
-  if (errString.includes('PAYER_ACTION_REQUIRED') || errString.includes('3D_SECURE_REQUIRED') || errString.includes('LIABILITY_SHIFT_NO')) {
+  // 7. PAYER_ACTION_REQUIRED & 3D Secure verification / PSD2 SCA (422)
+  if (
+    errString.includes('PAYER_ACTION_REQUIRED') ||
+    errString.includes('3D_SECURE_REQUIRED') ||
+    errString.includes('LIABILITY_SHIFT_NO')
+  ) {
     return {
       rawCode: 'PAYER_ACTION_REQUIRED',
       category: '3D_SECURE_REQUIRED',
@@ -337,13 +342,19 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
   }
 
   // 9. PREVIOUS_REQUEST_IN_PROGRESS or DUPLICATE_TRANSACTION (409)
-  if (errString.includes('PREVIOUS_REQUEST_IN_PROGRESS') || errString.includes('DUPLICATE_TRANSACTION')) {
+  if (
+    errString.includes('PREVIOUS_REQUEST_IN_PROGRESS') ||
+    errString.includes('DUPLICATE_TRANSACTION') ||
+    errString.includes('PAYPAL_REQUEST_ID_PREVIOUSLY_USED')
+  ) {
     return {
-      rawCode: 'PREVIOUS_REQUEST_IN_PROGRESS',
+      rawCode: errString.includes('PAYPAL_REQUEST_ID_PREVIOUSLY_USED')
+        ? 'PAYPAL_REQUEST_ID_PREVIOUSLY_USED'
+        : 'PREVIOUS_REQUEST_IN_PROGRESS',
       category: 'IDEMPOTENCY_CONFLICT',
-      title: 'Transaction Request In Progress',
+      title: 'Transaction Request In Progress / Duplicate',
       friendlyMessage:
-        'A request with this exact PayPal-Request-Id is currently processing or already completed. We will retrieve the confirmed order rather than submitting a duplicate charge.',
+        'A request with this exact PayPal-Request-Id is currently processing or was already used. We will retrieve the confirmed order rather than submitting a duplicate charge.',
       badge: { label: 'Idempotency Protection', variant: 'emerald' },
       details: 'Guarantees 0% double-charging via UUID idempotency headers.',
       actions: [
@@ -357,15 +368,180 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
     };
   }
 
-  // 10. General PayPal API errors (Vault, Permissions, Order State)
+  // 10. Authentication & Authorization Errors (401, 403)
+  if (
+    errString.includes('UNAUTHORIZED') ||
+    errString.includes('AUTHENTICATION_FAILURE') ||
+    errString.includes('NOT_AUTHORIZED') ||
+    errString.includes('PERMISSION_DENIED') ||
+    errString.includes('REQUIRED_SCOPE_MISSING') ||
+    errString.includes('AUTHORIZATION_ERROR')
+  ) {
+    const isPermission =
+      errString.includes('NOT_AUTHORIZED') ||
+      errString.includes('PERMISSION_DENIED') ||
+      errString.includes('REQUIRED_SCOPE_MISSING') ||
+      errString.includes('AUTHORIZATION_ERROR');
+    return {
+      rawCode: isPermission ? 'NOT_AUTHORIZED' : 'AUTHENTICATION_FAILURE',
+      category: 'AUTHENTICATION',
+      title: isPermission ? 'Feature Permission Required' : 'PayPal Session Expired',
+      friendlyMessage: isPermission
+        ? 'Your PayPal API integration credentials lack the required scope or feature permissions. Check developer dashboard feature eligibility.'
+        : 'Your PayPal API OAuth token has expired or credentials need refreshing. No unauthorized payment was initiated.',
+      badge: { label: isPermission ? 'Scope Permission' : 'Auth Security', variant: 'violet' },
+      details: errString.length < 180 ? errString : 'Authentication handshake failed on PayPal OAuth gateway.',
+      actions: [
+        {
+          id: 'REFRESH_AUTH_TOKEN',
+          label: 'Refresh Access Token',
+          variant: 'primary',
+          icon: KeyRound,
+        },
+        {
+          id: 'CONTACT_SUPPORT',
+          label: 'Check App Credentials',
+          variant: 'outline',
+          icon: HelpCircle,
+        },
+      ],
+    };
+  }
+
+  // 11. Vault v3 & Stored Credential Errors (403, 404, 422)
   if (
     errString.includes('NOT_ENABLED_TO_VAULT_PAYMENT_SOURCE') ||
-    errString.includes('TRANSACTION_REFUSED') ||
+    errString.includes('VAULT_INSTRUCTION_REQUIRED') ||
+    errString.includes('INVALID_VAULT_ID') ||
+    errString.includes('MISMATCHED_VAULT_ID_TO_PAYMENT_SOURCE') ||
+    errString.includes('SETUP_TOKEN_ALREADY_TOKENIZED') ||
+    errString.includes('TOKEN_NOT_FOUND') ||
+    errString.includes('REQUIRED_PARAMETER_FOR_CUSTOMER_INITIATED_PAYMENT') ||
+    errString.includes('MERCHANT_INITIATED_WITH_SECURITY_CODE') ||
+    errString.includes('MISSING_PREVIOUS_REFERENCE')
+  ) {
+    return {
+      rawCode: 'VAULT_TOKEN_ERROR',
+      category: 'VAULT_TOKEN',
+      title: 'Vault v3 Stored Credential Alignment',
+      friendlyMessage:
+        'The vaulted payment token requires re-authorization or updated customer-initiated parameters. Your payment details remain securely encrypted.',
+      badge: { label: 'Vault v3 Enforcer', variant: 'violet' },
+      details: errString.length < 180 ? errString : 'Payment method token v3 parameter mismatch.',
+      actions: [
+        {
+          id: 'RETRY_PAYPAL_VAULT',
+          label: 'Re-vault Payment Method',
+          variant: 'primary',
+          icon: RefreshCw,
+        },
+        {
+          id: 'SWITCH_PAYMENT_METHOD',
+          label: 'Use Alternate Card',
+          variant: 'secondary',
+          icon: CreditCard,
+        },
+      ],
+    };
+  }
+
+  // 12. Order Lifecycle & Status Errors (422)
+  if (
+    errString.includes('ORDER_NOT_APPROVED') ||
     errString.includes('ORDER_ALREADY_CAPTURED') ||
+    errString.includes('ORDER_ALREADY_AUTHORIZED') ||
+    errString.includes('ORDER_ALREADY_COMPLETED')
+  ) {
+    const isCompleted =
+      errString.includes('ORDER_ALREADY_CAPTURED') ||
+      errString.includes('ORDER_ALREADY_AUTHORIZED') ||
+      errString.includes('ORDER_ALREADY_COMPLETED');
+    return {
+      rawCode: isCompleted ? 'ORDER_ALREADY_COMPLETED' : 'ORDER_NOT_APPROVED',
+      category: 'ORDER_STATE',
+      title: isCompleted ? 'Order Already Processed' : 'Buyer Approval Pending',
+      friendlyMessage: isCompleted
+        ? 'This order has already been captured or completed. We are recovering your verified receipt without double-charging.'
+        : 'The order has not yet been approved by the buyer. Complete the one-time approval before final settlement.',
+      badge: { label: 'Order Lifecycle', variant: 'emerald' },
+      details: errString.length < 180 ? errString : 'Orders v2 lifecycle state lock.',
+      actions: [
+        {
+          id: isCompleted ? 'RECOVER_EXISTING_ORDER' : 'COMPLETE_APPROVAL',
+          label: isCompleted ? 'View Order Receipt' : 'Complete Approval',
+          variant: 'primary',
+          icon: ShieldCheck,
+        },
+      ],
+    };
+  }
+
+  // 13. Request Validation & Amount Mismatch (400, 422)
+  if (
+    errString.includes('INVALID_REQUEST') ||
+    errString.includes('AMOUNT_MISMATCH') ||
+    errString.includes('PAYPAL_REQUEST_ID_REQUIRED') ||
+    errString.includes('RESOURCE_NOT_FOUND') ||
+    errString.includes('INVALID_RESOURCE_ID')
+  ) {
+    return {
+      rawCode: errString.includes('AMOUNT_MISMATCH')
+        ? 'AMOUNT_MISMATCH'
+        : errString.includes('INVALID_RESOURCE_ID')
+        ? 'INVALID_RESOURCE_ID'
+        : 'INVALID_REQUEST',
+      category: 'VALIDATION',
+      title: 'Cart & Request Validation Notice',
+      friendlyMessage: errString.includes('AMOUNT_MISMATCH')
+        ? 'Item totals and shipping adjustments differ from the authorization sum. We have recalculated your cart to match the live total.'
+        : 'The transaction request parameters or resource ID could not be located in the current environment.',
+      badge: { label: 'Param Validator', variant: 'amber' },
+      details: errString.length < 180 ? errString : 'Orders API v2 payload integrity check.',
+      actions: [
+        {
+          id: 'RECALCULATE_CART',
+          label: 'Recalculate Cart Total',
+          variant: 'primary',
+          icon: DollarSign,
+        },
+        {
+          id: 'RETRY_OPERATION',
+          label: 'Retry Step',
+          variant: 'secondary',
+          icon: RefreshCw,
+        },
+      ],
+    };
+  }
+
+  // 14. Server errors (500)
+  if (errString.includes('INTERNAL_SERVER_ERROR')) {
+    return {
+      rawCode: 'INTERNAL_SERVER_ERROR',
+      category: 'PAYPAL_API',
+      title: 'PayPal Service Temporary Disruption',
+      friendlyMessage:
+        'PayPal servers experienced a transient hiccup. Your transaction was not debited; safe to retry with the same request ID.',
+      badge: { label: 'PayPal Gateway', variant: 'rose' },
+      details: errString.length < 180 ? errString : 'PayPal API returned an internal status code.',
+      actions: [
+        {
+          id: 'RETRY_WITH_SAME_ID',
+          label: 'Safe Retry (Same Idempotency Key)',
+          variant: 'primary',
+          icon: RefreshCw,
+        },
+      ],
+    };
+  }
+
+  // 15. General PayPal API errors (Vault, Permissions, Order State, TRANSACTION_REFUSED)
+  if (
+    errString.includes('TRANSACTION_REFUSED') ||
     errString.includes('PAYPAL')
   ) {
     return {
-      rawCode: 'PAYPAL_API_NOTICE',
+      rawCode: errString.includes('TRANSACTION_REFUSED') ? 'TRANSACTION_REFUSED' : 'PAYPAL_API_NOTICE',
       category: 'PAYPAL_API',
       title: 'PayPal Clearinghouse Notice',
       friendlyMessage:
@@ -389,7 +565,7 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
     };
   }
 
-  // 11. Fallback / generic error transmutation
+  // 16. Fallback / generic error transmutation
   return {
     rawCode: (errString.trim() ? errString.slice(0, 48) : 'SYSTEM_FAULT') || 'SYSTEM_FAULT',
     category: 'UNKNOWN',
@@ -435,7 +611,7 @@ export function FriendlyErrorTransmuter({
     emerald: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40',
   }[transmuted.badge.variant];
 
-  const borderStyles = {
+  const borderStyles: Record<TransmutedError['category'], string> = {
     BUDGET_OVERAGE: 'border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 dark:from-[#131109] dark:via-[#0c101a] dark:to-[#0f172a]',
     MANDATE_EXPIRED: 'border-rose-400/80 dark:border-rose-500/40 bg-gradient-to-br from-rose-50/90 via-white to-rose-50/40 dark:from-[#180a0e] dark:via-[#0c101a] dark:to-[#0f172a]',
     MERCHANT_CAP: 'border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 dark:from-[#131109] dark:via-[#0c101a] dark:to-[#0f172a]',
@@ -445,13 +621,17 @@ export function FriendlyErrorTransmuter({
     '3D_SECURE_REQUIRED': 'border-indigo-400/80 dark:border-indigo-500/40 bg-gradient-to-br from-indigo-50/90 via-white to-indigo-50/40 dark:from-[#0d1024] dark:via-[#0c101a] dark:to-[#0f172a]',
     RATE_LIMIT: 'border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 dark:from-[#131109] dark:via-[#0c101a] dark:to-[#0f172a]',
     IDEMPOTENCY_CONFLICT: 'border-emerald-400/80 dark:border-emerald-500/40 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 dark:from-[#0a1810] dark:via-[#0c101a] dark:to-[#0f172a]',
+    AUTHENTICATION: 'border-violet-400/80 dark:border-violet-500/40 bg-gradient-to-br from-violet-50/90 via-white to-violet-50/40 dark:from-[#130d24] dark:via-[#0c101a] dark:to-[#0f172a]',
+    VAULT_TOKEN: 'border-violet-400/80 dark:border-violet-500/40 bg-gradient-to-br from-violet-50/90 via-white to-violet-50/40 dark:from-[#130d24] dark:via-[#0c101a] dark:to-[#0f172a]',
+    ORDER_STATE: 'border-emerald-400/80 dark:border-emerald-500/40 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 dark:from-[#0a1810] dark:via-[#0c101a] dark:to-[#0f172a]',
+    VALIDATION: 'border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 dark:from-[#131109] dark:via-[#0c101a] dark:to-[#0f172a]',
     PAYPAL_API: 'border-violet-400/80 dark:border-violet-500/40 bg-gradient-to-br from-violet-50/90 via-white to-violet-50/40 dark:from-[#130d24] dark:via-[#0c101a] dark:to-[#0f172a]',
     UNKNOWN: 'border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c101a]',
-  }[transmuted.category];
+  };
 
   return (
     <div
-      className={`relative rounded-2xl border p-5 shadow-lg backdrop-blur-md transition-all ${borderStyles} ${className}`}
+      className={`relative rounded-2xl border p-5 shadow-lg backdrop-blur-md transition-all ${borderStyles[transmuted.category]} ${className}`}
       role="alert"
     >
       <div className="flex items-start justify-between gap-4">
@@ -463,10 +643,14 @@ export function FriendlyErrorTransmuter({
               <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
             ) : transmuted.category === '3D_SECURE_REQUIRED' ? (
               <Lock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            ) : transmuted.category === 'IDEMPOTENCY_CONFLICT' ? (
+            ) : transmuted.category === 'IDEMPOTENCY_CONFLICT' || transmuted.category === 'ORDER_STATE' ? (
               <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-            ) : transmuted.category === 'PAYPAL_API' ? (
+            ) : transmuted.category === 'AUTHENTICATION' ? (
+              <KeyRound className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+            ) : transmuted.category === 'VAULT_TOKEN' || transmuted.category === 'PAYPAL_API' ? (
               <Coins className="w-5 h-5 text-violet-600 dark:text-violet-400" />
+            ) : transmuted.category === 'VALIDATION' ? (
+              <DollarSign className="w-5 h-5 text-amber-600 dark:text-amber-400" />
             ) : (
               <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
             )}
