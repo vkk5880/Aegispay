@@ -54,6 +54,10 @@ export interface StreamResult {
   error: string | null;
 }
 
+const MAX_STREAM_RECONNECT_ATTEMPTS = 3;
+const BASE_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 8000;
+
 export function useAgentStream(query: string | null) {
   const [status, setStatus] = useState('');
   const [result, setResult] = useState<StreamResult | null>(null);
@@ -61,20 +65,31 @@ export function useAgentStream(query: string | null) {
   const [streamError, setStreamError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttemptsRef = useRef<number>(0);
 
   useEffect(() => {
     if (!query) return;
     let isActive = true;
     let usedFallback = false;
+    reconnectAttemptsRef.current = 0;
 
-    // Close any existing connection
-    if (esRef.current) {
-      esRef.current.close();
-    }
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
+    const cleanupActiveConnection = () => {
+      if (esRef.current) {
+        esRef.current.close();
+        esRef.current = null;
+      }
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+
+    cleanupActiveConnection();
 
     setLoading(true);
     setResult(null);
@@ -82,13 +97,11 @@ export function useAgentStream(query: string | null) {
     setStreamError(null);
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
-    const url = `${apiUrl}/api/search/stream?query=${encodeURIComponent(query)}`;
-    const es = new EventSource(url);
-    esRef.current = es;
 
     const runFallbackSearch = async (reason: string) => {
       if (usedFallback || !isActive) return;
       usedFallback = true;
+      cleanupActiveConnection();
       setStatus('Live stream interrupted. Retrying via HTTP endpoint...');
       try {
         const controller = new AbortController();
@@ -126,57 +139,76 @@ export function useAgentStream(query: string | null) {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
         runFallbackSearch('Live stream timed out. Loaded fallback response.');
-        es.close();
       }, 30000);
     };
 
-    armTimeout();
+    const connectStream = () => {
+      if (!isActive || usedFallback) return;
 
-    es.onmessage = (e: MessageEvent) => {
-      try {
-        const data = JSON.parse(e.data);
-        armTimeout();
-        if (data.type === 'result') {
-          setResult(data as StreamResult);
-          setLoading(false);
-          if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
+      const url = `${apiUrl}/api/search/stream?query=${encodeURIComponent(query)}`;
+      const es = new EventSource(url);
+      esRef.current = es;
+
+      armTimeout();
+
+      es.onmessage = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data);
+          armTimeout();
+          // Reset reconnect count on active message received
+          reconnectAttemptsRef.current = 0;
+
+          if (data.type === 'result') {
+            setResult(data as StreamResult);
+            setLoading(false);
+            cleanupActiveConnection();
+          } else if (data.type === 'error') {
+            setStreamError(data.message);
+            setStatus(data.message);
+            setLoading(false);
+            cleanupActiveConnection();
+          } else if (data.type === 'status') {
+            setStatus(data.message);
           }
-          es.close();
-        } else if (data.type === 'error') {
-          setStreamError(data.message);
-          setStatus(data.message);
-          setLoading(false);
-          if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
-          }
-          es.close();
-        } else if (data.type === 'status') {
-          setStatus(data.message);
+        } catch {
+          // non-JSON frame — ignore
         }
-      } catch {
-        // non-JSON frame — ignore
-      }
+      };
+
+      es.onerror = () => {
+        if (!isActive || usedFallback) return;
+
+        if (esRef.current) {
+          esRef.current.close();
+          esRef.current = null;
+        }
+
+        if (reconnectAttemptsRef.current < MAX_STREAM_RECONNECT_ATTEMPTS) {
+          reconnectAttemptsRef.current += 1;
+          const attempt = reconnectAttemptsRef.current;
+          const backoff = Math.min(
+            BASE_RECONNECT_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 300,
+            MAX_RECONNECT_DELAY_MS
+          );
+          setStatus(`Reconnecting stream (attempt ${attempt}/${MAX_STREAM_RECONNECT_ATTEMPTS})...`);
+
+          if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = setTimeout(() => {
+            if (isActive && !usedFallback) {
+              connectStream();
+            }
+          }, backoff);
+        } else {
+          runFallbackSearch('Live stream disconnected after retries. Loaded fallback response.');
+        }
+      };
     };
 
-    es.onerror = () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-      es.close();
-      runFallbackSearch('Live stream disconnected. Loaded fallback response.');
-    };
+    connectStream();
 
     return () => {
       isActive = false;
-      es.close();
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
+      cleanupActiveConnection();
     };
   }, [query]);
 

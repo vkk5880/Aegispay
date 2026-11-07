@@ -5,6 +5,8 @@ import {
   decodeShareData,
   buildShareUrl,
   copyToClipboard,
+  safeUtf8ToBase64,
+  safeBase64ToUtf8,
   type ShareData,
 } from './share.js';
 
@@ -33,9 +35,19 @@ test('share.ts: encodeShareData and decodeShareData round-trip cleanly with unic
   assert.deepEqual(decoded, data);
 });
 
+test('share.ts: safeUtf8ToBase64 and safeBase64ToUtf8 handle UTF-8 symbols and emojis', () => {
+  const text = 'Cyberpunk 2077: 🚀 Phantom Liberty ★ ¥ € £';
+  const b64 = safeUtf8ToBase64(text);
+  assert.ok(b64.length > 0);
+  const back = safeBase64ToUtf8(b64);
+  assert.equal(back, text);
+});
+
 test('share.ts: decodeShareData handles invalid base64 or corrupted json gracefully', () => {
   assert.equal(decodeShareData('not-valid-base64-@@!#'), null);
   assert.equal(decodeShareData(btoa('invalid-json-payload')), null);
+  assert.equal(decodeShareData(''), null);
+  assert.equal(decodeShareData(null as unknown as string), null);
 });
 
 test('share.ts: buildShareUrl constructs valid share query URL', () => {
