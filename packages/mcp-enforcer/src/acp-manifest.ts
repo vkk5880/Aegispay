@@ -5,6 +5,12 @@ import {
   AuthorizeEscrowOrderSchema,
   BroadcastSyntheticIntentSchema,
 } from './custom-tools.js';
+import {
+  AffiliateAttributionSchema,
+  IntentTraceSchema,
+  AcpAddressSchema,
+  AcpCartBuyerSchema,
+} from '@aegispay/shared-types';
 
 /**
  * OpenAI Agentic Commerce Protocol (ACP) Manifest Specification
@@ -181,6 +187,14 @@ export const ACPPaymentHandlerExecuteSchema = z.object({
  * Canonical ACP MCP Checkout Tool Schemas (docs/mcp-binding.md)
  * Strict JSON-RPC 2.0 argument validation with { meta, id, payload } envelope
  */
+export const ACPMCPFulfillmentDetailsSchema = z.object({
+  address: AcpAddressSchema.optional(),
+  shipping_option_id: z.string().optional(),
+  name: z.string().optional(),
+  phone_number: z.string().optional(),
+  email: z.string().email().optional(),
+});
+
 export const ACPMCPCreateCheckoutSessionSchema = z.object({
   meta: z.object({
     api_version: z.string().min(1),
@@ -194,17 +208,15 @@ export const ACPMCPCreateCheckoutSessionSchema = z.object({
   payload: z.object({
     currency: z.string().default('usd'),
     items: z.array(z.object({
-      id: z.string(),
+      id: z.string().min(1),
       quantity: z.number().int().positive(),
       unit_price_cents: z.number().int().nonnegative().optional(),
       name: z.string().optional(),
+      image_url: z.string().url().optional(),
     })).min(1),
-    buyer: z.object({
-      email: z.string().email().optional(),
-      name: z.string().optional(),
-    }).optional(),
-    fulfillment_details: z.any().optional(),
-    affiliate_attribution: z.any().optional(),
+    buyer: AcpCartBuyerSchema.optional(),
+    fulfillment_details: ACPMCPFulfillmentDetailsSchema.optional(),
+    affiliate_attribution: AffiliateAttributionSchema.optional(),
     order_notes: z.string().optional(),
     mandate_id: z.string().optional(),
   }),
@@ -226,9 +238,15 @@ export const ACPMCPUpdateCheckoutSessionSchema = z.object({
   }).passthrough(),
   id: z.string().min(1),
   payload: z.object({
-    items: z.array(z.any()).optional(),
-    buyer: z.any().optional(),
-    fulfillment_details: z.any().optional(),
+    items: z.array(z.object({
+      id: z.string().min(1),
+      quantity: z.number().int().positive(),
+      unit_price_cents: z.number().int().nonnegative().optional(),
+      name: z.string().optional(),
+      image_url: z.string().url().optional(),
+    })).optional(),
+    buyer: AcpCartBuyerSchema.optional(),
+    fulfillment_details: ACPMCPFulfillmentDetailsSchema.optional(),
     order_notes: z.string().optional(),
   }),
 });
@@ -242,12 +260,12 @@ export const ACPMCPCompleteCheckoutSessionSchema = z.object({
   id: z.string().min(1),
   payload: z.object({
     payment_method: z.object({
-      type: z.string(),
+      type: z.enum(['vault_token', 'card', 'ed25519_mandate', 'paypal_wallet', 'paypal_vault_v3']),
       token: z.string().optional(),
       mandate_signature: z.string().optional(),
       public_key_hex: z.string().optional(),
     }),
-    affiliate_attribution: z.any().optional(),
+    affiliate_attribution: AffiliateAttributionSchema.optional(),
     mandate_id: z.string().optional(),
   }),
 });
@@ -260,7 +278,7 @@ export const ACPMCPCancelCheckoutSessionSchema = z.object({
   id: z.string().min(1),
   payload: z.object({
     reason: z.string().optional(),
-    intent_trace: z.record(z.string(), z.any()).optional(),
+    intent_trace: IntentTraceSchema.optional(),
   }).optional(),
 });
 
@@ -531,10 +549,98 @@ export const ACP_MANIFEST: ACPManifest = {
       parameters: {
         type: 'object',
         properties: {
-          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
-          payload: { type: 'object', properties: { currency: { type: 'string' }, items: { type: 'array' } }, required: ['items'] },
+          meta: {
+            type: 'object',
+            properties: {
+              api_version: { type: 'string' },
+              idempotency_key: { type: 'string' },
+              request_id: { type: 'string' },
+              user_agent: { type: 'string' },
+              accept_language: { type: 'string' },
+              signature: { type: 'string' },
+              timestamp: { type: 'string' },
+            },
+            required: ['api_version'],
+          },
+          payload: {
+            type: 'object',
+            properties: {
+              currency: { type: 'string', default: 'usd' },
+              items: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    quantity: { type: 'number' },
+                    unit_price_cents: { type: 'number' },
+                    image_url: { type: 'string' },
+                  },
+                  required: ['id', 'quantity'],
+                },
+              },
+              buyer: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string' },
+                  name: { type: 'string' },
+                  phone: { type: 'string' },
+                },
+              },
+              fulfillment_details: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  phone_number: { type: 'string' },
+                  email: { type: 'string' },
+                  shipping_option_id: { type: 'string' },
+                  address: {
+                    type: 'object',
+                    properties: {
+                      name: { type: 'string' },
+                      line_one: { type: 'string' },
+                      line_two: { type: 'string' },
+                      city: { type: 'string' },
+                      state: { type: 'string' },
+                      country: { type: 'string' },
+                      postal_code: { type: 'string' },
+                    },
+                    required: ['line_one', 'city', 'postal_code'],
+                  },
+                },
+              },
+              affiliate_attribution: {
+                type: 'object',
+                properties: {
+                  provider: { type: 'string' },
+                  token: { type: 'string' },
+                  publisher_id: { type: 'string' },
+                  campaign_id: { type: 'string' },
+                  creative_id: { type: 'string' },
+                  sub_id: { type: 'string' },
+                  touchpoint: { type: 'string', enum: ['first', 'last'] },
+                },
+                required: ['provider'],
+              },
+              order_notes: { type: 'string' },
+              mandate_id: { type: 'string' },
+            },
+            required: ['items'],
+          },
         },
         required: ['meta', 'payload'],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+          currency: { type: 'string' },
+          line_items: { type: 'array' },
+          totals: { type: 'array' },
+          capabilities: { type: 'object' },
+        },
       },
       guarded_aegis_action: 'create_checkout_session',
     },
@@ -544,10 +650,26 @@ export const ACP_MANIFEST: ACPManifest = {
       parameters: {
         type: 'object',
         properties: {
-          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          meta: {
+            type: 'object',
+            properties: {
+              api_version: { type: 'string' },
+              request_id: { type: 'string' },
+            },
+            required: ['api_version'],
+          },
           id: { type: 'string', description: 'Checkout session ID' },
         },
         required: ['meta', 'id'],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+          currency: { type: 'string' },
+          totals: { type: 'array' },
+        },
       },
       guarded_aegis_action: 'get_checkout_session',
     },
@@ -557,11 +679,60 @@ export const ACP_MANIFEST: ACPManifest = {
       parameters: {
         type: 'object',
         properties: {
-          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          meta: {
+            type: 'object',
+            properties: {
+              api_version: { type: 'string' },
+              idempotency_key: { type: 'string' },
+              request_id: { type: 'string' },
+            },
+            required: ['api_version'],
+          },
           id: { type: 'string', description: 'Checkout session ID' },
-          payload: { type: 'object' },
+          payload: {
+            type: 'object',
+            properties: {
+              items: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    quantity: { type: 'number' },
+                    unit_price_cents: { type: 'number' },
+                  },
+                },
+              },
+              buyer: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string' },
+                  name: { type: 'string' },
+                  phone: { type: 'string' },
+                },
+              },
+              fulfillment_details: {
+                type: 'object',
+                properties: {
+                  shipping_option_id: { type: 'string' },
+                  address: { type: 'object' },
+                },
+              },
+              order_notes: { type: 'string' },
+            },
+          },
         },
         required: ['meta', 'id', 'payload'],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+          currency: { type: 'string' },
+          updated_at: { type: 'string' },
+        },
       },
       guarded_aegis_action: 'update_checkout_session',
     },
@@ -571,11 +742,44 @@ export const ACP_MANIFEST: ACPManifest = {
       parameters: {
         type: 'object',
         properties: {
-          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          meta: {
+            type: 'object',
+            properties: {
+              api_version: { type: 'string' },
+              idempotency_key: { type: 'string' },
+              request_id: { type: 'string' },
+            },
+            required: ['api_version'],
+          },
           id: { type: 'string', description: 'Checkout session ID' },
-          payload: { type: 'object', properties: { payment_method: { type: 'object' } }, required: ['payment_method'] },
+          payload: {
+            type: 'object',
+            properties: {
+              payment_method: {
+                type: 'object',
+                properties: {
+                  type: { type: 'string', enum: ['vault_token', 'card', 'ed25519_mandate', 'paypal_wallet', 'paypal_vault_v3'] },
+                  token: { type: 'string' },
+                  mandate_signature: { type: 'string' },
+                  public_key_hex: { type: 'string' },
+                },
+                required: ['type'],
+              },
+              affiliate_attribution: { type: 'object' },
+              mandate_id: { type: 'string' },
+            },
+            required: ['payment_method'],
+          },
         },
         required: ['meta', 'id', 'payload'],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+          order: { type: 'object' },
+        },
       },
       guarded_aegis_action: 'complete_checkout_session',
     },
@@ -585,11 +789,39 @@ export const ACP_MANIFEST: ACPManifest = {
       parameters: {
         type: 'object',
         properties: {
-          meta: { type: 'object', properties: { api_version: { type: 'string' } }, required: ['api_version'] },
+          meta: {
+            type: 'object',
+            properties: {
+              api_version: { type: 'string' },
+              request_id: { type: 'string' },
+            },
+            required: ['api_version'],
+          },
           id: { type: 'string', description: 'Checkout session ID' },
-          payload: { type: 'object', properties: { reason: { type: 'string' } } },
+          payload: {
+            type: 'object',
+            properties: {
+              reason: { type: 'string' },
+              intent_trace: {
+                type: 'object',
+                properties: {
+                  reason_code: { type: 'string' },
+                  trace_summary: { type: 'string' },
+                  metadata: { type: 'object' },
+                },
+              },
+            },
+          },
         },
         required: ['meta', 'id'],
+      },
+      returns: {
+        type: 'object',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string' },
+          cancellation_reason: { type: 'string' },
+        },
       },
       guarded_aegis_action: 'cancel_checkout_session',
     },
@@ -642,56 +874,77 @@ export function generateACPManifest(): ACPManifest {
  * ACP Action Dispatcher
  * Bridges standard ACP action calls directly to AegisPay guarded tool handlers.
  */
+export class ACPValidationError extends Error {
+  public code: number;
+  public data: any;
+
+  constructor(message: string, data?: any) {
+    super(message);
+    this.name = 'ACPValidationError';
+    this.code = -32602; // JSON-RPC 2.0 Invalid params
+    this.data = data;
+  }
+}
+
 export async function executeACPAction(actionName: string, params: Record<string, any>) {
-  switch (actionName) {
-    case 'discover_products': {
-      const parsed = ACPDiscoverProductsSchema.parse(params);
-      const res = await toolHandlers.handleOptimizeBasket({
-        allowance_voucher_id: parsed.allowance_voucher_id,
-        search_query: parsed.query,
-        category_ids: parsed.category_ids,
-        hex_color: parsed.hex_color,
-        image_url: parsed.image_url,
-      });
-      return { action: 'discover_products', result: res };
+  try {
+    switch (actionName) {
+      case 'discover_products': {
+        const parsed = ACPDiscoverProductsSchema.parse(params);
+        const res = await toolHandlers.handleOptimizeBasket({
+          allowance_voucher_id: parsed.allowance_voucher_id,
+          search_query: parsed.query,
+          category_ids: parsed.category_ids,
+          hex_color: parsed.hex_color,
+          image_url: parsed.image_url,
+        });
+        return { action: 'discover_products', result: res };
+      }
+      case 'request_purchase_quote': {
+        const parsed = ACPRequestPurchaseQuoteSchema.parse(params);
+        const res = await toolHandlers.handleBroadcastIntent(parsed);
+        return { action: 'request_purchase_quote', result: res };
+      }
+      case 'create_checkout_session': {
+        const parsed = ACPMCPCreateCheckoutSessionSchema.parse(params);
+        const res = await toolHandlers.handleCreateCheckoutSession(parsed);
+        return { action: 'create_checkout_session', result: res };
+      }
+      case 'get_checkout_session': {
+        const parsed = ACPMCPGetCheckoutSessionSchema.parse(params);
+        const res = await toolHandlers.handleGetCheckoutSession(parsed);
+        return { action: 'get_checkout_session', result: res };
+      }
+      case 'update_checkout_session': {
+        const parsed = ACPMCPUpdateCheckoutSessionSchema.parse(params);
+        const res = await toolHandlers.handleUpdateCheckoutSession(parsed);
+        return { action: 'update_checkout_session', result: res };
+      }
+      case 'complete_checkout_session': {
+        const parsed = ACPMCPCompleteCheckoutSessionSchema.parse(params);
+        const res = await toolHandlers.handleCompleteCheckoutSession(parsed);
+        return { action: 'complete_checkout_session', result: res };
+      }
+      case 'cancel_checkout_session': {
+        const parsed = ACPMCPCancelCheckoutSessionSchema.parse(params);
+        const res = await toolHandlers.handleCancelCheckoutSession(parsed);
+        return { action: 'cancel_checkout_session', result: res };
+      }
+      case 'confirm_payment_hold': {
+        const parsed = ACPConfirmPaymentHoldSchema.parse(params);
+        const res = await toolHandlers.handleAuthorizeEscrow(parsed);
+        return { action: 'confirm_payment_hold', result: res };
+      }
+      default:
+        throw new ACPValidationError(
+          `Unsupported ACP action: ${actionName}. Supported actions: discover_products, request_purchase_quote, confirm_payment_hold, create_checkout_session, get_checkout_session, update_checkout_session, complete_checkout_session, cancel_checkout_session`
+        );
     }
-    case 'request_purchase_quote': {
-      const parsed = ACPRequestPurchaseQuoteSchema.parse(params);
-      const res = await toolHandlers.handleBroadcastIntent(parsed);
-      return { action: 'request_purchase_quote', result: res };
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      throw new ACPValidationError(`Invalid params: ${err.message}`, err.errors);
     }
-    case 'create_checkout_session': {
-      const parsed = ACPMCPCreateCheckoutSessionSchema.parse(params);
-      const res = await toolHandlers.handleCreateCheckoutSession(parsed);
-      return { action: 'create_checkout_session', result: res };
-    }
-    case 'get_checkout_session': {
-      const parsed = ACPMCPGetCheckoutSessionSchema.parse(params);
-      const res = await toolHandlers.handleGetCheckoutSession(parsed);
-      return { action: 'get_checkout_session', result: res };
-    }
-    case 'update_checkout_session': {
-      const parsed = ACPMCPUpdateCheckoutSessionSchema.parse(params);
-      const res = await toolHandlers.handleUpdateCheckoutSession(parsed);
-      return { action: 'update_checkout_session', result: res };
-    }
-    case 'complete_checkout_session': {
-      const parsed = ACPMCPCompleteCheckoutSessionSchema.parse(params);
-      const res = await toolHandlers.handleCompleteCheckoutSession(parsed);
-      return { action: 'complete_checkout_session', result: res };
-    }
-    case 'cancel_checkout_session': {
-      const parsed = ACPMCPCancelCheckoutSessionSchema.parse(params);
-      const res = await toolHandlers.handleCancelCheckoutSession(parsed);
-      return { action: 'cancel_checkout_session', result: res };
-    }
-    case 'confirm_payment_hold': {
-      const parsed = ACPConfirmPaymentHoldSchema.parse(params);
-      const res = await toolHandlers.handleAuthorizeEscrow(parsed);
-      return { action: 'confirm_payment_hold', result: res };
-    }
-    default:
-      throw new Error(`Unsupported ACP action: ${actionName}. Supported actions: discover_products, request_purchase_quote, confirm_payment_hold`);
+    throw err;
   }
 }
 
