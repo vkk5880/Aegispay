@@ -32,30 +32,30 @@ export function extractAmount(text: string): number {
   }
 
   // If text starts with or clearly indicates a negative value, reject negative amounts:
-  // e.g. -$50, - 50 dollars, pay -30, amount of -100
+  // e.g. -$50, $-50, - 50 dollars, pay -30, amount of -100, minus 50 dollars, negative $50
 
-  // 1. Explicit dollar currency match: $50, $ 120.50
-  // Look for any dollar match and verify it is not preceded by '-'
-  const dollarMatches = Array.from(clean.matchAll(/(?:([-])\s*)?\$\s*(\d+(?:\.\d{1,2})?)/g));
+  // 1. Explicit dollar currency match: $50, $ 120.50, -$50, $-50, minus $50, negative $50
+  // Look for any dollar match and verify it is not preceded or succeeded by '-' or minus/negative keyword
+  const dollarMatches = Array.from(clean.matchAll(/(?:([-]|minus|negative)\s*)?\$\s*(?:([-]|minus|negative)\s*)?(\d+(?:\.\d{1,2})?)/gi));
   let hasNegativeDollar = false;
   for (const m of dollarMatches) {
-    if (m[1] === '-') {
+    if (m[1] || m[2]) {
       hasNegativeDollar = true;
       continue;
     }
-    const val = parseFloat(m[2]);
+    const val = parseFloat(m[3]);
     if (val > 0) return val;
   }
   if (hasNegativeDollar && dollarMatches.length > 0) {
     return 0;
   }
 
-  // 2. Unit word match: 50 dollars, 12.50 usd, 100 bucks
-  // Reject negative numbers like -50 dollars or - 12.50 usd
-  const wordMatches = Array.from(clean.matchAll(/(?:([-])\s*)?\b(\d+(?:\.\d{1,2})?)\s*(?:dollars|usd|bucks)\b/gi));
+  // 2. Unit word match: 50 dollars, 12.50 usd, 100 bucks, -50 dollars, minus 50 dollars
+  // Reject negative numbers like -50 dollars, - 12.50 usd, minus 50 dollars, negative 50 usd
+  const wordMatches = Array.from(clean.matchAll(/(?:([-]|minus|negative)\s*)?\b(\d+(?:\.\d{1,2})?)\s*(?:dollars|usd|bucks)\b/gi));
   let hasNegativeWord = false;
   for (const m of wordMatches) {
-    if (m[1] === '-') {
+    if (m[1]) {
       hasNegativeWord = true;
       continue;
     }
@@ -68,10 +68,10 @@ export function extractAmount(text: string): number {
 
   // 3. Prepositional amount match: for 45, pay 20.00, amount of 100
   // Disambiguate against non-USD currencies (EUR, GBP, JPY, etc., or €/£/¥/₹ prefix)
-  const prepMatches = Array.from(clean.matchAll(/(?:for|the|amount(?:\s+of)?|pay)\s+(?:([-])\s*)?(?:(?:\$\s*)?([€£¥₹]?)\s*(\d+(?:\.\d{1,2})?))(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
+  const prepMatches = Array.from(clean.matchAll(/(?:for|the|amount(?:\s+of)?|pay)\s+(?:([-]|minus|negative)\s*)?(?:(?:\$\s*)?([€£¥₹]?)\s*(\d+(?:\.\d{1,2})?))(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
   let hasNegativePrep = false;
   for (const m of prepMatches) {
-    if (m[1] === '-') {
+    if (m[1]) {
       hasNegativePrep = true;
       continue;
     }
@@ -84,11 +84,10 @@ export function extractAmount(text: string): number {
   }
 
   // 4. Standalone numeric value fallback (excluding known test resource entity IDs)
-  // Ensure standalone number is not preceded by minus, not prefixed with non-USD symbols, and not followed by non-USD codes
-  // We match with preceding characters to detect if a minus sign is in front
-  const numMatches = Array.from(clean.matchAll(/(?:([-\$€£¥₹])\s*)?\b([1-9]\d{0,6}(?:\.\d{1,2})?)\b(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
+  // Ensure standalone number is not preceded by minus/negative, not prefixed with non-USD symbols, and not followed by non-USD codes
+  const numMatches = Array.from(clean.matchAll(/(?:([-]|minus|negative|[\$€£¥₹])\s*)?\b([1-9]\d{0,6}(?:\.\d{1,2})?)\b(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
   for (const m of numMatches) {
-    if (m[1] === '-') continue; // Skip negative amounts
+    if (m[1] && (m[1] === '-' || m[1].toLowerCase() === 'minus' || m[1].toLowerCase() === 'negative')) continue; // Skip negative amounts
     if (m[1] && ['€', '£', '¥', '₹'].includes(m[1])) continue; // Skip non-USD currency symbol
     const val = parseFloat(m[2]);
     if (val !== 101 && val !== 772 && val !== 3301 && val !== 104 && val > 0) return val;
