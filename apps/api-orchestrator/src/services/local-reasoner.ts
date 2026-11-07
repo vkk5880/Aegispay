@@ -1,4 +1,6 @@
-import type { McpToolCall } from '@aegispay/shared-types';
+import { McpToolCallSchema, type McpToolCall } from '@aegispay/shared-types';
+
+export const MAX_PROMPT_LENGTH = 4000;
 
 export interface LocalReasonerProposal {
   toolCall: McpToolCall;
@@ -19,30 +21,77 @@ export interface LocalReasonerProposal {
  */
 export function extractAmount(text: string): number {
   if (!text) return 0;
+  const input = typeof text === 'string' ? text.slice(0, MAX_PROMPT_LENGTH) : String(text).slice(0, MAX_PROMPT_LENGTH);
 
-  // Strip comma thousands separators across numbers (e.g. $1,250.00 -> $1250.00, $1,000,000 -> $1000000)
-  let clean = text;
-  while (/(\d),(\d)/.test(clean)) {
+  // Strip comma thousands separators across numbers safely without unbounded loops
+  let clean = input;
+  let iterations = 0;
+  while (/(\d),(\d)/.test(clean) && iterations < 10) {
     clean = clean.replace(/(\d),(\d)/g, '$1$2');
+    iterations++;
   }
 
+  // If text starts with or clearly indicates a negative value, reject negative amounts:
+  // e.g. -$50, - 50 dollars, pay -30, amount of -100
+
   // 1. Explicit dollar currency match: $50, $ 120.50
-  const dollarMatch = clean.match(/\$\s*(\d+(?:\.\d{1,2})?)/);
-  if (dollarMatch) return parseFloat(dollarMatch[1]);
+  // Look for any dollar match and verify it is not preceded by '-'
+  const dollarMatches = Array.from(clean.matchAll(/(?:([-])\s*)?\$\s*(\d+(?:\.\d{1,2})?)/g));
+  let hasNegativeDollar = false;
+  for (const m of dollarMatches) {
+    if (m[1] === '-') {
+      hasNegativeDollar = true;
+      continue;
+    }
+    const val = parseFloat(m[2]);
+    if (val > 0) return val;
+  }
+  if (hasNegativeDollar && dollarMatches.length > 0) {
+    return 0;
+  }
 
   // 2. Unit word match: 50 dollars, 12.50 usd, 100 bucks
-  const wordMatch = clean.match(/(\d+(?:\.\d{1,2})?)\s*(?:dollars|usd|bucks)\b/i);
-  if (wordMatch) return parseFloat(wordMatch[1]);
+  // Reject negative numbers like -50 dollars or - 12.50 usd
+  const wordMatches = Array.from(clean.matchAll(/(?:([-])\s*)?\b(\d+(?:\.\d{1,2})?)\s*(?:dollars|usd|bucks)\b/gi));
+  let hasNegativeWord = false;
+  for (const m of wordMatches) {
+    if (m[1] === '-') {
+      hasNegativeWord = true;
+      continue;
+    }
+    const val = parseFloat(m[2]);
+    if (val > 0) return val;
+  }
+  if (hasNegativeWord && wordMatches.length > 0) {
+    return 0;
+  }
 
   // 3. Prepositional amount match: for 45, pay 20.00, amount of 100
-  const prepMatch = clean.match(/(?:for|the|amount(?:\s+of)?|pay)\s+(\d+(?:\.\d{1,2})?)/i);
-  if (prepMatch) return parseFloat(prepMatch[1]);
+  // Disambiguate against non-USD currencies (EUR, GBP, JPY, etc., or €/£/¥/₹ prefix)
+  const prepMatches = Array.from(clean.matchAll(/(?:for|the|amount(?:\s+of)?|pay)\s+(?:([-])\s*)?(?:(?:\$\s*)?([€£¥₹]?)\s*(\d+(?:\.\d{1,2})?))(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
+  let hasNegativePrep = false;
+  for (const m of prepMatches) {
+    if (m[1] === '-') {
+      hasNegativePrep = true;
+      continue;
+    }
+    if (m[2]) continue; // Has non-USD currency symbol like € or £
+    const val = parseFloat(m[3]);
+    if (val > 0) return val;
+  }
+  if (hasNegativePrep && prepMatches.length > 0) {
+    return 0;
+  }
 
   // 4. Standalone numeric value fallback (excluding known test resource entity IDs)
-  const numMatch = clean.match(/\b([1-9]\d{0,6}(?:\.\d{1,2})?)\b/);
-  if (numMatch) {
-    const val = parseFloat(numMatch[1]);
-    if (val !== 101 && val !== 772 && val !== 3301 && val !== 104) return val;
+  // Ensure standalone number is not preceded by minus, not prefixed with non-USD symbols, and not followed by non-USD codes
+  // We match with preceding characters to detect if a minus sign is in front
+  const numMatches = Array.from(clean.matchAll(/(?:([-\$€£¥₹])\s*)?\b([1-9]\d{0,6}(?:\.\d{1,2})?)\b(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
+  for (const m of numMatches) {
+    if (m[1] === '-') continue; // Skip negative amounts
+    if (m[1] && ['€', '£', '¥', '₹'].includes(m[1])) continue; // Skip non-USD currency symbol
+    const val = parseFloat(m[2]);
+    if (val !== 101 && val !== 772 && val !== 3301 && val !== 104 && val > 0) return val;
   }
 
   return 0;
@@ -53,7 +102,8 @@ export function extractAmount(text: string): number {
  */
 export function extractCategory(text: string): string {
   if (!text) return 'payment';
-  const lower = text.toLowerCase();
+  const input = typeof text === 'string' ? text.slice(0, MAX_PROMPT_LENGTH) : String(text).slice(0, MAX_PROMPT_LENGTH);
+  const lower = input.toLowerCase();
 
   if (/refund|return|reimburse/i.test(lower)) return 'refund';
   if (/dispute|claim|chargeback|arbitrat/i.test(lower)) return 'dispute';
@@ -70,7 +120,8 @@ export function extractCategory(text: string): string {
  */
 export function extractMerchant(text: string): string | undefined {
   if (!text) return undefined;
-  const lower = text.toLowerCase();
+  const input = typeof text === 'string' ? text.slice(0, MAX_PROMPT_LENGTH) : String(text).slice(0, MAX_PROMPT_LENGTH);
+  const lower = input.toLowerCase();
 
   if (lower.includes('sarah') || lower.includes('clean')) {
     return "Sarah's Eco Cleaning";
@@ -82,10 +133,10 @@ export function extractMerchant(text: string): string | undefined {
     return 'Metro Gym';
   }
 
-  // Regex patterns: "to <Merchant>", "merchant: <Merchant>"
-  const explicitMatch = text.match(/(?:merchant:\s*|to\s+)([A-Z][A-Za-z0-9'&.-]*(?:\s+[A-Z][A-Za-z0-9'&.-]*)*)/);
+  // ReDoS hardened regex patterns: bounded repetition {0,5}
+  const explicitMatch = input.match(/(?:merchant:\s*|to\s+)([A-Z][A-Za-z0-9'&.-]*(?:\s+[A-Z][A-Za-z0-9'&.-]*){0,5})/);
   if (explicitMatch && explicitMatch[1]) {
-    const candidate = explicitMatch[1].trim();
+    const candidate = explicitMatch[1].trim().replace(/[.,;:]+$/, '');
     if (!['The', 'A', 'An', 'Order', 'Invoice'].includes(candidate)) {
       return candidate;
     }
@@ -99,7 +150,8 @@ export function extractMerchant(text: string): string | undefined {
  */
 export function extractUrgency(text: string): 'immediate' | 'high' | 'normal' | 'low' {
   if (!text) return 'normal';
-  const lower = text.toLowerCase();
+  const input = typeof text === 'string' ? text.slice(0, MAX_PROMPT_LENGTH) : String(text).slice(0, MAX_PROMPT_LENGTH);
+  const lower = input.toLowerCase();
 
   if (/\b(immediate(?:ly)?|asap|emergency|stat|urgent(?:ly)?|right now|now)\b/i.test(lower)) {
     return 'immediate';
@@ -119,25 +171,28 @@ export function extractUrgency(text: string): 'immediate' | 'high' | 'normal' | 
  * Analyzes input prompts using pattern extraction to formulate strongly typed MCP tool call proposals.
  */
 export function runLocalReasoner(prompt: string): LocalReasonerProposal {
-  const amount = extractAmount(prompt);
-  const category = extractCategory(prompt);
-  const merchant = extractMerchant(prompt);
-  const urgency = extractUrgency(prompt);
-  const lower = prompt.toLowerCase();
+  const clampedPrompt = (typeof prompt === 'string' ? prompt : String(prompt || '')).slice(0, MAX_PROMPT_LENGTH);
+  const amount = extractAmount(clampedPrompt);
+  const category = extractCategory(clampedPrompt);
+  const merchant = extractMerchant(clampedPrompt);
+  const urgency = extractUrgency(clampedPrompt);
+  const lower = clampedPrompt.toLowerCase();
 
-  const idMatch = prompt.match(/\b(INV2-[A-Z0-9-]+|ORD-[A-Z0-9-]+|DSP-[A-Z0-9-]+|SUB-[A-Z0-9-]+)\b/i);
+  const idMatch = clampedPrompt.match(/\b(INV2-[A-Z0-9-]+|ORD-[A-Z0-9-]+|DSP-[A-Z0-9-]+|SUB-[A-Z0-9-]+)\b/i);
   const resourceId = idMatch ? idMatch[1].toUpperCase() : '';
+
+  let proposal: LocalReasonerProposal;
 
   // 1. Customer refund / return intent
   if (lower.includes('refund') || lower.includes('return')) {
     const orderId = resourceId || 'ORD-772';
     const finalAmount = amount || 24;
-    return {
+    proposal = {
       toolCall: {
         id: `agent-${Date.now()}`,
         toolName: 'create_refund',
         agentSummary: `Refund order ${orderId} ($${finalAmount.toFixed(2)})`,
-        args: { orderId, amountUsd: finalAmount, reason: prompt }
+        args: { orderId, amountUsd: finalAmount, reason: clampedPrompt }
       },
       rationale: `Customer refund of $${finalAmount.toFixed(2)} on order ${orderId}.`,
       modelUsed: 'local-financial-reasoner-v1',
@@ -147,18 +202,16 @@ export function runLocalReasoner(prompt: string): LocalReasonerProposal {
       merchant: merchant || 'Customer Service',
       urgency
     };
-  }
-
-  // 2. Dispute / claim settlement intent
-  if (lower.includes('dispute') || lower.includes('claim')) {
+  } else if (lower.includes('dispute') || lower.includes('claim')) {
+    // 2. Dispute / claim settlement intent
     const disputeId = resourceId || 'DSP-3301';
     const finalAmount = amount || 320;
-    return {
+    proposal = {
       toolCall: {
         id: `agent-${Date.now()}`,
         toolName: 'accept_dispute_claim',
         agentSummary: `Accept dispute claim ${disputeId} ($${finalAmount.toFixed(2)})`,
-        args: { disputeId, amountUsd: finalAmount, reason: prompt }
+        args: { disputeId, amountUsd: finalAmount, reason: clampedPrompt }
       },
       rationale: `Settles customer dispute ${disputeId} for $${finalAmount.toFixed(2)}.`,
       modelUsed: 'local-financial-reasoner-v1',
@@ -168,14 +221,12 @@ export function runLocalReasoner(prompt: string): LocalReasonerProposal {
       merchant: merchant || 'Dispute Forensics',
       urgency
     };
-  }
-
-  // 3. Service invoice settlement (e.g. Sarah's Eco Cleaning)
-  if (lower.includes('clean') || lower.includes('sarah') || amount === 185 || (resourceId && resourceId.includes('SARAH'))) {
+  } else if (lower.includes('clean') || lower.includes('sarah') || amount === 185 || (resourceId && resourceId.includes('SARAH'))) {
+    // 3. Service invoice settlement (e.g. Sarah's Eco Cleaning)
     const invoiceId = resourceId || 'INV2-SARAH-104';
     const finalAmount = amount || 185;
     const recipientName = merchant || "Sarah's Eco Cleaning";
-    return {
+    proposal = {
       toolCall: {
         id: `agent-${Date.now()}`,
         toolName: 'record_payment_for_invoice',
@@ -196,14 +247,12 @@ export function runLocalReasoner(prompt: string): LocalReasonerProposal {
       merchant: recipientName,
       urgency
     };
-  }
-
-  // 4. Utility / Internet bill settlement (e.g. Metro Fiber)
-  if (lower.includes('internet') || lower.includes('metro') || lower.includes('fiber') || amount === 28 || (resourceId && resourceId.includes('101'))) {
+  } else if (lower.includes('internet') || lower.includes('metro') || lower.includes('fiber') || amount === 28 || (resourceId && resourceId.includes('101'))) {
+    // 4. Utility / Internet bill settlement (e.g. Metro Fiber)
     const finalAmount = amount || 28;
     const recipientName = merchant || 'Metro Fiber';
     const orderId = resourceId || 'ORD-101';
-    return {
+    proposal = {
       toolCall: {
         id: `agent-${Date.now()}`,
         toolName: 'pay_order',
@@ -225,12 +274,10 @@ export function runLocalReasoner(prompt: string): LocalReasonerProposal {
       merchant: recipientName,
       urgency
     };
-  }
-
-  // 5. Subscription cancellation intent
-  if (lower.includes('cancel') && lower.includes('sub')) {
+  } else if (lower.includes('cancel') && lower.includes('sub')) {
+    // 5. Subscription cancellation intent
     const subscriptionId = resourceId || 'SUB-GYM-01';
-    return {
+    proposal = {
       toolCall: {
         id: `agent-${Date.now()}`,
         toolName: 'cancel_subscription',
@@ -245,31 +292,35 @@ export function runLocalReasoner(prompt: string): LocalReasonerProposal {
       merchant: merchant || 'Subscription Provider',
       urgency
     };
+  } else {
+    // 6. Generic payment intent fallback
+    const invoiceId = resourceId.startsWith('INV') ? resourceId : 'INV2-METRO-01';
+    const finalAmount = amount || 50;
+    const recipientName = merchant || 'Merchant';
+    proposal = {
+      toolCall: {
+        id: `agent-${Date.now()}`,
+        toolName: 'record_payment_for_invoice',
+        agentSummary: `Record payment of $${finalAmount.toFixed(2)}`,
+        args: {
+          invoiceId,
+          recipientName,
+          recipientEmail: 'payee@paypal.com',
+          amountUsd: finalAmount,
+          currency: 'USD'
+        }
+      },
+      rationale: `Payment intent for $${finalAmount.toFixed(2)}.`,
+      modelUsed: 'local-financial-reasoner-v1',
+      confidence: 0.85,
+      thinking: `Fallback reasoner parsed payment intent of $${finalAmount.toFixed(2)} for ${recipientName} on invoice ${invoiceId}.`,
+      category,
+      merchant: recipientName,
+      urgency
+    };
   }
 
-  // 6. Generic payment intent fallback
-  const invoiceId = resourceId.startsWith('INV') ? resourceId : 'INV2-METRO-01';
-  const finalAmount = amount || 50;
-  const recipientName = merchant || 'Merchant';
-  return {
-    toolCall: {
-      id: `agent-${Date.now()}`,
-      toolName: 'record_payment_for_invoice',
-      agentSummary: `Record payment of $${finalAmount.toFixed(2)}`,
-      args: {
-        invoiceId,
-        recipientName,
-        recipientEmail: 'payee@paypal.com',
-        amountUsd: finalAmount,
-        currency: 'USD'
-      }
-    },
-    rationale: `Payment intent for $${finalAmount.toFixed(2)}.`,
-    modelUsed: 'local-financial-reasoner-v1',
-    confidence: 0.85,
-    thinking: `Fallback reasoner parsed payment intent of $${finalAmount.toFixed(2)} for ${recipientName} on invoice ${invoiceId}.`,
-    category,
-    merchant: recipientName,
-    urgency
-  };
+  // Ensure all generated fallback proposals strictly conform to McpToolCallSchema
+  McpToolCallSchema.parse(proposal.toolCall);
+  return proposal;
 }
