@@ -5,12 +5,12 @@ import {
   PaymentsController,
   VaultController,
   CheckoutPaymentIntent,
+  ApiError,
 } from '@paypal/paypal-server-sdk';
+import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 
-
 dotenv.config();
-
 
 export interface PayPalConfig {
   clientId: string;
@@ -19,12 +19,10 @@ export interface PayPalConfig {
   webhookId?: string;
 }
 
-
 export interface CachedToken {
   accessToken: string;
   expiresAt: number;
 }
-
 
 export interface DisputeEvidencePayload {
   evidence_type?: string;
@@ -42,11 +40,7 @@ export interface DisputeEvidencePayload {
   };
 }
 
-
-
-
 export type PayPalMoney = { value: string; currency_code: string };
-
 
 export interface CatalogProductItem {
   id: string;
@@ -56,7 +50,6 @@ export interface CatalogProductItem {
   category?: string;
   create_time: string;
 }
-
 
 export interface BillingPlanItem {
   id: string;
@@ -73,7 +66,6 @@ export interface BillingPlanItem {
   }>;
   payment_preferences?: { setup_fee?: PayPalMoney };
 }
-
 
 export interface InvoiceItemSummary {
   id: string;
@@ -111,7 +103,6 @@ export interface InvoiceItemSummary {
   };
 }
 
-
 export interface AccountBalancesResult {
   as_of_time?: string;
   balances: Array<{
@@ -121,7 +112,6 @@ export interface AccountBalancesResult {
     withheld_balance: PayPalMoney;
   }>;
 }
-
 
 export interface TransactionSearchResult {
   transaction_info: {
@@ -141,6 +131,46 @@ export interface TransactionSearchResult {
   };
 }
 
+/**
+ * Defensive check to verify an unknown value is a non-null Record
+ */
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Defensive check to safely extract string properties
+ */
+function safeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+/**
+ * Helper to ensure a valid UUID is returned for PayPal-Request-Id idempotency
+ */
+function ensureRequestId(id?: string): string {
+  if (id && typeof id === 'string' && id.trim().length > 0) {
+    return id.trim();
+  }
+  return crypto.randomUUID();
+}
+
+/**
+ * Parse Retry-After header (seconds or HTTP-date) to milliseconds
+ */
+function parseRetryAfter(headerValue: string | null | undefined): number | null {
+  if (!headerValue) return null;
+  const numeric = Number(headerValue);
+  if (!Number.isNaN(numeric) && numeric >= 0) {
+    return Math.round(numeric * 1000);
+  }
+  const dateMs = Date.parse(headerValue);
+  if (!Number.isNaN(dateMs)) {
+    const delta = dateMs - Date.now();
+    return delta > 0 ? delta : 0;
+  }
+  return null;
+}
 
 export class PayPalApimaticClient {
   private client: Client;
@@ -150,7 +180,8 @@ export class PayPalApimaticClient {
   private config: PayPalConfig;
   private tokenCache: CachedToken | null = null;
   private clientTokenCache: CachedToken | null = null;
-
+  private tokenRefreshPromise: Promise<string> | null = null;
+  private clientTokenRefreshPromise: Promise<string> | null = null;
 
   constructor(customConfig?: Partial<PayPalConfig>) {
     this.config = {
@@ -161,9 +192,7 @@ export class PayPalApimaticClient {
       webhookId: customConfig?.webhookId || process.env.PAYPAL_WEBHOOK_ID || '',
     };
 
-
     const env = this.config.environment === 'production' ? Environment.Production : Environment.Sandbox;
-
 
     this.client = new Client({
       clientCredentialsAuthCredentials: {
@@ -173,12 +202,10 @@ export class PayPalApimaticClient {
       environment: env,
     });
 
-
     this.ordersController = new OrdersController(this.client);
     this.paymentsController = new PaymentsController(this.client);
     this.vaultController = new VaultController(this.client);
   }
-
 
   private getBaseUrl(): string {
     return this.config.environment === 'production'
@@ -186,95 +213,200 @@ export class PayPalApimaticClient {
       : 'https://api-m.sandbox.paypal.com';
   }
 
+  /**
+   * Helper sleep function for backoff
+   */
+  private async sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
   /**
-   * Client credential OAuth2 token fetching with 15-minute token caching.
+   * Fetch wrapper with exponential backoff, jitter, and Retry-After support for HTTP 429
+   */
+  private async fetchWithRetry(
+    url: string,
+    options: RequestInit,
+    maxRetries = 3,
+    initialBackoffMs = 500
+  ): Promise<Response> {
+    let attempt = 0;
+    while (attempt <= maxRetries) {
+      const response = await fetch(url, options);
+
+      if (response.status === 429 && attempt < maxRetries) {
+        attempt++;
+        const retryAfterHeader = response.headers.get('Retry-After');
+        const parsedRetryAfter = parseRetryAfter(retryAfterHeader);
+        const jitter = Math.random() * 200;
+        const delayMs = parsedRetryAfter !== null
+          ? Math.min(parsedRetryAfter + jitter, 10000)
+          : initialBackoffMs * Math.pow(2, attempt - 1) + jitter;
+
+        await this.sleep(delayMs);
+        continue;
+      }
+
+      return response;
+    }
+
+    // Should not reach here, but return last response as safety
+    return fetch(url, options);
+  }
+
+  /**
+   * SDK controller execution wrapper with exponential backoff on HTTP 429 (ApiError)
+   */
+  private async executeWithRetry<T>(
+    operation: () => Promise<T>,
+    maxRetries = 3,
+    initialBackoffMs = 500
+  ): Promise<T> {
+    let attempt = 0;
+    while (attempt <= maxRetries) {
+      try {
+        return await operation();
+      } catch (err: any) {
+        const isRateLimit =
+          (err instanceof ApiError && err.statusCode === 429) ||
+          err?.statusCode === 429 ||
+          err?.status === 429;
+
+        if (isRateLimit && attempt < maxRetries) {
+          attempt++;
+          const retryAfterVal = err?.headers?.['retry-after'] || err?.headers?.['Retry-After'];
+          const parsedRetryAfter = parseRetryAfter(retryAfterVal);
+          const jitter = Math.random() * 200;
+          const delayMs = parsedRetryAfter !== null
+            ? Math.min(parsedRetryAfter + jitter, 10000)
+            : initialBackoffMs * Math.pow(2, attempt - 1) + jitter;
+
+          await this.sleep(delayMs);
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    return operation();
+  }
+
+  /**
+   * Client credential OAuth2 token fetching with seamless rotation before expiry (120s buffer)
+   * and in-flight promise deduplication to prevent thundering herd.
    */
   async getAccessToken(forceRefresh = false): Promise<string> {
     const now = Date.now();
-    // 15-minute cache buffer (900 seconds)
-    if (!forceRefresh && this.tokenCache && this.tokenCache.expiresAt > now + 60 * 1000) {
+    // Safety buffer of 120 seconds to guarantee rotation BEFORE actual expiration
+    const SAFETY_BUFFER_MS = 120 * 1000;
+
+    if (!forceRefresh && this.tokenCache && this.tokenCache.expiresAt > now + SAFETY_BUFFER_MS) {
       return this.tokenCache.accessToken;
     }
-
 
     if (!this.config.clientId || !this.config.clientSecret) {
       // Allow fallback / mock token for tests/dev without live credentials
       return 'mock_access_token_sandbox';
     }
 
-
-    const auth = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
-    const response = await fetch(`${this.getBaseUrl()}/v1/oauth2/token`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: 'grant_type=client_credentials',
-    });
-
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Failed to fetch PayPal OAuth2 token: ${response.status} ${errText}`);
+    if (this.tokenRefreshPromise) {
+      return this.tokenRefreshPromise;
     }
 
+    this.tokenRefreshPromise = (async () => {
+      try {
+        const auth = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
+        const response = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/oauth2/token`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: 'grant_type=client_credentials',
+        });
 
-    const data = await response.json() as { access_token: string; expires_in: number };
-    // Cache token for (expires_in - buffer) or 15 minutes (900s)
-    const ttlMs = Math.min((data.expires_in || 900) * 1000, 15 * 60 * 1000);
-    this.tokenCache = {
-      accessToken: data.access_token,
-      expiresAt: now + ttlMs,
-    };
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Failed to fetch PayPal OAuth2 token: ${response.status} ${errText}`);
+        }
 
+        const data = await response.json();
+        if (!isRecord(data) || typeof data.access_token !== 'string') {
+          throw new Error('Invalid OAuth2 token response: missing access_token');
+        }
 
-    return data.access_token;
+        const expiresInSec = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : 900;
+        const ttlMs = Math.min(expiresInSec * 1000, 15 * 60 * 1000);
+        this.tokenCache = {
+          accessToken: data.access_token,
+          expiresAt: Date.now() + ttlMs,
+        };
+
+        return data.access_token;
+      } finally {
+        this.tokenRefreshPromise = null;
+      }
+    })();
+
+    return this.tokenRefreshPromise;
   }
 
-
   /**
-   * Generates or retrieves 15-min cached client token for frontend PayPal SDK mount
+   * Generates or retrieves cached client token for frontend PayPal SDK mount
+   * with seamless rotation before expiry and promise deduplication.
    */
   async getClientToken(): Promise<string> {
     const now = Date.now();
-    if (this.clientTokenCache && this.clientTokenCache.expiresAt > now + 60 * 1000) {
+    const SAFETY_BUFFER_MS = 120 * 1000;
+
+    if (this.clientTokenCache && this.clientTokenCache.expiresAt > now + SAFETY_BUFFER_MS) {
       return this.clientTokenCache.accessToken;
     }
-
 
     const accessToken = await this.getAccessToken();
     if (accessToken === 'mock_access_token_sandbox') {
       return 'mock_client_token_15min';
     }
 
-
-    const response = await fetch(`${this.getBaseUrl()}/v1/identity/generate-token`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-        'Accept-Language': 'en_US',
-      },
-    });
-
-
-    if (!response.ok) {
-      // Fallback to client id if generate-token not enabled on client credentials
-      return this.config.clientId;
+    if (this.clientTokenRefreshPromise) {
+      return this.clientTokenRefreshPromise;
     }
 
+    this.clientTokenRefreshPromise = (async () => {
+      try {
+        const response = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/identity/generate-token`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'Accept-Language': 'en_US',
+          },
+        });
 
-    const data = await response.json() as { client_token: string; expires_in?: number };
-    const ttlMs = (data.expires_in || 900) * 1000;
-    this.clientTokenCache = {
-      accessToken: data.client_token,
-      expiresAt: now + ttlMs,
-    };
-    return data.client_token;
+        if (!response.ok) {
+          // Fallback to client id if generate-token not enabled on client credentials
+          return this.config.clientId;
+        }
+
+        const data = await response.json();
+        if (!isRecord(data) || typeof data.client_token !== 'string') {
+          return this.config.clientId;
+        }
+
+        const expiresInSec = typeof data.expires_in === 'number' && data.expires_in > 0 ? data.expires_in : 900;
+        const ttlMs = expiresInSec * 1000;
+        this.clientTokenCache = {
+          accessToken: data.client_token,
+          expiresAt: Date.now() + ttlMs,
+        };
+        return data.client_token;
+      } finally {
+        this.clientTokenRefreshPromise = null;
+      }
+    })();
+
+    return this.clientTokenRefreshPromise;
   }
-
 
   /**
    * Orders v2 Multi-Purchase Unit creation (intent: "AUTHORIZE" or "CAPTURE")
@@ -315,15 +447,14 @@ export class PayPalApimaticClient {
       ? CheckoutPaymentIntent.Capture
       : CheckoutPaymentIntent.Authorize;
 
-
     const reqBody: any = {
       intent,
-      purchaseUnits: params.purchaseUnits.map(pu => ({
+      purchaseUnits: (params.purchaseUnits || []).map((pu) => ({
         referenceId: pu.reference_id,
         customId: pu.custom_id,
         invoiceId: pu.invoice_id,
         description: pu.description,
-        amount: {
+        amount: pu.amount ? {
           currencyCode: pu.amount.currency_code,
           value: pu.amount.value,
           breakdown: pu.amount.breakdown ? {
@@ -344,13 +475,13 @@ export class PayPalApimaticClient {
               value: pu.amount.breakdown.discount.value,
             } : undefined,
           } : undefined,
-        },
-        items: pu.items?.map(it => ({
+        } : undefined,
+        items: pu.items?.map((it) => ({
           name: it.name,
-          unitAmount: {
+          unitAmount: it.unit_amount ? {
             currencyCode: it.unit_amount.currency_code,
             value: it.unit_amount.value,
-          },
+          } : undefined,
           quantity: it.quantity,
           sku: it.sku,
           category: it.category as any,
@@ -362,7 +493,6 @@ export class PayPalApimaticClient {
       })),
     };
 
-
     if (params.paymentSourceToken) {
       reqBody.paymentSource = {
         token: {
@@ -372,12 +502,15 @@ export class PayPalApimaticClient {
       };
     }
 
+    const requestId = ensureRequestId(params.payPalRequestId);
 
     try {
-      const response = await this.ordersController.createOrder({
-        body: reqBody,
-        paypalRequestId: params.payPalRequestId || `aegis-req-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`,
-      });
+      const response = await this.executeWithRetry(() =>
+        this.ordersController.createOrder({
+          body: reqBody,
+          paypalRequestId: requestId,
+        })
+      );
       return response.result;
     } catch (err: any) {
       // In sandbox/offline mode without live API credentials, provide structured simulated response
@@ -396,14 +529,12 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Alias for createMultiPurchaseUnitOrder to satisfy APIMatic SDK createOrder contract
    */
   async createOrder(params: Parameters<PayPalApimaticClient['createMultiPurchaseUnitOrder']>[0]) {
     return this.createMultiPurchaseUnitOrder(params);
   }
-
 
   /**
    * Capture an approved order directly (POST /v2/checkout/orders/{id}/capture)
@@ -419,11 +550,16 @@ export class PayPalApimaticClient {
       (err as any).name = 'TIMEOUT';
       throw err;
     }
+
+    const requestId = ensureRequestId(payPalRequestId);
+
     try {
-      const response = await this.ordersController.captureOrder({
-        id: orderId,
-        paypalRequestId: payPalRequestId,
-      });
+      const response = await this.executeWithRetry(() =>
+        this.ordersController.captureOrder({
+          id: orderId,
+          paypalRequestId: requestId,
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
@@ -450,15 +586,17 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Mandatory server read-back verification (GET /v2/checkout/orders/{id})
    */
   async getOrder(orderId: string) {
     try {
-      const response = await this.ordersController.getOrder({ id: orderId });
+      const response = await this.executeWithRetry(() =>
+        this.ordersController.getOrder({ id: orderId })
+      );
+      const resData = isRecord(response.result) ? response.result : {};
       return {
-        ...response.result,
+        ...resData,
         server_readback_verified: true,
         verification_timestamp: new Date().toISOString(),
       };
@@ -477,16 +615,19 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Authorize an approved order (POST /v2/checkout/orders/{id}/authorize)
    */
   async authorizeOrder(orderId: string, payPalRequestId?: string) {
+    const requestId = ensureRequestId(payPalRequestId);
+
     try {
-      const response = await this.ordersController.authorizeOrder({
-        id: orderId,
-        paypalRequestId: payPalRequestId,
-      });
+      const response = await this.executeWithRetry(() =>
+        this.ordersController.authorizeOrder({
+          id: orderId,
+          paypalRequestId: requestId,
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
@@ -512,22 +653,31 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Capture an authorized payment (POST /v2/payments/authorizations/{id}/capture)
    */
-  async captureAuthorization(authorizationId: string, amount?: { currencyCode: string; value: string }, isFinal = true) {
+  async captureAuthorization(
+    authorizationId: string,
+    amount?: { currencyCode: string; value: string },
+    isFinal = true,
+    payPalRequestId?: string
+  ) {
+    const requestId = ensureRequestId(payPalRequestId);
+
     try {
-      const response = await this.paymentsController.captureAuthorizedPayment({
-        authorizationId,
-        body: {
-          finalCapture: isFinal,
-          amount: amount ? {
-            currencyCode: amount.currencyCode,
-            value: amount.value,
-          } : undefined,
-        },
-      });
+      const response = await this.executeWithRetry(() =>
+        this.paymentsController.captureAuthorizedPayment({
+          authorizationId,
+          paypalRequestId: requestId,
+          body: {
+            finalCapture: isFinal,
+            amount: amount ? {
+              currencyCode: amount.currencyCode,
+              value: amount.value,
+            } : undefined,
+          },
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || authorizationId.startsWith('MOCK_')) {
@@ -542,15 +692,19 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Void an authorization (POST /v2/payments/authorizations/{id}/void)
    */
-  async voidAuthorization(authorizationId: string) {
+  async voidAuthorization(authorizationId: string, payPalRequestId?: string) {
+    const requestId = ensureRequestId(payPalRequestId);
+
     try {
-      const response = await this.paymentsController.voidPayment({
-        authorizationId,
-      });
+      const response = await this.executeWithRetry(() =>
+        this.paymentsController.voidPayment({
+          authorizationId,
+          paypalRequestId: requestId,
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || authorizationId.startsWith('MOCK_')) {
@@ -563,22 +717,31 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Refund a captured payment (POST /v2/payments/captures/{id}/refund)
    */
-  async refundCapturedPayment(captureId: string, amount?: { currencyCode: string; value: string }, note?: string) {
+  async refundCapturedPayment(
+    captureId: string,
+    amount?: { currencyCode: string; value: string },
+    note?: string,
+    payPalRequestId?: string
+  ) {
+    const requestId = ensureRequestId(payPalRequestId);
+
     try {
-      const response = await this.paymentsController.refundCapturedPayment({
-        captureId,
-        body: {
-          noteToPayer: note,
-          amount: amount ? {
-            currencyCode: amount.currencyCode,
-            value: amount.value,
-          } : undefined,
-        },
-      });
+      const response = await this.executeWithRetry(() =>
+        this.paymentsController.refundCapturedPayment({
+          captureId,
+          paypalRequestId: requestId,
+          body: {
+            noteToPayer: note,
+            amount: amount ? {
+              currencyCode: amount.currencyCode,
+              value: amount.value,
+            } : undefined,
+          },
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || captureId.startsWith('MOCK_')) {
@@ -592,7 +755,6 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Vault v3 Setup Token creation (POST /v3/vault/setup-tokens)
    */
@@ -600,22 +762,28 @@ export class PayPalApimaticClient {
     customer?: { id?: string };
     paymentSource?: any;
     usageType?: 'MERCHANT' | 'PLATFORM';
+    payPalRequestId?: string;
   }) {
+    const requestId = ensureRequestId(params.payPalRequestId);
+
     try {
-      const response = await this.vaultController.createSetupToken({
-        body: {
-          paymentSource: params.paymentSource || {
-            paypal: {
-              usageType: (params.usageType || 'PLATFORM') as any,
-              experienceContext: {
-                returnUrl: 'https://aegispay.dev/vault/return',
-                cancelUrl: 'https://aegispay.dev/vault/cancel',
+      const response = await this.executeWithRetry(() =>
+        this.vaultController.createSetupToken({
+          paypalRequestId: requestId,
+          body: {
+            paymentSource: params.paymentSource || {
+              paypal: {
+                usageType: (params.usageType || 'PLATFORM') as any,
+                experienceContext: {
+                  returnUrl: 'https://aegispay.dev/vault/return',
+                  cancelUrl: 'https://aegispay.dev/vault/cancel',
+                },
               },
             },
+            customer: params.customer ? { id: params.customer.id } : undefined,
           },
-          customer: params.customer ? { id: params.customer.id } : undefined,
-        },
-      });
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
@@ -632,26 +800,31 @@ export class PayPalApimaticClient {
     }
   }
 
-
   /**
    * Vault v3 Payment Token creation (POST /v3/vault/payment-tokens)
    */
   async createVaultPaymentToken(params: {
     setupTokenId: string;
     customer?: { id?: string };
+    payPalRequestId?: string;
   }) {
+    const requestId = ensureRequestId(params.payPalRequestId);
+
     try {
-      const response = await this.vaultController.createPaymentToken({
-        body: {
-          paymentSource: {
-            token: {
-              id: params.setupTokenId,
-              type: 'SETUP_TOKEN' as any,
+      const response = await this.executeWithRetry(() =>
+        this.vaultController.createPaymentToken({
+          paypalRequestId: requestId,
+          body: {
+            paymentSource: {
+              token: {
+                id: params.setupTokenId,
+                type: 'SETUP_TOKEN' as any,
+              },
             },
+            customer: params.customer ? { id: params.customer.id } : undefined,
           },
-          customer: params.customer ? { id: params.customer.id } : undefined,
-        },
-      });
+        })
+      );
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
@@ -664,7 +837,6 @@ export class PayPalApimaticClient {
       throw err;
     }
   }
-
 
   /**
    * Disputes v1 actions: GET /v1/customer/disputes/{id}
@@ -688,9 +860,8 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}`, {
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -698,19 +869,22 @@ export class PayPalApimaticClient {
       },
     });
 
-
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to get PayPal dispute: ${res.status} ${errText}`);
     }
-    return res.json();
+    const data = await res.json();
+    return isRecord(data) ? data : {};
   }
-
 
   /**
    * Disputes v1 actions: POST /v1/customer/disputes/{id}/provide-evidence (supporting multipart/form-data)
    */
-  async provideDisputeEvidence(disputeId: string, payload: DisputeEvidencePayload) {
+  async provideDisputeEvidence(
+    disputeId: string,
+    payload: DisputeEvidencePayload,
+    payPalRequestId?: string
+  ) {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || disputeId.startsWith('MOCK_')) {
       return {
         status: 'EVIDENCE_SUBMITTED',
@@ -720,8 +894,9 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
+    const requestId = ensureRequestId(payPalRequestId);
+
     if (payload.file) {
       // Build multipart/form-data
       const boundary = `----AegisPayBoundary${Date.now()}`;
@@ -731,7 +906,6 @@ export class PayPalApimaticClient {
         notes: payload.notes || 'Automated multi-modal evidentiary submission by AegisPay arbiter.',
       });
 
-
       const bodyParts: Buffer[] = [];
       bodyParts.push(Buffer.from(
         `--${boundary}\r\n` +
@@ -739,7 +913,6 @@ export class PayPalApimaticClient {
         `Content-Type: application/json\r\n\r\n` +
         `${metadata}\r\n`
       ));
-
 
       bodyParts.push(Buffer.from(
         `--${boundary}\r\n` +
@@ -749,30 +922,30 @@ export class PayPalApimaticClient {
       bodyParts.push(Buffer.from(payload.file.buffer));
       bodyParts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
 
-
       const multipartBuffer = Buffer.concat(bodyParts);
 
-
-      const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/provide-evidence`, {
+      const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}/provide-evidence`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
+          'PayPal-Request-Id': requestId,
           'Content-Type': `multipart/form-data; boundary=${boundary}`,
         },
         body: multipartBuffer,
       });
 
-
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(`Failed to provide dispute evidence: ${res.status} ${errText}`);
       }
-      return res.json();
+      const data = await res.json();
+      return isRecord(data) ? data : {};
     } else {
-      const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/provide-evidence`, {
+      const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}/provide-evidence`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
+          'PayPal-Request-Id': requestId,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -782,24 +955,27 @@ export class PayPalApimaticClient {
         }),
       });
 
-
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(`Failed to provide dispute evidence: ${res.status} ${errText}`);
       }
-      return res.json();
+      const data = await res.json();
+      return isRecord(data) ? data : {};
     }
   }
-
 
   /**
    * Disputes v1 actions: POST /v1/customer/disputes/{id}/make-offer
    */
-  async makeDisputeOffer(disputeId: string, offer: {
-    note: string;
-    offer_amount: { currency_code: string; value: string };
-    offer_type: 'REFUND' | 'REFUND_WITH_RETURN' | 'REFUND_WITH_REPLACEMENT';
-  }) {
+  async makeDisputeOffer(
+    disputeId: string,
+    offer: {
+      note: string;
+      offer_amount: { currency_code: string; value: string };
+      offer_type: 'REFUND' | 'REFUND_WITH_RETURN' | 'REFUND_WITH_REPLACEMENT';
+    },
+    payPalRequestId?: string
+  ) {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || disputeId.startsWith('MOCK_')) {
       return {
         status: 'OFFER_MADE',
@@ -808,30 +984,31 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/make-offer`, {
+    const requestId = ensureRequestId(payPalRequestId);
+
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}/make-offer`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'PayPal-Request-Id': requestId,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(offer),
     });
 
-
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to make dispute offer: ${res.status} ${errText}`);
     }
-    return res.json();
+    const data = await res.json();
+    return isRecord(data) ? data : {};
   }
-
 
   /**
    * Disputes v1 actions: POST /v1/customer/disputes/{id}/acknowledge-return-item
    */
-  async acknowledgeReturnItem(disputeId: string, note?: string) {
+  async acknowledgeReturnItem(disputeId: string, note?: string, payPalRequestId?: string) {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || disputeId.startsWith('MOCK_')) {
       return {
         status: 'RETURN_ACKNOWLEDGED',
@@ -840,12 +1017,14 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/acknowledge-return-item`, {
+    const requestId = ensureRequestId(payPalRequestId);
+
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}/acknowledge-return-item`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'PayPal-Request-Id': requestId,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -853,19 +1032,22 @@ export class PayPalApimaticClient {
       }),
     });
 
-
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to acknowledge return item: ${res.status} ${errText}`);
     }
-    return res.json();
+    const data = await res.json();
+    return isRecord(data) ? data : {};
   }
-
 
   /**
    * Disputes v1 sandbox actions: POST /v1/customer/disputes/{id}/adjudicate
    */
-  async adjudicateDispute(disputeId: string, action: 'BUYER_FAVOR' | 'SELLER_FAVOR' = 'SELLER_FAVOR') {
+  async adjudicateDispute(
+    disputeId: string,
+    action: 'BUYER_FAVOR' | 'SELLER_FAVOR' = 'SELLER_FAVOR',
+    payPalRequestId?: string
+  ) {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || disputeId.startsWith('MOCK_')) {
       return {
         status: 'RESOLVED',
@@ -875,12 +1057,14 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/adjudicate`, {
+    const requestId = ensureRequestId(payPalRequestId);
+
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}/adjudicate`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'PayPal-Request-Id': requestId,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -888,19 +1072,18 @@ export class PayPalApimaticClient {
       }),
     });
 
-
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to adjudicate dispute: ${res.status} ${errText}`);
     }
-    return res.json();
+    const data = await res.json();
+    return isRecord(data) ? data : {};
   }
-
 
   /**
    * Disputes v1 sandbox testing helper: POST /v1/customer/disputes/{id}/require-evidence
    */
-  async requireDisputeEvidence(disputeId: string) {
+  async requireDisputeEvidence(disputeId: string, payPalRequestId?: string) {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || disputeId.startsWith('MOCK_')) {
       return {
         status: 'REQUIRED_ACTION',
@@ -908,12 +1091,14 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/require-evidence`, {
+    const requestId = ensureRequestId(payPalRequestId);
+
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/customer/disputes/${encodeURIComponent(disputeId)}/require-evidence`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'PayPal-Request-Id': requestId,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -921,29 +1106,31 @@ export class PayPalApimaticClient {
       }),
     });
 
-
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to require evidence on dispute: ${res.status} ${errText}`);
     }
-    return res.json();
+    const data = await res.json();
+    return isRecord(data) ? data : {};
   }
-
 
   /**
    * Shipment Tracking v1: POST /v1/shipping/trackers-batch
    */
-  async addTrackingBatch(trackers: Array<{
-    transaction_id: string;
-    tracking_number: string;
-    status: 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
-    carrier: string;
-  }>) {
+  async addTrackingBatch(
+    trackers: Array<{
+      transaction_id: string;
+      tracking_number: string;
+      status: 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+      carrier: string;
+    }>,
+    payPalRequestId?: string
+  ) {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
       return {
-        tracker_identifiers: trackers.map(t => ({
-          transaction_id: t.transaction_id,
-          tracking_number: t.tracking_number,
+        tracker_identifiers: (trackers || []).map((t) => ({
+          transaction_id: safeString(t.transaction_id),
+          tracking_number: safeString(t.tracking_number),
           status: t.status,
           links: [],
         })),
@@ -951,27 +1138,35 @@ export class PayPalApimaticClient {
       };
     }
 
-
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/shipping/trackers-batch`, {
+    const requestId = ensureRequestId(payPalRequestId);
+
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/shipping/trackers-batch`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
+        'PayPal-Request-Id': requestId,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        trackers,
+        trackers: trackers || [],
       }),
     });
-
 
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to add shipment tracking batch: ${res.status} ${errText}`);
     }
-    return res.json();
+    const data = await res.json();
+    if (!isRecord(data)) {
+      return { tracker_identifiers: [], errors: [] };
+    }
+    return {
+      tracker_identifiers: Array.isArray(data.tracker_identifiers) ? data.tracker_identifiers : [],
+      errors: Array.isArray(data.errors) ? data.errors : [],
+      ...data,
+    };
   }
-
 
   /**
    * Webhook signature verification (POST /v1/notifications/verify-webhook-signature)
@@ -987,16 +1182,14 @@ export class PayPalApimaticClient {
   }): Promise<boolean> {
     const webhookId = params.webhookId || this.config.webhookId;
 
-
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
       // In mock/sandbox offline mode, if test headers are present, accept as verified
       return !!params.transmissionSig;
     }
 
-
     try {
       const token = await this.getAccessToken();
-      const res = await fetch(`${this.getBaseUrl()}/v1/notifications/verify-webhook-signature`, {
+      const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/notifications/verify-webhook-signature`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -1013,17 +1206,15 @@ export class PayPalApimaticClient {
         }),
       });
 
-
       if (!res.ok) {
         return false;
       }
-      const data = await res.json() as { verification_status?: string };
-      return data.verification_status === 'SUCCESS';
+      const data = await res.json();
+      return isRecord(data) && data.verification_status === 'SUCCESS';
     } catch {
       return false;
     }
   }
-
 
   /**
    * List catalog products with full details per product.
@@ -1036,23 +1227,37 @@ export class PayPalApimaticClient {
       ];
     }
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/catalogs/products?page_size=${pageSize}&total_required=true`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await this.fetchWithRetry(
+      `${this.getBaseUrl()}/v1/catalogs/products?page_size=${encodeURIComponent(pageSize)}&total_required=true`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     if (!res.ok) throw new Error(`PayPal listProducts failed: ${res.status}`);
-    const data = await res.json() as { products?: Array<{ id: string }> };
-    const summaries = data.products || [];
+    const data = await res.json();
+    const productsArray = isRecord(data) && Array.isArray(data.products) ? data.products : [];
+    const summaries = productsArray.filter(
+      (p: unknown): p is { id: string } => isRecord(p) && typeof p.id === 'string'
+    );
+
     return Promise.all(
       summaries.map(async (p) => {
-        const itemRes = await fetch(`${this.getBaseUrl()}/v1/catalogs/products/${encodeURIComponent(p.id)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const itemRes = await this.fetchWithRetry(
+          `${this.getBaseUrl()}/v1/catalogs/products/${encodeURIComponent(p.id)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         if (!itemRes.ok) return { id: p.id, name: p.id, create_time: new Date().toISOString() };
-        return await itemRes.json() as CatalogProductItem;
+        const itemData = await itemRes.json();
+        if (!isRecord(itemData)) return { id: p.id, name: p.id, create_time: new Date().toISOString() };
+        return {
+          id: safeString(itemData.id, p.id),
+          name: safeString(itemData.name, p.id),
+          description: typeof itemData.description === 'string' ? itemData.description : undefined,
+          type: itemData.type as any,
+          category: typeof itemData.category === 'string' ? itemData.category : undefined,
+          create_time: safeString(itemData.create_time, new Date().toISOString()),
+        };
       })
     );
   }
-
 
   /**
    * List billing subscription plans with full cycle specifications.
@@ -1073,23 +1278,38 @@ export class PayPalApimaticClient {
       ];
     }
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/billing/plans?page_size=${pageSize}&total_required=true`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await this.fetchWithRetry(
+      `${this.getBaseUrl()}/v1/billing/plans?page_size=${encodeURIComponent(pageSize)}&total_required=true`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     if (!res.ok) throw new Error(`PayPal listPlans failed: ${res.status}`);
-    const data = await res.json() as { plans?: Array<{ id: string }> };
-    const summaries = data.plans || [];
+    const data = await res.json();
+    const plansArray = isRecord(data) && Array.isArray(data.plans) ? data.plans : [];
+    const summaries = plansArray.filter(
+      (plan: unknown): plan is { id: string } => isRecord(plan) && typeof plan.id === 'string'
+    );
+
     return Promise.all(
       summaries.map(async (plan) => {
-        const itemRes = await fetch(`${this.getBaseUrl()}/v1/billing/plans/${encodeURIComponent(plan.id)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const itemRes = await this.fetchWithRetry(
+          `${this.getBaseUrl()}/v1/billing/plans/${encodeURIComponent(plan.id)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         if (!itemRes.ok) return { id: plan.id, product_id: '', name: plan.id, status: 'ACTIVE', create_time: new Date().toISOString(), billing_cycles: [] };
-        return await itemRes.json() as BillingPlanItem;
+        const itemData = await itemRes.json();
+        if (!isRecord(itemData)) return { id: plan.id, product_id: '', name: plan.id, status: 'ACTIVE', create_time: new Date().toISOString(), billing_cycles: [] };
+        return {
+          id: safeString(itemData.id, plan.id),
+          product_id: safeString(itemData.product_id, ''),
+          name: safeString(itemData.name, plan.id),
+          status: (itemData.status as any) || 'ACTIVE',
+          create_time: safeString(itemData.create_time, new Date().toISOString()),
+          billing_cycles: Array.isArray(itemData.billing_cycles) ? itemData.billing_cycles : [],
+          payment_preferences: isRecord(itemData.payment_preferences) ? itemData.payment_preferences : undefined,
+        };
       })
     );
   }
-
 
   /**
    * List invoices with detailed line items and payment histories.
@@ -1107,23 +1327,58 @@ export class PayPalApimaticClient {
       ];
     }
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v2/invoicing/invoices?page_size=${pageSize}&total_required=true`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await this.fetchWithRetry(
+      `${this.getBaseUrl()}/v2/invoicing/invoices?page_size=${encodeURIComponent(pageSize)}&total_required=true`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     if (!res.ok) throw new Error(`PayPal listInvoices failed: ${res.status}`);
-    const data = await res.json() as { items?: Array<{ id: string }> };
-    const summaries = data.items || [];
+    const data = await res.json();
+    const itemsArray = isRecord(data) && Array.isArray(data.items) ? data.items : [];
+    const summaries = itemsArray.filter(
+      (inv: unknown): inv is { id: string } => isRecord(inv) && typeof inv.id === 'string'
+    );
+
     return Promise.all(
       summaries.map(async (inv) => {
-        const itemRes = await fetch(`${this.getBaseUrl()}/v2/invoicing/invoices/${encodeURIComponent(inv.id)}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const itemRes = await this.fetchWithRetry(
+          `${this.getBaseUrl()}/v2/invoicing/invoices/${encodeURIComponent(inv.id)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         if (!itemRes.ok) return { id: inv.id, status: 'SENT', detail: { invoice_number: inv.id, currency_code: 'USD' } };
-        return await itemRes.json() as InvoiceItemSummary;
+        const itemData = await itemRes.json();
+        if (!isRecord(itemData)) return { id: inv.id, status: 'SENT', detail: { invoice_number: inv.id, currency_code: 'USD' } };
+        return {
+          id: safeString(itemData.id, inv.id),
+          status: safeString(itemData.status, 'SENT'),
+          detail: isRecord(itemData.detail)
+            ? {
+                invoice_number: safeString(itemData.detail.invoice_number, inv.id),
+                invoice_date: itemData.detail.invoice_date,
+                currency_code: safeString(itemData.detail.currency_code, 'USD'),
+                payment_term: itemData.detail.payment_term,
+              }
+            : { invoice_number: inv.id, currency_code: 'USD' },
+          amount: isRecord(itemData.amount) && typeof itemData.amount.value === 'string' && typeof itemData.amount.currency_code === 'string'
+            ? {
+                currency_code: itemData.amount.currency_code,
+                value: itemData.amount.value,
+                breakdown: isRecord(itemData.amount.breakdown) ? itemData.amount.breakdown : undefined,
+              }
+            : undefined,
+          due_amount: isRecord(itemData.due_amount) && typeof itemData.due_amount.value === 'string' && typeof itemData.due_amount.currency_code === 'string'
+            ? {
+                currency_code: itemData.due_amount.currency_code,
+                value: itemData.due_amount.value,
+              }
+            : undefined,
+          primary_recipients: Array.isArray(itemData.primary_recipients) ? itemData.primary_recipients : undefined,
+          items: Array.isArray(itemData.items) ? itemData.items : undefined,
+          payments: isRecord(itemData.payments) ? itemData.payments as any : undefined,
+          refunds: isRecord(itemData.refunds) ? itemData.refunds as any : undefined,
+        };
       })
     );
   }
-
 
   /**
    * Get account balances across all held currencies.
@@ -1139,13 +1394,27 @@ export class PayPalApimaticClient {
       };
     }
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/reporting/balances`, {
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/reporting/balances`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(`PayPal getBalances failed: ${res.status}`);
-    return await res.json() as AccountBalancesResult;
+    const data = await res.json();
+    if (!isRecord(data)) {
+      return { balances: [] };
+    }
+    return {
+      as_of_time: typeof data.as_of_time === 'string' ? data.as_of_time : new Date().toISOString(),
+      balances: Array.isArray(data.balances)
+        ? data.balances.filter((b): b is AccountBalancesResult['balances'][0] =>
+            isRecord(b) &&
+            typeof b.currency === 'string' &&
+            isRecord(b.total_balance) &&
+            isRecord(b.available_balance) &&
+            isRecord(b.withheld_balance)
+          )
+        : [],
+    };
   }
-
 
   /**
    * Search transactions over an interval (up to 31 days).
@@ -1153,7 +1422,6 @@ export class PayPalApimaticClient {
   async searchTransactions(startDate: Date | string, endDate: Date | string): Promise<TransactionSearchResult[]> {
     const startStr = typeof startDate === 'string' ? startDate : startDate.toISOString();
     const endStr = typeof endDate === 'string' ? endDate : endDate.toISOString();
-
 
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
       return [
@@ -1173,16 +1441,19 @@ export class PayPalApimaticClient {
       ];
     }
     const token = await this.getAccessToken();
-    const res = await fetch(`${this.getBaseUrl()}/v1/reporting/transactions?start_date=${encodeURIComponent(startStr)}&end_date=${encodeURIComponent(endStr)}&fields=all`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await this.fetchWithRetry(
+      `${this.getBaseUrl()}/v1/reporting/transactions?start_date=${encodeURIComponent(startStr)}&end_date=${encodeURIComponent(endStr)}&fields=all`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     if (!res.ok) throw new Error(`PayPal searchTransactions failed: ${res.status}`);
-    const data = await res.json() as { transaction_details?: TransactionSearchResult[] };
-    return data.transaction_details || [];
+    const data = await res.json();
+    if (!isRecord(data) || !Array.isArray(data.transaction_details)) {
+      return [];
+    }
+    return data.transaction_details.filter(
+      (t: unknown): t is TransactionSearchResult => isRecord(t) && isRecord((t as any).transaction_info)
+    );
   }
-
-
 }
-
 
 export const defaultPayPalClient = new PayPalApimaticClient();
