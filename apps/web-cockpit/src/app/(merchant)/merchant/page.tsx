@@ -6,6 +6,7 @@ import { AutonomyDialWidget } from '@/components/ag-studio/AutonomyDialWidget';
 import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceComparatorWidget';
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
 import { DisputeSlaScheduler } from '@/components/bryntum/DisputeSlaScheduler';
+import { DashboardReports } from '@/components/merchant/DashboardReports';
 import { Store, Database, ArrowLeft, Bot, Sparkles } from 'lucide-react';
 
 export default function MerchantCockpitPage() {
@@ -44,6 +45,9 @@ export default function MerchantCockpitPage() {
           </span>
         </div>
       </div>
+
+      {/* Merchant Reporting & APIMatic Overview */}
+      <DashboardReports />
 
       {/* Merchant Autonomy Dial Configuration */}
       <AutonomyDialWidget initialMode="SUPERVISED" />
