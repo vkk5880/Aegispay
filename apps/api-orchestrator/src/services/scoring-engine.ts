@@ -269,13 +269,20 @@ export function computeConfidenceAdjustedRating(
 
 export function logNormalize(values: number[]): number[] {
   if (!values || values.length === 0) return [];
-  const logged = values.map(v => Math.log1p(Math.max(0, v)));
+  const logged = values.map(v => {
+    const safeV = Number.isFinite(v) ? Math.max(0, v) : 0;
+    return Math.log1p(safeV);
+  });
   const min = Math.min(...logged);
   const max = Math.max(...logged);
-  if (min === max) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min === max || max - min <= 0) {
     return values.map(() => 1.0);
   }
-  return logged.map(v => (v - min) / (max - min));
+  const spread = max - min;
+  return logged.map(v => {
+    const norm = (v - min) / spread;
+    return Number.isFinite(norm) ? Math.max(0.0, Math.min(1.0, norm)) : 1.0;
+  });
 }
 
 // Deal Verdict mapping thresholds
@@ -360,11 +367,20 @@ export function computeCosineSimilarity(query: string, document: string): number
  * If target is undefined or <= 0, defaults to 1.0 (neutral, no penalty).
  */
 export function computePriceAffinity(priceCents: number, targetPriceCents?: number): number {
-  if (!targetPriceCents || targetPriceCents <= 0) {
+  if (
+    targetPriceCents === undefined ||
+    targetPriceCents === null ||
+    !Number.isFinite(targetPriceCents) ||
+    targetPriceCents <= 0
+  ) {
     return 1.0;
   }
-  const deviation = Math.abs(priceCents - targetPriceCents);
+  const safePrice = Number.isFinite(priceCents) && priceCents >= 0 ? priceCents : 0;
+  const deviation = Math.abs(safePrice - targetPriceCents);
   const ratio = deviation / targetPriceCents;
+  if (!Number.isFinite(ratio)) {
+    return 0.0;
+  }
   const affinity = Math.max(0.0, 1.0 - ratio);
   return Math.min(1.0, affinity);
 }
@@ -436,9 +452,10 @@ export function merchantReputationWeight(
  * Converts delivery days or estimated latency into a normalized penalty [0.0, 1.0].
  */
 export function computeShippingPenalty(shippingDays: number, maxShippingDays: number = 7): number {
-  if (shippingDays <= 0) return 0.0;
-  const normalized = Math.min(1.0, shippingDays / Math.max(1, maxShippingDays));
-  return normalized;
+  if (!Number.isFinite(shippingDays) || shippingDays <= 0) return 0.0;
+  const safeMax = Number.isFinite(maxShippingDays) && maxShippingDays > 0 ? maxShippingDays : 7;
+  const normalized = Math.min(1.0, Math.max(0.0, shippingDays / safeMax));
+  return Number.isFinite(normalized) ? normalized : 0.0;
 }
 
 /**
@@ -450,10 +467,13 @@ export function detectPriceAnomaly(
   allPricesCents: number[],
   compareAtCents?: number
 ): { is_suspicious: boolean; deviation_pct: number; median_price_cents: number } {
-  if (allPricesCents.length < 3) {
-    if (compareAtCents && compareAtCents > 0) {
-      const markdownRatio = (compareAtCents - priceCents) / compareAtCents;
-      if (markdownRatio >= 0.50) {
+  const safePrice = Number.isFinite(priceCents) && priceCents >= 0 ? priceCents : 0;
+  const validPrices = (allPricesCents || []).filter(p => Number.isFinite(p) && p > 0);
+
+  if (validPrices.length < 3) {
+    if (compareAtCents && Number.isFinite(compareAtCents) && compareAtCents > 0) {
+      const markdownRatio = (compareAtCents - safePrice) / compareAtCents;
+      if (Number.isFinite(markdownRatio) && markdownRatio >= 0.50) {
         return {
           is_suspicious: true,
           deviation_pct: Math.round(markdownRatio * 1000) / 10,
@@ -461,24 +481,24 @@ export function detectPriceAnomaly(
         };
       }
     }
-    return { is_suspicious: false, deviation_pct: 0, median_price_cents: priceCents };
+    return { is_suspicious: false, deviation_pct: 0, median_price_cents: safePrice };
   }
 
-  const sorted = [...allPricesCents].sort((a, b) => a - b);
+  const sorted = [...validPrices].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 
-  if (median <= 0) {
+  if (!Number.isFinite(median) || median <= 0) {
     return { is_suspicious: false, deviation_pct: 0, median_price_cents: 0 };
   }
 
-  const deviation = (median - priceCents) / median;
-  const isSuspicious = deviation > 0.35; // 35% below batch median
-  const devPct = Math.round(deviation * 1000) / 10;
+  const deviation = (median - safePrice) / median;
+  const isSuspicious = Number.isFinite(deviation) && deviation > 0.35; // 35% below batch median
+  const devPct = Number.isFinite(deviation) ? Math.round(deviation * 1000) / 10 : 0;
 
   return {
     is_suspicious: isSuspicious,
-    deviation_pct: devPct,
+    deviation_pct: Math.max(0, devPct),
     median_price_cents: Math.round(median),
   };
 }
@@ -700,6 +720,121 @@ export function assignProductBadges(
     assignProductBadges(all);
     return input;
   }
+}
+
+
+/**
+ * Normalizes factor weights so they sum exactly to 1.0.
+ */
+export function normalizeWeights(
+  weights?: Partial<ScoringWeights>,
+  fallback: ScoringWeights = DEFAULT_SCORING_WEIGHTS
+): ScoringWeights {
+  const w1 = Number.isFinite(weights?.w1_cosine) ? Math.max(0, weights!.w1_cosine!) : fallback.w1_cosine;
+  const w2 = Number.isFinite(weights?.w2_price) ? Math.max(0, weights!.w2_price!) : fallback.w2_price;
+  const w3 = Number.isFinite(weights?.w3_reputation) ? Math.max(0, weights!.w3_reputation!) : fallback.w3_reputation;
+  const w4 = Number.isFinite(weights?.w4_shipping) ? Math.max(0, weights!.w4_shipping!) : fallback.w4_shipping;
+
+  const total = w1 + w2 + w3 + w4;
+  if (!Number.isFinite(total) || total <= 0) {
+    return { ...DEFAULT_SCORING_WEIGHTS };
+  }
+
+  const nw1 = Math.round((w1 / total) * 10000) / 10000;
+  const nw2 = Math.round((w2 / total) * 10000) / 10000;
+  const nw3 = Math.round((w3 / total) * 10000) / 10000;
+  const nw4 = Math.round((1.0 - (nw1 + nw2 + nw3)) * 10000) / 10000;
+
+  return {
+    w1_cosine: nw1,
+    w2_price: nw2,
+    w3_reputation: nw3,
+    w4_shipping: Math.max(0, nw4),
+  };
+}
+
+/**
+ * Clamps any score strictly to [0.0, 100.0] or specified bounds.
+ */
+export function clampScore(score: number, min = 0, max = 100): number {
+  if (!Number.isFinite(score)) return min;
+  return Math.max(min, Math.min(max, score));
+}
+
+/**
+ * Clamps normalized score strictly to [0.0, 100.0] scale.
+ */
+export function normalizeScore100(score: number): number {
+  return clampScore(Math.round(score * 10000) / 100, 0, 100);
+}
+
+export interface LosingReasonDiagnostic {
+  primary: string;
+  stats: string[];
+}
+
+/**
+ * Deterministic Losing-Reason Diagnostic Generator.
+ * Compares an underperforming candidate against the benchmark winner item.
+ */
+export function generateLosingReason(
+  loser: any,
+  winner: any
+): LosingReasonDiagnostic {
+  if (loser?.eliminated && loser?.elimination_reason) {
+    return {
+      primary: loser.elimination_reason,
+      stats: ['Eliminated by policy constraint'],
+    };
+  }
+
+  const loserPrice = loser?.selected_offer?.price ?? loser?.price ?? 0;
+  const winnerPrice = winner?.selected_offer?.price ?? winner?.price ?? 0;
+  const priceDiff = loserPrice - winnerPrice;
+
+  const loserRating = loser?.adjusted_rating ?? loser?.rating ?? 0;
+  const winnerRating = winner?.adjusted_rating ?? winner?.rating ?? 0;
+  const ratingDiff = loserRating - winnerRating;
+
+  const loserReviewCount = loser?.review_count ?? 120;
+  const winnerReviewCount = winner?.review_count ?? 120;
+  const reviewDiff = loserReviewCount - winnerReviewCount;
+
+  const loserCosine = loser?.score_breakdown?.cosine_similarity ?? loser?.relevance_score ?? 0;
+  const isSuspicious = loser?.price_anomaly?.is_suspicious ?? false;
+  const trustTier = loser?.primary_badge?.tier ?? loser?.trust_tier ?? 'unknown';
+
+  let primary = 'Lower overall composite score';
+  if (priceDiff > 5000) {
+    primary = `$${(priceDiff / 100).toFixed(2)} higher than winner`;
+  } else if (loserReviewCount < 50) {
+    primary = `Low confidence: only ${loserReviewCount} reviews`;
+  } else if (loserCosine < 0.40) {
+    primary = 'Poor semantic query match (< 40%)';
+  } else if (trustTier === 'tier3' || trustTier === 'unknown') {
+    primary = 'Unverified store trust tier';
+  } else if (isSuspicious) {
+    primary = 'Anomaly detected (> 35% median price drop)';
+  }
+
+  const stats: string[] = [];
+  if (priceDiff !== 0) {
+    stats.push(
+      `Price: $${(winnerPrice / 100).toFixed(2)} vs $${(loserPrice / 100).toFixed(2)} (${priceDiff > 0 ? '+' : ''}$${(priceDiff / 100).toFixed(2)})`
+    );
+  }
+  if (ratingDiff !== 0) {
+    stats.push(
+      `Rating: ${winnerRating} vs ${loserRating} (${ratingDiff > 0 ? '+' : ''}${ratingDiff.toFixed(1)})`
+    );
+  }
+  if (reviewDiff !== 0) {
+    stats.push(
+      `Reviews: ${winnerReviewCount} vs ${loserReviewCount} (${reviewDiff > 0 ? '+' : ''}${reviewDiff})`
+    );
+  }
+
+  return { primary, stats };
 }
 
 export class MurthyroshanScoringEngine {
