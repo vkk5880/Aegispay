@@ -36,6 +36,10 @@ export class SyntheticIntentEngine {
    * Evaluates if a basket/item qualifies for Synthetic Intent Negotiation (5%-18% budget overage)
    * and generates Vault v3 setup-token bid matching & auto-capture.
    */
+  async evaluateAndIssueVoucher(proposal: SyntheticIntentProposal): Promise<SyntheticIntentEvaluation> {
+    return this.processSyntheticBid(proposal);
+  }
+
   async processSyntheticBid(proposal: SyntheticIntentProposal): Promise<SyntheticIntentEvaluation> {
     const retail = proposal.retail_offer_cents;
     const budgetCap = proposal.buyer_budget_cap_cents;

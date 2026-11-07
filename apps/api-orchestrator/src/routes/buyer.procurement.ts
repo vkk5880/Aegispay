@@ -25,7 +25,7 @@ const KnapsackRequestSchema = z.object({
 });
 
 const AuthorizeRequestSchema = z.object({
-  mandate_id: z.string().max(32),
+  mandate_id: z.string().min(1).max(32),
   zip_code: z.string().max(10).optional(),
   purchase_units: z.array(
     z.object({
@@ -51,7 +51,7 @@ const AuthorizeRequestSchema = z.object({
         })
       ).optional(),
     })
-  ),
+  ).min(1),
 });
 
 function stringOrNumber() {
@@ -269,6 +269,8 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         status: 'AUTHORIZED',
         mandate_id,
         paypal_order_id: orderId,
+        order_id: orderId,
+        authorization_id: `AUTH-${orderId}`,
         stock_reservation_status: 'HELD_2PC',
         readback_verified: true,
         order: verifiedOrder,
@@ -367,6 +369,14 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
     const { order_id, mandate_id, amount_cents, merchant_domain } = parseResult.data;
 
     try {
+      // 3D Secure liability shift evaluation before order capture per 3d-secure.md
+      const existingOrder = await defaultPayPalClient.getOrder(order_id) as any;
+      const cardVerification = existingOrder?.payment_source?.card?.authentication_result ||
+        existingOrder?.attributes?.verification?.['3d_secure'];
+      if (cardVerification?.liability_shift === 'NO') {
+        throw new Error('LIABILITY_SHIFT_NO: Card issuer did not grant liability shift. Order capture declined for seller protection.');
+      }
+
       const captureResult = await defaultPayPalClient.captureOrder(order_id);
 
       // Verify capture state via server read-back
