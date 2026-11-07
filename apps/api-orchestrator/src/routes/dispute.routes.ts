@@ -4,6 +4,15 @@ import { defaultDisputeForensicsService } from '../services/dispute-forensics.js
 import { defaultDisputeMatrixService } from '../services/dispute-matrix.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 
+const DisputeParamsSchema = z.object({
+  id: z.string().min(1, 'Dispute ID is required'),
+});
+
+const HateoasQuerySchema = z.object({
+  stage: z.enum(['INQUIRY', 'CLAIM', 'CHARGEBACK', 'PRE_ARBITRATION', 'ARBITRATION', 'RESOLVED']).optional(),
+  amount_cents: z.string().regex(/^\d+$/).optional(),
+});
+
 const EscalateRequestSchema = z.object({
   notes: z.string().optional(),
 });
@@ -19,7 +28,10 @@ const EvidenceRequestSchema = z.object({
   tracking_number: z.string().optional(),
   carrier_name: z.string().optional(),
   notes: z.string().optional(),
-  bounding_box: z.array(z.number()).length(4).optional(),
+  bounding_box: z.array(z.number().min(0).max(1)).length(4).refine(
+    ([ymin, xmin, ymax, xmax]) => ymin < ymax && xmin < xmax,
+    { message: 'Bounding box coordinates must be non-inverted: ymin < ymax and xmin < xmax' }
+  ).optional(),
 });
 
 const AppealRequestSchema = z.object({
@@ -27,12 +39,33 @@ const AppealRequestSchema = z.object({
   evidence_notes: z.string().optional(),
 });
 
-const BoundingBoxSchema = z.object({
+const BoundingBoxCoordinatesSchema = z.object({
   ymin: z.number().min(0).max(1),
   xmin: z.number().min(0).max(1),
   ymax: z.number().min(0).max(1),
   xmax: z.number().min(0).max(1),
-});
+}).refine(
+  (b) => b.ymin < b.ymax && b.xmin < b.xmax,
+  { message: 'Bounding box coordinates must be non-inverted: ymin < ymax and xmin < xmax' }
+);
+
+const BoundingBoxTupleSchema = z.tuple([
+  z.number().min(0).max(1),
+  z.number().min(0).max(1),
+  z.number().min(0).max(1),
+  z.number().min(0).max(1),
+]).refine(
+  ([ymin, xmin, ymax, xmax]) => ymin < ymax && xmin < xmax,
+  { message: 'Bounding box coordinates must be non-inverted: ymin < ymax and xmin < xmax' }
+);
+
+const BoundingBoxSchema = z.union([
+  BoundingBoxCoordinatesSchema,
+  BoundingBoxTupleSchema,
+  z.object({
+    box: z.union([BoundingBoxCoordinatesSchema, BoundingBoxTupleSchema]),
+  }).transform((val) => val.box),
+]);
 
 const ExifAnalyzeSchema = z.object({
   software: z.string().optional(),
@@ -49,13 +82,20 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * Retrieves current HATEOAS state, SLA deadlines, allowed response actions, and matrix decision
    */
   fastify.get('/api/disputes/:id/hateoas', async (request, reply) => {
-    const { id } = request.params as { id: string };
-    const query = (request.query || {}) as {
-      stage?: 'INQUIRY' | 'CLAIM' | 'CHARGEBACK' | 'PRE_ARBITRATION' | 'ARBITRATION';
-      amount_cents?: string;
-    };
+    const paramsResult = DisputeParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: paramsResult.error.format() });
+    }
 
-    const amountCents = parseInt(query.amount_cents || '12000', 10);
+    const queryResult = HateoasQuerySchema.safeParse(request.query || {});
+    if (!queryResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: queryResult.error.format() });
+    }
+
+    const { id } = paramsResult.data;
+    const query = queryResult.data;
+
+    const amountCents = query.amount_cents ? parseInt(query.amount_cents, 10) : 12000;
     const matrix = defaultDisputeForensicsService.evaluateHateoasMatrix({
       disputeId: id,
       stage: query.stage || 'INQUIRY',
@@ -71,11 +111,17 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * Escalates an informal INQUIRY to formal PayPal CLAIM adjudication
    */
   fastify.post('/api/disputes/:id/escalate', async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const paramsResult = DisputeParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: paramsResult.error.format() });
+    }
+
     const parseResult = EscalateRequestSchema.safeParse(request.body || {});
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
+
+    const { id } = paramsResult.data;
 
     try {
       const result = await defaultPayPalClient.adjudicateDispute(id, 'SELLER_FAVOR');
@@ -97,12 +143,17 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * Proposes a settlement offer or partial compromise to the buyer
    */
   fastify.post('/api/disputes/:id/offer', async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const paramsResult = DisputeParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: paramsResult.error.format() });
+    }
+
     const parseResult = OfferRequestSchema.safeParse(request.body || {});
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
 
+    const { id } = paramsResult.data;
     const { offer_amount_cents, offer_type, notes } = parseResult.data;
     try {
       const offerTypeMapped =
@@ -134,12 +185,17 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * Submits evidence dossier (tracking, bounding box forensics, compiled PDF)
    */
   fastify.post('/api/disputes/:id/evidence', async (request, reply) => {
-    const { id } = request.params as { id: string };
+    const paramsResult = DisputeParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: paramsResult.error.format() });
+    }
+
     const parseResult = EvidenceRequestSchema.safeParse(request.body || {});
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
     }
 
+    const { id } = paramsResult.data;
     const { evidence_type, tracking_number, carrier_name, notes, bounding_box } = parseResult.data;
 
     let defectAnalysis: any = null;
@@ -187,6 +243,9 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const result = defaultDisputeForensicsService.analyzeDefectBoundingBox(parseResult.data);
+    if (!result.valid) {
+      return reply.status(400).send({ error: 'INVALID_BOUNDING_BOX', details: result.description, result });
+    }
     return reply.status(200).send(result);
   });
 

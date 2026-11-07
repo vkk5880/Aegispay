@@ -51,7 +51,7 @@ export interface DisputeLifecycleHateoasMatrix {
 
 /**
  * Known image manipulation and editing software identifiers to flag as evidence tampering.
- * Stock camera tags (Apple, Samsung, Google Pixel, Sony, etc.) are treated as legitimate.
+ * Stock camera tags (Apple, Samsung, Google Pixel, Sony, Xiaomi, etc.) are treated as legitimate.
  */
 const KNOWN_EDITING_SIGNATURES = [
   'adobe photoshop',
@@ -62,12 +62,17 @@ const KNOWN_EDITING_SIGNATURES = [
   'pixelmator',
   'snapseed',
   'affinity photo',
+  'affinity',
   'coreldraw',
   'photopea',
   'vsco',
   'facetune',
   'picsart',
   'paint.net',
+  'midjourney',
+  'dall-e',
+  'stable diffusion',
+  'pixlr',
 ];
 
 export class DisputeForensicsService {
@@ -80,6 +85,9 @@ export class DisputeForensicsService {
   /**
    * Evaluates normalized defect bounding box coordinates [ymin, xmin, ymax, xmax]
    * to determine defect severity score S_defect according to the AegisPay Two-Dimensional Matrix.
+   *
+   * Hardened: Strictly rejects non-normalized coordinates (< 0.0, > 1.0, NaN/Infinite)
+   * or inverted coordinates (ymin >= ymax, xmin >= xmax) without masking via silent clamping.
    */
   analyzeDefectBoundingBox(
     box: [number, number, number, number] | BoundingBoxCoordinates
@@ -88,37 +96,75 @@ export class DisputeForensicsService {
 
     if (Array.isArray(box)) {
       [ymin, xmin, ymax, xmax] = box;
-    } else {
+    } else if (box && typeof box === 'object') {
       ymin = box.ymin;
       xmin = box.xmin;
       ymax = box.ymax;
       xmax = box.xmax;
-    }
-
-    // Clamp coordinates to normalized range [0.0, 1.0]
-    const clampedYmin = Math.max(0, Math.min(1, ymin));
-    const clampedXmin = Math.max(0, Math.min(1, xmin));
-    const clampedYmax = Math.max(0, Math.min(1, ymax));
-    const clampedXmax = Math.max(0, Math.min(1, xmax));
-
-    if (clampedYmin >= clampedYmax || clampedXmin >= clampedXmax) {
+    } else {
       return {
         valid: false,
         defectAreaRatio: 0,
         defectSeverityScore: 0.05,
         centralityScore: 0,
         defectClass: 'NEGLIGIBLE',
-        description: 'Invalid or inverted bounding box coordinates provided.',
+        description: 'Invalid bounding box payload structure.',
       };
     }
 
-    const height = clampedYmax - clampedYmin;
-    const width = clampedXmax - clampedXmin;
+    // Verify all coordinates are finite numbers
+    if (
+      !Number.isFinite(ymin) ||
+      !Number.isFinite(xmin) ||
+      !Number.isFinite(ymax) ||
+      !Number.isFinite(xmax)
+    ) {
+      return {
+        valid: false,
+        defectAreaRatio: 0,
+        defectSeverityScore: 0.05,
+        centralityScore: 0,
+        defectClass: 'NEGLIGIBLE',
+        description: 'Bounding box coordinates must be finite numbers.',
+      };
+    }
+
+    // Strictly verify normalized range [0.0, 1.0] without silent clamping
+    if (
+      ymin < 0 || ymin > 1 ||
+      xmin < 0 || xmin > 1 ||
+      ymax < 0 || ymax > 1 ||
+      xmax < 0 || xmax > 1
+    ) {
+      return {
+        valid: false,
+        defectAreaRatio: 0,
+        defectSeverityScore: 0.05,
+        centralityScore: 0,
+        defectClass: 'NEGLIGIBLE',
+        description: 'Bounding box coordinates must be strictly normalized between 0.0 and 1.0.',
+      };
+    }
+
+    // Reject inverted or degenerate coordinates
+    if (ymin >= ymax || xmin >= xmax) {
+      return {
+        valid: false,
+        defectAreaRatio: 0,
+        defectSeverityScore: 0.05,
+        centralityScore: 0,
+        defectClass: 'NEGLIGIBLE',
+        description: 'Invalid or inverted bounding box coordinates provided: ymin must be < ymax and xmin must be < xmax.',
+      };
+    }
+
+    const height = ymax - ymin;
+    const width = xmax - xmin;
     const areaRatio = Number((height * width).toFixed(4));
 
     // Calculate centrality (distance from center of image [0.5, 0.5])
-    const centerY = (clampedYmin + clampedYmax) / 2;
-    const centerX = (clampedXmin + clampedXmax) / 2;
+    const centerY = (ymin + ymax) / 2;
+    const centerX = (xmin + xmax) / 2;
     const distanceFromCenter = Math.sqrt(Math.pow(centerY - 0.5, 2) + Math.pow(centerX - 0.5, 2));
     const centralityScore = Number(Math.max(0, 1 - distanceFromCenter / 0.707).toFixed(3));
 
@@ -155,6 +201,9 @@ export class DisputeForensicsService {
 
   /**
    * Scans EXIF metadata or raw image buffer for editing software signatures and temporal anomalies.
+   *
+   * Hardened: Ensures stock smartphone tags (Apple iOS, Samsung, Google Pixel, Sony, Xiaomi)
+   * or stripped metadata are treated as neutral without false positives.
    */
   detectExifTampering(metadata: {
     software?: string;
@@ -168,33 +217,46 @@ export class DisputeForensicsService {
     const anomalyReasons: string[] = [];
     let softwareDetected: string | undefined;
 
-    // 1. Scan software string
-    const software = (metadata.software || '').toLowerCase();
-    for (const signature of KNOWN_EDITING_SIGNATURES) {
-      if (software.includes(signature)) {
-        softwareDetected = metadata.software;
-        anomalyReasons.push(`Image edited with third-party graphics tool: "${metadata.software}"`);
-        break;
-      }
-    }
+    const rawSoftware = metadata?.software ? String(metadata.software).trim() : '';
+    const softwareLower = rawSoftware.toLowerCase();
 
-    // 2. Scan raw buffer for ASCII signatures if provided
-    if (!softwareDetected && metadata.rawBuffer) {
-      const bufferString = Buffer.from(metadata.rawBuffer).toString('binary').toLowerCase();
+    // 1. Scan software string against known manipulation software
+    if (softwareLower) {
       for (const signature of KNOWN_EDITING_SIGNATURES) {
-        if (bufferString.includes(signature)) {
-          softwareDetected = signature;
-          anomalyReasons.push(`Binary buffer contains metadata signature for: "${signature}"`);
+        if (softwareLower.includes(signature)) {
+          softwareDetected = rawSoftware;
+          anomalyReasons.push(`Image edited with third-party graphics tool: "${rawSoftware}"`);
           break;
         }
       }
     }
 
-    // 3. Temporal discrepancy check between capture and digitization/modification
-    if (metadata.dateTimeOriginal && metadata.modifyDate) {
+    // 2. Scan raw buffer for ASCII signatures if provided and not yet detected
+    if (!softwareDetected && metadata?.rawBuffer && metadata.rawBuffer.length > 0) {
       try {
-        const origTime = new Date(metadata.dateTimeOriginal.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')).getTime();
-        const modTime = new Date(metadata.modifyDate.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')).getTime();
+        const bufferString = Buffer.from(metadata.rawBuffer).toString('binary').toLowerCase();
+        for (const signature of KNOWN_EDITING_SIGNATURES) {
+          if (bufferString.includes(signature)) {
+            softwareDetected = signature;
+            anomalyReasons.push(`Binary buffer contains metadata signature for: "${signature}"`);
+            break;
+          }
+        }
+      } catch {
+        // Safe fallback on buffer decoding
+      }
+    }
+
+    // 3. Temporal discrepancy check between capture and digitization/modification
+    if (metadata?.dateTimeOriginal && metadata?.modifyDate) {
+      try {
+        const parseExifDate = (dateStr: string): number => {
+          const normalized = String(dateStr).trim().replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3');
+          return new Date(normalized).getTime();
+        };
+
+        const origTime = parseExifDate(metadata.dateTimeOriginal);
+        const modTime = parseExifDate(metadata.modifyDate);
         if (!isNaN(origTime) && !isNaN(modTime)) {
           const diffHours = Math.abs(modTime - origTime) / (1000 * 60 * 60);
           if (diffHours > 72) {
@@ -207,15 +269,15 @@ export class DisputeForensicsService {
     }
 
     const exifTamperFlag = anomalyReasons.length > 0;
-    const cameraDevice = [metadata.make, metadata.model].filter(Boolean).join(' ');
+    const cameraDevice = [metadata?.make, metadata?.model].filter(Boolean).map(String).join(' ').trim();
 
     return {
       exifTamperFlag,
       softwareDetected,
       anomalyReasons,
       cameraDevice: cameraDevice || undefined,
-      originalTimestamp: metadata.dateTimeOriginal,
-      digitizedTimestamp: metadata.dateTimeDigitized,
+      originalTimestamp: metadata?.dateTimeOriginal,
+      digitizedTimestamp: metadata?.dateTimeDigitized,
     };
   }
 

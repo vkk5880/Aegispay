@@ -48,21 +48,34 @@ export class DisputeMatrixService {
    * R = clamp(0.50 * I_exif_tamper + 0.30 * (1 - S_identity_match) + 0.20 * S_buyer_dispute_velocity, 0.0, 1.0)
    */
   calculateLiabilityAndAbuse(factors: ForensicsFactors): DisputeMatrixDecision {
+    // Sanitize and clamp factor scores to [0.0, 1.0]
+    const clampScore = (score: number, defaultVal = 0.0) => {
+      if (!Number.isFinite(score)) return defaultVal;
+      return Math.min(1.0, Math.max(0.0, score));
+    };
+
+    const defectSeverity = clampScore(factors.defect_severity_score);
+    const nonDelivery = clampScore(factors.non_delivery_score);
+    const policyValid = clampScore(factors.policy_valid_score, 0.85);
+    const identityMatch = clampScore(factors.identity_match_score, 0.9);
+    const disputeVelocity = clampScore(factors.buyer_dispute_velocity_score, 0.1);
+    const exifTamper = Boolean(factors.exif_tamper_flag);
+
     const rawL = (
-      0.45 * factors.defect_severity_score +
-      0.35 * factors.non_delivery_score +
-      0.20 * factors.policy_valid_score
+      0.45 * defectSeverity +
+      0.35 * nonDelivery +
+      0.20 * policyValid
     );
     const L = Math.min(1.0, Math.max(0.0, Number(rawL.toFixed(3))));
 
     const rawR = (
-      0.50 * (factors.exif_tamper_flag ? 1.0 : 0.0) +
-      0.30 * (1.0 - factors.identity_match_score) +
-      0.20 * factors.buyer_dispute_velocity_score
+      0.50 * (exifTamper ? 1.0 : 0.0) +
+      0.30 * (1.0 - identityMatch) +
+      0.20 * disputeVelocity
     );
     const R = Math.min(1.0, Math.max(0.0, Number(rawR.toFixed(3))));
 
-    const amount = factors.dispute_amount_cents;
+    const amount = Math.max(0, Math.round(Number.isFinite(factors.dispute_amount_cents) ? factors.dispute_amount_cents : 0));
 
     let tier: DisputeTierAction;
     let partialOffer: number | undefined;
@@ -88,7 +101,7 @@ export class DisputeMatrixService {
     } else if (L >= 0.30 && L < 0.75 && R < 0.35) {
       // Tier 2 — Partial Keep-The-Item Compromise (0.30 <= L < 0.75, R < 0.35, Cosmetic Defect)
       tier = 'TIER2_PARTIAL_OFFER';
-      partialOffer = Math.round(amount * L);
+      partialOffer = Math.min(amount, Math.max(0, Math.round(amount * L)));
       reasoning = `Partial compromise offer calculated at ${Math.round(L * 100)}% of dispute value ($${(partialOffer / 100).toFixed(2)}) for buyer to retain item.`;
     } else {
       // Default fallback
