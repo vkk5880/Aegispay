@@ -3,7 +3,8 @@ import { z } from 'zod';
 /**
  * Jules Task 1: Shared Types & Schema Parity
  * Fully verified parity with .development/packages/shared-types/src/index.ts.
- * Exports PrimaryBadgeSchema, ProductBadgeSchema, and complete ACP & x402 contracts.
+ * Exports PrimaryBadgeSchema, ProductBadgeSchema, complete ACP & x402 contracts,
+ * AcpMcpToolArgumentsSchema, and hardened dispute schemas.
  */
 
 /**

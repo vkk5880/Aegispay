@@ -2622,3 +2622,122 @@ test('Section 01 Audit: PaymentReceiptSchema and X402PaymentReceiptSchema parity
   assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, timestamp: 12345.67 }).success, false);
   assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, timestamp: NaN }).success, false);
 });
+
+test('Section 01 Audit: DisputeArbitrationSchema and DisputeAnalysisResultSchema contract verification', () => {
+  const {
+    DisputeArbitrationSchema,
+    DisputeAnalysisResultSchema,
+    PrimaryBadgeSchema,
+    ProductBadgeSchema,
+    BazaarDiscoveryExtensionSchema,
+    StrictEIP3009AuthorizationSchema,
+  } = require('./index.js');
+
+  const validDispute = {
+    paypal_dispute_id: 'PP-D-12345678',
+    purchase_unit_id: '123e4567-e89b-12d3-a456-426614174000',
+    dispute_reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+    dispute_state: 'REQUIRED_ACTION',
+    dispute_amount_cents: 12500,
+    liability_score_l: 0.85,
+    abuse_risk_score_r: 0.12,
+    exif_tamper_flag: false,
+    defect_bounding_box: [0.1, 0.2, 0.8, 0.9],
+    hateoas_allowed_actions: ['accept-claim', 'make-offer', 'provide-evidence'],
+    selected_tier_action: 'TIER1_REFUND' as const,
+    seller_response_due_date: new Date(),
+    assigned_analyst_id: 'analyst_007',
+  };
+
+  const parsedDispute = DisputeArbitrationSchema.safeParse(validDispute);
+  assert.equal(parsedDispute.success, true);
+  if (parsedDispute.success) {
+    assert.equal(parsedDispute.data.paypal_dispute_id, 'PP-D-12345678');
+    assert.equal(parsedDispute.data.dispute_amount_cents, 12500);
+    assert.equal(parsedDispute.data.liability_score_l, 0.85);
+    assert.equal(parsedDispute.data.abuse_risk_score_r, 0.12);
+    assert.deepEqual(parsedDispute.data.defect_bounding_box, [0.1, 0.2, 0.8, 0.9]);
+    assert.deepEqual(parsedDispute.data.hateoas_allowed_actions, ['accept-claim', 'make-offer', 'provide-evidence']);
+  }
+
+  // Reject out-of-range or non-finite liability scores
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, liability_score_l: -0.1 }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, liability_score_l: 1.1 }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, liability_score_l: NaN }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, liability_score_l: Infinity }).success, false);
+
+  // Reject out-of-range or non-finite abuse risk scores
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, abuse_risk_score_r: -0.05 }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, abuse_risk_score_r: 1.05 }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, abuse_risk_score_r: NaN }).success, false);
+
+  // Reject invalid defect_bounding_box
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, defect_bounding_box: [0.1, 0.2] }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, defect_bounding_box: [0.1, 0.2, 0.3, NaN] }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, defect_bounding_box: [0.1, 0.2, 0.3, Infinity] }).success, false);
+
+  // Reject invalid dispute_amount_cents
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, dispute_amount_cents: -100 }).success, false);
+  assert.equal(DisputeArbitrationSchema.safeParse({ ...validDispute, dispute_amount_cents: 12.5 }).success, false);
+
+  // DisputeAnalysisResultSchema
+  const validAnalysis = {
+    identity_match_score: 0.92,
+    defect_severity_score: 0.74,
+    defect_bounding_box: [0.15, 0.25, 0.65, 0.85],
+    liability_score_l: 0.81,
+    abuse_risk_score_r: 0.15,
+  };
+  const parsedAnalysis = DisputeAnalysisResultSchema.safeParse(validAnalysis);
+  assert.equal(parsedAnalysis.success, true);
+  assert.equal(DisputeAnalysisResultSchema.safeParse({ ...validAnalysis, liability_score_l: 1.5 }).success, false);
+  assert.equal(DisputeAnalysisResultSchema.safeParse({ ...validAnalysis, abuse_risk_score_r: -0.2 }).success, false);
+
+  // AcpMcpToolArgumentsSchema
+  const { AcpMcpToolArgumentsSchema } = require('./index.js');
+  const validAcpToolArgs = {
+    meta: {
+      api_version: '2026-04-17',
+      idempotency_key: 'idem_test_999',
+    },
+    id: 'cs_session_audit_1',
+    payload: {
+      cart_id: 'cart_123',
+      action: 'inspect',
+    },
+  };
+  assert.equal(AcpMcpToolArgumentsSchema.safeParse(validAcpToolArgs).success, true);
+  // Missing api_version in meta must fail
+  assert.equal(AcpMcpToolArgumentsSchema.safeParse({ meta: {} }).success, false);
+
+  // PrimaryBadgeSchema & ProductBadgeSchema
+  const validPrimaryBadge = {
+    tier: 'tier1',
+    label: 'Verified Merchant',
+    color: '#00FF00',
+    icon: 'shield-check',
+    description: 'High reputational standing and zero dispute velocity',
+    trust_multiplier: 1.25,
+  };
+  assert.equal(PrimaryBadgeSchema.safeParse(validPrimaryBadge).success, true);
+  assert.equal(PrimaryBadgeSchema.safeParse({ ...validPrimaryBadge, tier: 'invalid_tier' }).success, false);
+
+  const validProductBadge = {
+    label: 'Best Value',
+    color: '#0088FF',
+    description: 'Optimal price-to-performance ratio',
+  };
+  assert.equal(ProductBadgeSchema.safeParse(validProductBadge).success, true);
+
+  // BazaarDiscoveryExtensionSchema & StrictEIP3009AuthorizationSchema
+  const validStrictAuth = {
+    from: '0x' + '1'.repeat(40),
+    to: '0x' + '2'.repeat(40),
+    value: '1000000',
+    validAfter: '0',
+    validBefore: '1893456000',
+    nonce: '0x' + '3'.repeat(64),
+  };
+  assert.equal(StrictEIP3009AuthorizationSchema.safeParse(validStrictAuth).success, true);
+  assert.equal(StrictEIP3009AuthorizationSchema.safeParse({ ...validStrictAuth, from: 'invalid_evm_addr' }).success, false);
+});
