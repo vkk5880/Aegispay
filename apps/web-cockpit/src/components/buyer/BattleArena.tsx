@@ -5,7 +5,10 @@ import {
   Trophy,
   Swords,
   Star,
+  CheckCircle2,
+  ExternalLink,
   ShoppingBag,
+  TrendingDown,
   Sparkles,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
@@ -15,6 +18,97 @@ export interface BattleArenaProps {
   battleReport?: string | null;
   winner?: (ProductCardData | Record<string, any>) | null;
   onSelectWinner?: (winner: any) => void;
+}
+
+/**
+ * Safely parses product price into dollars with zero NaN guarantee.
+ */
+export function extractProductPrice(product: any): number {
+  if (!product) return 0;
+  if (typeof product.price_cents === 'number' && !Number.isNaN(product.price_cents)) {
+    return Math.max(0, product.price_cents / 100);
+  }
+  if (typeof product.price === 'number' && !Number.isNaN(product.price)) {
+    return Math.max(0, product.price > 1000 ? product.price / 100 : product.price);
+  }
+  const parsed = parseFloat(product.price || product.price_cents || 0);
+  return Number.isNaN(parsed) || !Number.isFinite(parsed) ? 0 : Math.max(0, parsed);
+}
+
+/**
+ * Safely normalizes score to an integer percentage [0, 100] with zero NaN guarantee.
+ */
+export function extractProductScore(product: any): number {
+  if (!product) return 90;
+  let scoreVal: number | undefined;
+
+  if (typeof product.composite_score === 'number' && !Number.isNaN(product.composite_score)) {
+    scoreVal = product.composite_score <= 10 ? product.composite_score * 10 : product.composite_score;
+  } else if (typeof product.score === 'number' && !Number.isNaN(product.score)) {
+    scoreVal = product.score <= 1 ? product.score * 100 : product.score;
+  }
+
+  if (scoreVal === undefined || Number.isNaN(scoreVal) || !Number.isFinite(scoreVal)) {
+    return 90;
+  }
+
+  return Math.round(Math.min(100, Math.max(0, scoreVal)));
+}
+
+/**
+ * Calculates head-to-head metric deltas between contender A and B with zero NaN guarantee.
+ */
+export interface MetricDeltas {
+  priceDelta: number; // A - B in dollars
+  scoreDelta: number; // A - B in percentage points
+  priceDiffText: string;
+  scoreDiffText: string;
+  cheaperSide: 'A' | 'B' | 'EQUAL';
+  higherScoreSide: 'A' | 'B' | 'EQUAL';
+}
+
+export function calculateMetricDeltas(a: any, b: any): MetricDeltas {
+  const priceA = extractProductPrice(a);
+  const priceB = extractProductPrice(b);
+  const scoreA = extractProductScore(a);
+  const scoreB = extractProductScore(b);
+
+  const rawPriceDelta = priceA - priceB;
+  const priceDelta = Number.isNaN(rawPriceDelta) || !Number.isFinite(rawPriceDelta) ? 0 : rawPriceDelta;
+
+  const rawScoreDelta = scoreA - scoreB;
+  const scoreDelta = Number.isNaN(rawScoreDelta) || !Number.isFinite(rawScoreDelta) ? 0 : rawScoreDelta;
+
+  const cheaperSide: 'A' | 'B' | 'EQUAL' =
+    Math.abs(priceDelta) < 0.001 ? 'EQUAL' : priceDelta < 0 ? 'A' : 'B';
+  const higherScoreSide: 'A' | 'B' | 'EQUAL' =
+    scoreDelta === 0 ? 'EQUAL' : scoreDelta > 0 ? 'A' : 'B';
+
+  const absPriceDelta = Math.abs(priceDelta).toFixed(2);
+  const absScoreDelta = Math.abs(scoreDelta);
+
+  const priceDiffText =
+    cheaperSide === 'EQUAL'
+      ? 'Identical Price'
+      : cheaperSide === 'A'
+      ? `Side A is $${absPriceDelta} cheaper`
+      : `Side B is $${absPriceDelta} cheaper`;
+
+  const scoreDiffText =
+    higherScoreSide === 'EQUAL'
+      ? 'Equal Score'
+      : higherScoreSide === 'A'
+      ? `Side A leads by +${absScoreDelta}%`
+      : `Side B leads by +${absScoreDelta}%`;
+
+  return {
+    priceDelta,
+    scoreDelta,
+    priceDiffText,
+    scoreDiffText,
+    cheaperSide,
+    higherScoreSide,
+  };
 }
 
 function useTypewriter(text: string | null | undefined, speed = 16): string {
@@ -59,8 +153,8 @@ function ContenderCard({
   isRevealed: boolean;
   onSelect?: () => void;
 }) {
-  const price = typeof product.price_cents === 'number' ? product.price_cents / 100 : product.price || 0;
-  const score = product.composite_score ? (product.composite_score <= 10 ? product.composite_score * 10 : product.composite_score) : Math.round((product.score || 0.9) * 100);
+  const price = extractProductPrice(product);
+  const score = extractProductScore(product);
   const merchant = product.merchant_domain || product.source || 'Verified Store';
   const title = product.title || 'Product Offer';
   const img = product.cleaned_url || product.image_url;
@@ -163,6 +257,7 @@ export function BattleArena({
   const a = contenders?.[0];
   const b = contenders?.[1];
   const winnerTitle = winner?.title ?? a?.title;
+  const deltas = a && b ? calculateMetricDeltas(a, b) : null;
 
   useEffect(() => {
     const t1 = setTimeout(() => setReportReady(true), 400);
@@ -204,11 +299,29 @@ export function BattleArena({
           onSelect={() => onSelectWinner?.(a)}
         />
 
-        {/* VS Divider */}
-        <div className="flex md:flex-col items-center justify-center shrink-0 gap-1 my-2 md:my-0">
+        {/* VS Divider & Head-to-Head Metric Deltas */}
+        <div className="flex md:flex-col items-center justify-center shrink-0 gap-2 my-2 md:my-0 px-2">
           <div className="w-10 h-10 rounded-full bg-cyan-950/80 border border-cyan-500/50 flex items-center justify-center font-black text-xs text-cyan-300 shadow-lg shadow-cyan-950/50">
             VS
           </div>
+          {deltas && (
+            <div className="flex flex-col items-center gap-1 text-[10px] font-mono text-center">
+              <span className={`px-2 py-0.5 rounded-full border ${
+                deltas.cheaperSide === 'EQUAL'
+                  ? 'bg-slate-800 text-slate-300 border-slate-700'
+                  : 'bg-emerald-950/60 text-emerald-300 border-emerald-500/30'
+              }`}>
+                {deltas.priceDiffText}
+              </span>
+              <span className={`px-2 py-0.5 rounded-full border ${
+                deltas.higherScoreSide === 'EQUAL'
+                  ? 'bg-slate-800 text-slate-300 border-slate-700'
+                  : 'bg-cyan-950/60 text-cyan-300 border-cyan-500/30'
+              }`}>
+                {deltas.scoreDiffText}
+              </span>
+            </div>
+          )}
         </div>
 
         <ContenderCard

@@ -123,9 +123,14 @@ export function ExplainDrawer({
 
   const getCoordinates = (index: number, normalizedValue: number) => {
     const angle = (Math.PI * 2 / totalAxes) * index - Math.PI / 2;
-    const r = radius * Math.min(Math.max(normalizedValue, 0.05), 1);
-    const x = center + r * Math.cos(angle);
-    const y = center + r * Math.sin(angle);
+    const safeVal =
+      typeof normalizedValue === 'number' && !Number.isNaN(normalizedValue) && Number.isFinite(normalizedValue)
+        ? Math.min(Math.max(normalizedValue, 0), 1)
+        : 0;
+    // Keep a minimum radius offset of 0.05 so zero scores still display cleanly at the hub
+    const r = radius * Math.max(0.05, safeVal);
+    const x = Number.isFinite(center + r * Math.cos(angle)) ? center + r * Math.cos(angle) : center;
+    const y = Number.isFinite(center + r * Math.sin(angle)) ? center + r * Math.sin(angle) : center;
     return { x, y, angle };
   };
 

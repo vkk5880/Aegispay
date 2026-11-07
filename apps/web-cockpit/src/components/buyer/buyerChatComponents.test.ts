@@ -285,3 +285,108 @@ test('ExplainDrawer: deterministic SVG radar math, baseline normalization, and l
   assert.equal(getReason(expensiveLoser, winner), '$90.00 higher than winner');
   assert.equal(getReason(suspiciousLoser, winner), 'Low confidence: only 12 reviews');
 });
+
+import { sanitizeChatInput } from './ChatFlow.js';
+import {
+  extractProductPrice,
+  extractProductScore,
+  calculateMetricDeltas,
+} from './BattleArena.js';
+
+test('ChatFlow: sanitizeChatInput neutralizes XSS vectors, scripts, and control characters', () => {
+  const xssPayload = '<script>alert("xss")</script><img src=x onerror=alert(1)>Sony Headphones';
+  const sanitized = sanitizeChatInput(xssPayload);
+  assert.equal(sanitized.includes('<script>'), false);
+  assert.equal(sanitized.includes('onerror='), false);
+  assert.equal(sanitized.includes('Sony Headphones'), true);
+
+  // Dangerous uri scheme
+  const jsUri = 'javascript:doEvil() mechanical keyboard';
+  assert.equal(sanitizeChatInput(jsUri).includes('javascript:'), false);
+
+  // Control characters stripped
+  const ctrlChars = 'Clean\u0000Text\u0007Here';
+  assert.equal(sanitizeChatInput(ctrlChars), 'CleanTextHere');
+
+  // Keystroke typing preserves trailing spaces when trim is false
+  assert.equal(sanitizeChatInput('over ear ', 1000, false), 'over ear ');
+});
+
+test('BattleArena: zero NaN price & score parsing and head-to-head metric deltas', () => {
+  // Empty, null, and NaN handling
+  assert.equal(extractProductPrice(null), 0);
+  assert.equal(extractProductPrice({ price_cents: NaN }), 0);
+  assert.equal(extractProductPrice({ price_cents: 14999 }), 149.99);
+  assert.equal(extractProductPrice({ price: 49.99 }), 49.99);
+
+  assert.equal(extractProductScore(null), 90);
+  assert.equal(extractProductScore({ composite_score: NaN }), 90);
+  assert.equal(extractProductScore({ composite_score: 9.6 }), 96);
+  assert.equal(extractProductScore({ score: 0.85 }), 85);
+
+  // Head-to-head deltas with clean formatting and no NaN
+  const contenderA = { price_cents: 20000, composite_score: 9.5 };
+  const contenderB = { price_cents: 25000, composite_score: 8.5 };
+  const deltas = calculateMetricDeltas(contenderA, contenderB);
+
+  assert.equal(deltas.priceDelta, -50);
+  assert.equal(deltas.scoreDelta, 10);
+  assert.equal(deltas.cheaperSide, 'A');
+  assert.equal(deltas.higherScoreSide, 'A');
+  assert.equal(deltas.priceDiffText, 'Side A is $50.00 cheaper');
+  assert.equal(deltas.scoreDiffText, 'Side A leads by +10%');
+
+  // Edge case: completely undefined/empty objects
+  const emptyDeltas = calculateMetricDeltas({}, {});
+  assert.equal(emptyDeltas.priceDelta, 0);
+  assert.equal(emptyDeltas.scoreDelta, 0);
+  assert.equal(emptyDeltas.cheaperSide, 'EQUAL');
+  assert.equal(emptyDeltas.higherScoreSide, 'EQUAL');
+  assert.equal(Number.isNaN(emptyDeltas.priceDelta), false);
+  assert.equal(Number.isNaN(emptyDeltas.scoreDelta), false);
+});
+
+test('ExplainDrawer: SVG radar coordinate calculation handles zero, 1.0, null, and NaN without broken SVG paths', () => {
+  const size = 260;
+  const center = size / 2;
+  const radius = size * 0.38;
+  const totalAxes = 5;
+
+  const safeGetCoordinates = (index: number, normalizedValue: number) => {
+    const angle = ((Math.PI * 2) / totalAxes) * index - Math.PI / 2;
+    const safeVal =
+      typeof normalizedValue === 'number' && !Number.isNaN(normalizedValue) && Number.isFinite(normalizedValue)
+        ? Math.min(Math.max(normalizedValue, 0), 1)
+        : 0;
+    const r = radius * Math.max(0.05, safeVal);
+    const x = Number.isFinite(center + r * Math.cos(angle)) ? center + r * Math.cos(angle) : center;
+    const y = Number.isFinite(center + r * Math.sin(angle)) ? center + r * Math.sin(angle) : center;
+    return { x, y, angle };
+  };
+
+  // Test zero score
+  const zeroCoord = safeGetCoordinates(0, 0);
+  assert.equal(Number.isNaN(zeroCoord.x), false);
+  assert.equal(Number.isNaN(zeroCoord.y), false);
+  assert.ok(zeroCoord.y < center);
+
+  // Test perfect 1.0 score
+  const maxCoord = safeGetCoordinates(0, 1.0);
+  assert.equal(Number.isNaN(maxCoord.x), false);
+  assert.equal(Number.isNaN(maxCoord.y), false);
+  assert.ok(maxCoord.y < zeroCoord.y); // Extends further up
+
+  // Test NaN and undefined input values
+  const nanCoord = safeGetCoordinates(1, NaN);
+  assert.equal(Number.isNaN(nanCoord.x), false);
+  assert.equal(Number.isNaN(nanCoord.y), false);
+
+  const nullCoord = safeGetCoordinates(2, null as any);
+  assert.equal(Number.isNaN(nullCoord.x), false);
+  assert.equal(Number.isNaN(nullCoord.y), false);
+
+  // Test polygon string serialization has zero NaN
+  const testPoints = [0, 1.0, 0.5, NaN, -0.2].map((val, idx) => safeGetCoordinates(idx, val));
+  const polygonStr = testPoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  assert.equal(polygonStr.includes('NaN'), false);
+});

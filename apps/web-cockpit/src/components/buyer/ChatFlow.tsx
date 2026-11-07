@@ -14,6 +14,23 @@ type FlowState = 'IDLE' | 'CLARIFYING' | 'SEARCHING';
 
 const VS_PATTERN = /\s+(?:vs\.?|versus)\s+/i;
 
+/**
+ * Sanitizes chat inputs against XSS and injection payloads.
+ * Strips script tags, HTML markup, dangerous schemes, and controls length.
+ */
+export function sanitizeChatInput(input: string, maxLength = 1000, trim = true): string {
+  if (typeof input !== 'string') return '';
+  let sanitized = input
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/javascript:/gi, '')
+    .replace(/data:text\/html/gi, '')
+    .replace(/on\w+\s*=/gi, '');
+  sanitized = sanitized.replace(/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\u007F]/g, '');
+  const sliced = sanitized.slice(0, maxLength);
+  return trim ? sliced.trim() : sliced;
+}
+
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 10000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -62,11 +79,14 @@ export function ChatFlow({
 
   async function handleInitialSearch(e: React.FormEvent) {
     e.preventDefault();
-    triggerClarify(query);
+    const clean = sanitizeChatInput(query);
+    if (!clean) return;
+    setQuery(clean);
+    triggerClarify(clean);
   }
 
   async function triggerClarify(q: string) {
-    const qClean = q.trim();
+    const qClean = sanitizeChatInput(q);
     if (!qClean || disabled) return;
 
     if (VS_PATTERN.test(qClean)) {
@@ -87,7 +107,7 @@ export function ChatFlow({
       });
 
       if (data.needs_clarification && data.questions && data.questions.length > 0) {
-        setQuestions(data.questions);
+        setQuestions(data.questions.map((item: string) => sanitizeChatInput(item)));
         setFlowState('CLARIFYING');
       } else {
         triggerFinalSearch(qClean);
@@ -104,25 +124,32 @@ export function ChatFlow({
     if (isEnriching) return;
     setIsEnriching(true);
 
+    const cleanQuery = sanitizeChatInput(query);
+    const sanitizedAnswers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(answers)) {
+      sanitizedAnswers[k] = sanitizeChatInput(v);
+    }
+
     try {
       const data = await fetchWithTimeout('/api/buyer/enrich', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, answers }),
+        body: JSON.stringify({ query: cleanQuery, answers: sanitizedAnswers }),
       });
-      const finalQ = data.enriched_query || query;
-      triggerFinalSearch(finalQ);
+      const finalQ = sanitizeChatInput(data.enriched_query || cleanQuery);
+      triggerFinalSearch(finalQ || cleanQuery);
     } catch {
-      triggerFinalSearch(query);
+      triggerFinalSearch(cleanQuery);
     } finally {
       setIsEnriching(false);
     }
   }
 
   function triggerFinalSearch(q: string) {
-    setEnrichedQuery(q);
+    const clean = sanitizeChatInput(q);
+    setEnrichedQuery(clean);
     setFlowState('SEARCHING');
-    onSearch(q);
+    onSearch(clean);
   }
 
   function handleReset() {
@@ -133,7 +160,11 @@ export function ChatFlow({
     setAnswers({});
     setRevealedIdx(-1);
     setTimeout(() => {
-      inputRef.current?.focus();
+      // Prevent viewport jump on mobile viewports: check matchMedia for hover/pointer
+      const isMobile = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+      if (!isMobile) {
+        inputRef.current?.focus({ preventScroll: true });
+      }
     }, 20);
   }
 
@@ -196,8 +227,11 @@ export function ChatFlow({
                 <input
                   type="text"
                   placeholder="Enter your specification..."
-                  value={answers[q] || ''}
-                  onChange={(e) => setAnswers((prev) => ({ ...prev, [q]: e.target.value }))}
+                  value={answers[q] ?? ''}
+                  onChange={(e) => {
+                    const cleanVal = sanitizeChatInput(e.target.value, 1000, false);
+                    setAnswers((prev) => ({ ...prev, [q]: cleanVal }));
+                  }}
                   className="w-full px-4 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
                   autoFocus={idx === revealedIdx}
                 />
