@@ -6,6 +6,15 @@ import {
   queryAnonymizedFinancialLedger,
   clearStatementCache,
   getStatementCacheSize,
+  setMaxStatementCacheSize,
+  validateWorkerMessage,
+  buildSafeAnalyticsQuery,
+  isWasmSupported,
+  computeDisputeAnalyticsFallback,
+  queryFinancialLedgerWithFallback,
+  handleWorkerMessage,
+  projectOptimizedDisputeRecord,
+  AnonymizedDisputeRecord,
 } from './duckdb.worker.js';
 import {
   verifySessionMandateSignature,
@@ -35,8 +44,53 @@ test('DuckDB Read-Only Query Validation: Strictly allows SELECT and WITH queries
   assert.equal(validateReadOnlySelectQuery('   '), false);
 });
 
+test('DuckDB SQL Injection Hardening: Blocks stacked queries, unsafe system functions, and unbalanced delimiters', () => {
+  // Stacked queries with semicolon injection
+  assert.equal(validateReadOnlySelectQuery('SELECT 1; DROP TABLE disputes;'), false);
+  assert.equal(validateReadOnlySelectQuery('SELECT * FROM disputes; DELETE FROM disputes'), false);
+  assert.equal(validateReadOnlySelectQuery('SELECT 1; VACUUM'), false);
+
+  // Dangerous internal functions or execution engines
+  assert.equal(validateReadOnlySelectQuery('SELECT * FROM read_csv("secret.csv")'), false);
+  assert.equal(validateReadOnlySelectQuery('SELECT * FROM read_parquet("secret.parquet")'), false);
+  assert.equal(validateReadOnlySelectQuery('SELECT SYSTEM("rm -rf /")'), false);
+  assert.equal(validateReadOnlySelectQuery('SELECT EXEC("cat /etc/passwd")'), false);
+  assert.equal(validateReadOnlySelectQuery('SELECT CALL dangerous_proc()'), false);
+
+  // Unbalanced string quotes
+  assert.equal(validateReadOnlySelectQuery("SELECT * FROM disputes WHERE reason = 'unclosed"), false);
+
+  // Valid queries with trailing semicolons should still pass
+  assert.equal(validateReadOnlySelectQuery('SELECT * FROM disputes;'), true);
+  assert.equal(validateReadOnlySelectQuery('SELECT * FROM disputes;   '), true);
+});
+
+test('DuckDB Dynamic Query Builder: Validates dimensions and sort order, parameterizing filters', () => {
+  // Valid query generation
+  const q1 = buildSafeAnalyticsQuery({
+    dimension: 'selected_tier_action',
+    sortBy: 'count',
+    sortDirection: 'DESC',
+    minLiability: 0.5,
+  });
+  assert.ok(q1.query.startsWith('SELECT selected_tier_action, COUNT(*) as count'));
+  assert.ok(q1.query.includes('WHERE liability_score_l >= ?'));
+  assert.deepEqual(q1.params, [0.5]);
+
+  // Invalid dimension rejected
+  assert.throws(() => {
+    buildSafeAnalyticsQuery({ dimension: 'evil_column; DROP TABLE disputes--' as any });
+  }, /Invalid dimension/);
+
+  // Invalid sort direction rejected
+  assert.throws(() => {
+    buildSafeAnalyticsQuery({ sortDirection: 'INJECT' as any });
+  }, /Invalid sort direction/);
+});
+
 test('DuckDB Statement Caching & Connection Safety: Caches prepared statements and ensures connection is closed', async () => {
   await clearStatementCache();
+  setMaxStatementCacheSize(50);
   assert.equal(getStatementCacheSize(), 0);
 
   let connectionsClosed = 0;
@@ -123,6 +177,186 @@ test('DuckDB Statement Caching & Connection Safety: Caches prepared statements a
   await clearStatementCache();
   assert.equal(getStatementCacheSize(), 0);
   assert.ok(statementsClosed >= 1);
+});
+
+test('DuckDB Statement Cache LRU Eviction: Closes evicted statements to prevent memory leaks', async () => {
+  await clearStatementCache();
+  setMaxStatementCacheSize(2);
+
+  let statementsClosed = 0;
+  const createMockPreparedStatement = (id: string) => ({
+    query: async () => ({ toArray: () => [{ id }] }),
+    close: async () => {
+      statementsClosed++;
+    },
+  });
+
+  const mockConn = {
+    prepare: async (q: string) => createMockPreparedStatement(q) as any,
+    close: async () => {},
+  };
+  const mockDb = {
+    connect: async () => mockConn as any,
+  } as any;
+
+  // Add statement 1
+  await queryAnonymizedFinancialLedger(mockDb, 'SELECT 1');
+  assert.equal(getStatementCacheSize(), 1);
+
+  // Add statement 2
+  await queryAnonymizedFinancialLedger(mockDb, 'SELECT 2');
+  assert.equal(getStatementCacheSize(), 2);
+
+  // Adding statement 3 exceeds limit of 2, oldest (SELECT 1) must be closed and evicted
+  await queryAnonymizedFinancialLedger(mockDb, 'SELECT 3');
+  assert.equal(getStatementCacheSize(), 2);
+  assert.equal(statementsClosed, 1, 'Evicted statement must be closed');
+
+  // Clean up
+  await clearStatementCache();
+  setMaxStatementCacheSize(50);
+});
+
+test('Web Worker Message Contract Validation: Enforces schema contracts and rejects malformed payloads', () => {
+  // Valid QUERY message
+  assert.equal(
+    validateWorkerMessage({
+      id: 'req_001',
+      action: 'QUERY',
+      payload: { query: 'SELECT * FROM disputes', params: [] },
+    }),
+    true
+  );
+
+  // Valid INGEST message
+  assert.equal(
+    validateWorkerMessage({
+      id: 'req_002',
+      action: 'INGEST',
+      payload: { records: [] },
+    }),
+    true
+  );
+
+  // Valid AGGREGATE message
+  assert.equal(
+    validateWorkerMessage({
+      id: 'req_003',
+      action: 'AGGREGATE',
+      payload: { dimension: 'selected_tier_action' },
+    }),
+    true
+  );
+
+  // Valid CLEAR_CACHE message
+  assert.equal(
+    validateWorkerMessage({
+      id: 'req_004',
+      action: 'CLEAR_CACHE',
+    }),
+    true
+  );
+
+  // Invalid: missing id
+  assert.equal(validateWorkerMessage({ action: 'QUERY', payload: { query: 'SELECT 1' } }), false);
+
+  // Invalid: unsupported action
+  assert.equal(validateWorkerMessage({ id: 'bad_act', action: 'UNSUPPORTED_ACTION' }), false);
+
+  // Invalid: QUERY without query string
+  assert.equal(validateWorkerMessage({ id: 'bad_query', action: 'QUERY', payload: {} }), false);
+
+  // Invalid: INGEST without records array
+  assert.equal(validateWorkerMessage({ id: 'bad_ingest', action: 'INGEST', payload: { records: 'not-array' } }), false);
+
+  // Invalid: Non-object message
+  assert.equal(validateWorkerMessage(null), false);
+  assert.equal(validateWorkerMessage('raw-string'), false);
+});
+
+test('DuckDB-WASM Fallback Aggregation: Computes dispute analytics accurately when WASM is unavailable', async () => {
+  assert.equal(typeof isWasmSupported(), 'boolean');
+
+  const mockRecords: AnonymizedDisputeRecord[] = [
+    {
+      paypal_dispute_id: 'PP-D-01',
+      dispute_reason: 'MERCHANDISE_NOT_AS_DESCRIBED',
+      dispute_state: 'REQUIRED_ACTION',
+      dispute_amount_cents: 10000,
+      liability_score_l: 0.8,
+      abuse_risk_score_r: 0.2,
+      exif_tamper_flag: true,
+      selected_tier_action: 'TIER1_REFUND',
+      seller_response_due_date: '2026-06-01',
+    },
+    {
+      paypal_dispute_id: 'PP-D-02',
+      dispute_reason: 'MERCHANDISE_NOT_AS_DESCRIBED',
+      dispute_state: 'REQUIRED_ACTION',
+      dispute_amount_cents: 20000,
+      liability_score_l: 0.6,
+      abuse_risk_score_r: 0.4,
+      exif_tamper_flag: false,
+      selected_tier_action: 'TIER1_REFUND',
+      seller_response_due_date: '2026-06-01',
+    },
+    {
+      paypal_dispute_id: 'PP-D-03',
+      dispute_reason: 'UNAUTHORIZED_TRANSACTION',
+      dispute_state: 'UNDER_REVIEW',
+      dispute_amount_cents: 15000,
+      liability_score_l: 0.2,
+      abuse_risk_score_r: 0.9,
+      exif_tamper_flag: true,
+      selected_tier_action: 'TIER4_CONTEST_PDF',
+      seller_response_due_date: '2026-06-02',
+    },
+  ];
+
+  // 1. Direct fallback calculation
+  const fallbackResults = computeDisputeAnalyticsFallback(mockRecords);
+  assert.equal(fallbackResults.length, 2);
+
+  const tier1 = fallbackResults.find((r) => r.tier === 'TIER1_REFUND');
+  assert.ok(tier1);
+  assert.equal(tier1.count, 2);
+  assert.equal(tier1.total_dispute_amount_cents, 30000);
+  assert.equal(tier1.avg_liability, 0.7);
+  assert.equal(tier1.avg_abuse_risk, 0.3);
+
+  const tier4 = fallbackResults.find((r) => r.tier === 'TIER4_CONTEST_PDF');
+  assert.ok(tier4);
+  assert.equal(tier4.count, 1);
+  assert.equal(tier4.total_dispute_amount_cents, 15000);
+  assert.equal(tier4.avg_liability, 0.2);
+  assert.equal(tier4.avg_abuse_risk, 0.9);
+
+  // 2. queryFinancialLedgerWithFallback when db is null
+  const fallbackQueryRes = await queryFinancialLedgerWithFallback(
+    null,
+    'SELECT * FROM disputes',
+    [],
+    mockRecords
+  );
+  assert.equal(fallbackQueryRes.fallback, true);
+  assert.equal(fallbackQueryRes.result.length, 2);
+
+  // 3. handleWorkerMessage dispatcher test
+  const msgResponse = await handleWorkerMessage(
+    null,
+    {
+      id: 'msg_test_01',
+      action: 'AGGREGATE',
+      payload: { records: mockRecords },
+    },
+    []
+  );
+  assert.equal(msgResponse.success, true);
+  assert.equal(msgResponse.id, 'msg_test_01');
+  if (msgResponse.success) {
+    assert.equal(msgResponse.fallback, true);
+    assert.equal(msgResponse.data.length, 2);
+  }
 });
 
 test('Ed25519 ASN.1 KeyObject LRU Cache: Reuses parsed KeyObjects across repeated signature verifications', async () => {
