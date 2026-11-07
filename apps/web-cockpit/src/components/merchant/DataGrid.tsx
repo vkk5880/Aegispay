@@ -41,13 +41,69 @@ const theme = themeQuartz.withParams({
 
 export type Row = Record<string, unknown>;
 
-const formatMoney = ({ value, data }: ValueFormatterParams<Row>) =>
-  typeof value === 'number' && typeof data?.currency === 'string'
-    ? value.toLocaleString('en-US', { style: 'currency', currency: data.currency })
-    : '';
+/**
+ * Escapes special regex characters in a search string to protect against regex injection
+ * or syntax errors when querying across AG-Grid columns.
+ */
+export function sanitizeQuickFilter(input: unknown): string {
+  if (typeof input !== 'string') {
+    return '';
+  }
+  // Trim and escape regex special characters: \ ^ $ * + ? . ( ) | { } [ ]
+  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
+}
 
-const columnTypes: ColTypeDefs<Row> = {
+/**
+ * Formats numeric monetary amounts with currency safety and null/undefined handling.
+ */
+export function formatMoney({ value, data }: ValueFormatterParams<Row>): string {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) {
+    return '—';
+  }
+
+  const rawCurrency = typeof data?.currency === 'string' ? data.currency.trim().toUpperCase() : 'USD';
+  const currencyCode = /^[A-Z]{3}$/.test(rawCurrency) ? rawCurrency : 'USD';
+
+  try {
+    return num.toLocaleString('en-US', {
+      style: 'currency',
+      currency: currencyCode,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  } catch {
+    return `${currencyCode} ${num.toFixed(2)}`;
+  }
+}
+
+/**
+ * Formats timestamps or ISO date strings with resilient null, undefined, and invalid date handling.
+ */
+export function formatTimestamp({ value }: ValueFormatterParams<Row>): string {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  try {
+    const d = value instanceof Date ? value : new Date(value as string | number);
+    if (Number.isNaN(d.getTime())) {
+      return '—';
+    }
+    return d.toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+  } catch {
+    return '—';
+  }
+}
+
+export const columnTypes: ColTypeDefs<Row> = {
   money: { valueFormatter: formatMoney, filter: 'agNumberColumnFilter' },
+  timestamp: { valueFormatter: formatTimestamp, filter: 'agDateColumnFilter' },
+  dateTime: { valueFormatter: formatTimestamp, filter: 'agDateColumnFilter' },
 };
 
 const defaultColDef: ColDef<Row> = { filter: true };
@@ -55,6 +111,9 @@ const autoSizeStrategy = { type: 'fitCellContents' } as const;
 
 export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[] }) {
   const [search, setSearch] = useState('');
+
+  // Sanitize the search query before providing to AG Grid quick filter text
+  const sanitizedSearch = sanitizeQuickFilter(search);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -66,7 +125,7 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
         aria-label="Search all columns"
         className="h-10 w-72 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c1424] px-3 text-sm outline-none focus:border-cyan-500 text-slate-800 dark:text-slate-100"
       />
-      <div className="min-h-[400px] flex-1 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div className="min-h-[400px] h-[520px] flex-1 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm">
         <AgGridProvider modules={modules}>
           <AgGridReact
             theme={theme}
@@ -74,9 +133,10 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
             columnDefs={columns}
             columnTypes={columnTypes}
             defaultColDef={defaultColDef}
-            quickFilterText={search}
+            quickFilterText={sanitizedSearch}
             autoSizeStrategy={autoSizeStrategy}
             enableCellTextSelection
+            domLayout="normal"
           />
         </AgGridProvider>
       </div>

@@ -1,3 +1,4 @@
+import React from 'react';
 import type { Metadata } from 'next';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 
@@ -33,8 +34,8 @@ export default async function InvoicesPage() {
         { field: 'status', headerName: 'Status', width: 110 },
         { field: 'recipient', headerName: 'Recipient', flex: 1 },
         { field: 'email', headerName: 'Email', flex: 1 },
-        { field: 'invoiceDate', headerName: 'Invoice Date', cellDataType: 'dateString', width: 130 },
-        { field: 'dueDate', headerName: 'Due Date', cellDataType: 'dateString', width: 130 },
+        { field: 'invoiceDate', headerName: 'Invoice Date', type: 'timestamp', width: 130 },
+        { field: 'dueDate', headerName: 'Due Date', type: 'timestamp', width: 130 },
         { field: 'total', headerName: 'Total', type: 'money', width: 120 },
         { field: 'paid', headerName: 'Paid', type: 'money', width: 120 },
         { field: 'due', headerName: 'Due', type: 'money', width: 120 },

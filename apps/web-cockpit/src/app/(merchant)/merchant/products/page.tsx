@@ -1,3 +1,4 @@
+import React from 'react';
 import type { Metadata } from 'next';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 
@@ -11,7 +12,7 @@ export default async function ProductsPage() {
       type: 'DIGITAL' as const,
       category: 'SOFTWARE',
       description: 'Monthly SaaS seat tier with real-time analytics access',
-      create_time: new Date().toISOString(),
+      create_time: '2026-09-01T12:00:00Z',
     },
     {
       id: 'PROD-2',
@@ -19,7 +20,7 @@ export default async function ProductsPage() {
       type: 'PHYSICAL' as const,
       category: 'ELECTRONICS',
       description: 'Physical USB hardware authentication key',
-      create_time: new Date().toISOString(),
+      create_time: '2026-09-15T15:30:00Z',
     },
   ];
 
@@ -42,7 +43,7 @@ export default async function ProductsPage() {
         { field: 'type', headerName: 'Type', width: 120 },
         { field: 'category', headerName: 'Category', width: 140 },
         { field: 'description', headerName: 'Description', flex: 2 },
-        { field: 'created', headerName: 'Created', cellDataType: 'dateTimeString', width: 200 },
+        { field: 'created', headerName: 'Created', type: 'dateTime', width: 200 },
         { field: 'id', headerName: 'Product ID', width: 140 },
       ]}
     />

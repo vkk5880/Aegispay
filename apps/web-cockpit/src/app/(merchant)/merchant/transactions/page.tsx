@@ -1,3 +1,4 @@
+import React from 'react';
 import type { Metadata } from 'next';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 
@@ -7,7 +8,7 @@ export default async function TransactionsPage() {
   const transactions = [
     {
       id: 'TXN-DEMO-001',
-      date: new Date().toISOString(),
+      date: '2026-11-04T14:22:00Z',
       eventCode: 'T0001',
       status: 'S',
       amount: 150.0,
@@ -29,7 +30,7 @@ export default async function TransactionsPage() {
       note="Transaction Search covers at most 31 days per request. Event codes are PayPal T-codes (T0001 = payout); status S = success, P = pending."
       rows={transactions}
       columns={[
-        { field: 'date', headerName: 'Date', cellDataType: 'dateTimeString', width: 190 },
+        { field: 'date', headerName: 'Date', type: 'dateTime', width: 190 },
         { field: 'id', headerName: 'Transaction ID', width: 150 },
         { field: 'eventCode', headerName: 'Event Code', width: 110 },
         { field: 'status', headerName: 'Status', width: 90 },

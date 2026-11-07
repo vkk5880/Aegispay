@@ -1,3 +1,4 @@
+import React from 'react';
 import type { Metadata } from 'next';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 
@@ -15,7 +16,7 @@ export default async function PlansPage() {
       trial: 'None',
       setupFee: 0,
       currency: 'USD',
-      created: new Date().toISOString(),
+      created: '2026-10-15T08:30:00Z',
     },
   ];
 
@@ -35,7 +36,7 @@ export default async function PlansPage() {
         { field: 'trial', headerName: 'Trial', width: 110 },
         { field: 'setupFee', headerName: 'Setup fee', type: 'money', width: 120 },
         { field: 'currency', headerName: 'Currency', width: 100 },
-        { field: 'created', headerName: 'Created', cellDataType: 'dateTimeString', width: 200 },
+        { field: 'created', headerName: 'Created', type: 'dateTime', width: 200 },
         { field: 'id', headerName: 'Plan ID', width: 130 },
       ]}
     />

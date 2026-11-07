@@ -2,9 +2,119 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { ValueFormatterParams } from 'ag-grid-community';
 import { DashboardReports } from './DashboardReports.js';
-import { DataGrid } from './DataGrid.js';
+import {
+  DataGrid,
+  formatMoney,
+  formatTimestamp,
+  sanitizeQuickFilter,
+  columnTypes,
+  type Row,
+} from './DataGrid.js';
 import { EndpointPage } from './EndpointPage.js';
+import BalancesPage from '../../app/(merchant)/merchant/balances/page.js';
+import InvoicesPage from '../../app/(merchant)/merchant/invoices/page.js';
+import PlansPage from '../../app/(merchant)/merchant/plans/page.js';
+import ProductsPage from '../../app/(merchant)/merchant/products/page.js';
+import TransactionsPage from '../../app/(merchant)/merchant/transactions/page.js';
+
+test('formatMoney: correctly formats valid numbers and currencies', () => {
+  const params1 = {
+    value: 1250.5,
+    data: { currency: 'USD' },
+  } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(params1), '$1,250.50');
+
+  const params2 = {
+    value: 99,
+    data: { currency: 'EUR' },
+  } as ValueFormatterParams<Row>;
+  assert.ok(formatMoney(params2).includes('99.00'));
+
+  const params3 = {
+    value: 0,
+    data: { currency: 'USD' },
+  } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(params3), '$0.00');
+
+  const params4 = {
+    value: -45.2,
+    data: { currency: 'USD' },
+  } as ValueFormatterParams<Row>;
+  assert.ok(formatMoney(params4).includes('45.20'));
+});
+
+test('formatMoney: gracefully handles null, undefined, NaN, and invalid currencies', () => {
+  const nullVal = { value: null, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(nullVal), '—');
+
+  const undefinedVal = { value: undefined, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(undefinedVal), '—');
+
+  const emptyVal = { value: '', data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(emptyVal), '—');
+
+  const nanVal = { value: NaN, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(nanVal), '—');
+
+  const infVal = { value: Infinity, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(infVal), '—');
+
+  // Missing or non-string currency falls back to USD
+  const missingCurrency = { value: 25.5, data: {} } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(missingCurrency), '$25.50');
+
+  // Invalid currency format (e.g. symbols, lowercase or non-3-letter) sanitized to USD
+  const invalidCurrency = { value: 10, data: { currency: 'INVALID_123' } } as ValueFormatterParams<Row>;
+  assert.equal(formatMoney(invalidCurrency), '$10.00');
+});
+
+test('formatTimestamp: correctly formats valid ISO strings and Date objects', () => {
+  const isoParams = {
+    value: '2026-11-04T14:22:00.000Z',
+  } as ValueFormatterParams<Row>;
+  assert.equal(formatTimestamp(isoParams), '2026-11-04 14:22:00 UTC');
+
+  const dateParams = {
+    value: new Date('2026-05-10T12:00:00.000Z'),
+  } as ValueFormatterParams<Row>;
+  assert.equal(formatTimestamp(dateParams), '2026-05-10 12:00:00 UTC');
+});
+
+test('formatTimestamp: gracefully handles null, undefined, empty, and invalid dates', () => {
+  assert.equal(formatTimestamp({ value: null } as ValueFormatterParams<Row>), '—');
+  assert.equal(formatTimestamp({ value: undefined } as ValueFormatterParams<Row>), '—');
+  assert.equal(formatTimestamp({ value: '' } as ValueFormatterParams<Row>), '—');
+  assert.equal(formatTimestamp({ value: 'not-a-real-date' } as ValueFormatterParams<Row>), '—');
+});
+
+test('sanitizeQuickFilter: safely escapes regex metacharacters and handles non-string inputs', () => {
+  assert.equal(sanitizeQuickFilter(null), '');
+  assert.equal(sanitizeQuickFilter(undefined), '');
+  assert.equal(sanitizeQuickFilter(123), '');
+  assert.equal(sanitizeQuickFilter('simple text'), 'simple text');
+  assert.equal(sanitizeQuickFilter('   trimmed text   '), 'trimmed text');
+
+  // Special regex characters: [.*+?^${}()|[\]\\]
+  const maliciousRegex = '[.*+?^${}()|[\\]\\]';
+  const sanitized = sanitizeQuickFilter(maliciousRegex);
+  // None of the unescaped characters should remain raw
+  assert.equal(sanitized, '\\[\\.\\*\\+\\?\\^\\$\\{\\}\\(\\)\\|\\[\\\\\\]\\\\\\]');
+
+  // Common quick search queries with symbols
+  assert.equal(sanitizeQuickFilter('$100.00 USD'), '\\$100\\.00 USD');
+  assert.equal(sanitizeQuickFilter('Order #123 (pending)?'), 'Order #123 \\(pending\\)\\?');
+});
+
+test('columnTypes definition registers money, timestamp, and dateTime formatters', () => {
+  assert.ok(columnTypes.money);
+  assert.equal(columnTypes.money.valueFormatter, formatMoney);
+  assert.ok(columnTypes.timestamp);
+  assert.equal(columnTypes.timestamp.valueFormatter, formatTimestamp);
+  assert.ok(columnTypes.dateTime);
+  assert.equal(columnTypes.dateTime.valueFormatter, formatTimestamp);
+});
 
 test('DashboardReports renders all 5 report cards and metrics', () => {
   const html = renderToStaticMarkup(
@@ -71,4 +181,36 @@ test('EndpointPage renders header metadata, source API, calls, and DataGrid', ()
   assert.ok(html.includes('Account balance reporting test note'));
   assert.ok(html.includes('1 row'));
   assert.ok(html.includes('Search all columns…'));
+});
+
+test('All 5 merchant report subpages load seamlessly under SSR without errors', async () => {
+  const balancesEl = await BalancesPage();
+  const balancesHtml = renderToStaticMarkup(balancesEl);
+  assert.ok(balancesHtml.includes('Merchant Balances'));
+  assert.ok(balancesHtml.includes('GET /v1/reporting/balances'));
+  assert.ok(balancesHtml.includes('getBalances()'));
+
+  const invoicesEl = await InvoicesPage();
+  const invoicesHtml = renderToStaticMarkup(invoicesEl);
+  assert.ok(invoicesHtml.includes('Commercial Invoices'));
+  assert.ok(invoicesHtml.includes('GET /v2/invoicing/invoices'));
+  assert.ok(invoicesHtml.includes('listInvoices()'));
+
+  const plansEl = await PlansPage();
+  const plansHtml = renderToStaticMarkup(plansEl);
+  assert.ok(plansHtml.includes('Billing Plans'));
+  assert.ok(plansHtml.includes('GET /v1/billing/plans'));
+  assert.ok(plansHtml.includes('listPlans()'));
+
+  const productsEl = await ProductsPage();
+  const productsHtml = renderToStaticMarkup(productsEl);
+  assert.ok(productsHtml.includes('Catalog Products'));
+  assert.ok(productsHtml.includes('GET /v1/catalogs/products'));
+  assert.ok(productsHtml.includes('listProducts()'));
+
+  const txEl = await TransactionsPage();
+  const txHtml = renderToStaticMarkup(txEl);
+  assert.ok(txHtml.includes('Transaction Search (Last 31 Days)'));
+  assert.ok(txHtml.includes('GET /v1/reporting/transactions'));
+  assert.ok(txHtml.includes('searchTransactions(start, end)'));
 });
