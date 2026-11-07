@@ -10,6 +10,10 @@ export const HEADER_PAY_TO = 'PAY-TO';
 export const HEADER_X_PAYMENT_CONTRACT_ID = 'X-Payment-Contract-Id';
 export const HEADER_X_PAYPAL_VAULT_SETUP_URL = 'X-PayPal-Vault-Setup-Url';
 export const HEADER_PAYMENT_REQUIRED = 'PAYMENT-REQUIRED';
+export const HEADER_X_PAYMENT_REQUIRED = 'X-Payment-Required';
+export const HEADER_WWW_AUTHENTICATE = 'WWW-Authenticate';
+export const HEADER_AUTHORIZATION = 'Authorization';
+export const HEADER_X_CHALLENGE_RESPONSE = 'X-Challenge-Response';
 export const HEADER_X_AEGIS_SPEND_POLICY = 'X-Aegis-Spend-Policy';
 export const HEADER_X_PAYMENT_RECEIPT = 'X-Payment-Receipt';
 export const HEADER_X_SPEND_MANDATE_ID = 'X-Spend-Mandate-Id';
@@ -19,6 +23,14 @@ export const HEADER_X_A2A_VERSION = 'X-A2A-Version';
 export const X402_EXTENSION_URI_V1 = 'https://github.com/google-a2a/a2a-x402/v0.1';
 export const X402_EXTENSION_URI_V2 = 'https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2';
 export const X402_EXTENSION_URI = X402_EXTENSION_URI_V2;
+
+/**
+ * Generates an RFC/L402-compliant challenge header value
+ */
+export function generateL402Challenge(contractId: string, invoice?: string): string {
+  const inv = invoice || `inv_${contractId}`;
+  return `L402 token="${contractId}", invoice="${inv}"`;
+}
 
 /**
  * Creates A2A extension declaration for AgentCard
@@ -101,7 +113,51 @@ const DEFAULT_PROTECTED_PREFIXES = [
 const DEFAULT_SECRET = process.env.AEGIS_HMAC_SECRET || 'aegispay_test_secret_key_402';
 
 /**
- * Generates an RFC/x402-compliant cryptographically signed payment receipt
+ * Timing-safe string comparison preventing timing side-channel attacks
+ */
+export function timingSafeEqualString(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Timing-safe hexadecimal string comparison
+ */
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') {
+    return false;
+  }
+  const cleanA = a.trim().toLowerCase();
+  const cleanB = b.trim().toLowerCase();
+  if (!/^[0-9a-f]+$/.test(cleanA) || !/^[0-9a-f]+$/.test(cleanB)) {
+    return false;
+  }
+  const bufA = Buffer.from(cleanA, 'hex');
+  const bufB = Buffer.from(cleanB, 'hex');
+  if (bufA.length !== bufB.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+export interface PaymentReceiptData {
+  readonly contractId: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly timestamp: number;
+  readonly digest: string;
+  readonly hmac: string;
+}
+
+/**
+ * Generates an RFC/x402-compliant cryptographically signed payment receipt with immutable SHA-256 digest
  */
 export function generatePaymentReceipt(
   contractId: string,
@@ -112,49 +168,159 @@ export function generatePaymentReceipt(
 ): string {
   const timestamp = customTimestamp ?? Date.now();
   const payload = `${contractId}:${amountCents}:${currency}:${timestamp}`;
+  // Immutable SHA-256 payload digest
+  const digest = crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
   const hmac = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-  const receiptData = { contractId, amountCents, currency, timestamp, hmac };
+  const receiptData: PaymentReceiptData = Object.freeze({
+    contractId,
+    amountCents,
+    currency,
+    timestamp,
+    digest,
+    hmac,
+  });
   return `rcpt_${Buffer.from(JSON.stringify(receiptData)).toString('base64')}`;
 }
 
 /**
- * Validates cryptographic authenticity and freshness of an x402 payment receipt using timing-safe comparison
+ * Safely parses payment receipt into strongly typed object
+ */
+export function parsePaymentReceipt(receipt: string): PaymentReceiptData | null {
+  if (!receipt || typeof receipt !== 'string' || !receipt.startsWith('rcpt_')) {
+    return null;
+  }
+  try {
+    const raw = Buffer.from(receipt.slice(5), 'base64').toString('utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return Object.freeze({
+      contractId: String(parsed.contractId || ''),
+      amountCents: Number(parsed.amountCents || 0),
+      currency: String(parsed.currency || 'USD'),
+      timestamp: Number(parsed.timestamp || 0),
+      digest: String(parsed.digest || ''),
+      hmac: String(parsed.hmac || ''),
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validates cryptographic authenticity, freshness, and immutable SHA-256 digest of an x402 payment receipt using timing-safe comparison
  */
 export function verifyPaymentReceipt(
   receipt: string,
   secret = DEFAULT_SECRET
 ): boolean {
-  if (!receipt || typeof receipt !== 'string' || !receipt.startsWith('rcpt_')) {
+  const parsed = parsePaymentReceipt(receipt);
+  if (!parsed) {
+    return false;
+  }
+
+  const { contractId, amountCents, currency, timestamp, digest, hmac } = parsed;
+
+  if (!contractId || !amountCents || !currency || !timestamp || !hmac) {
+    return false;
+  }
+
+  // Enforce 24-hour freshness TTL (86,400,000 ms)
+  const now = Date.now();
+  const ageMs = now - timestamp;
+  if (ageMs > 24 * 60 * 60 * 1000 || ageMs < -60000) {
+    return false;
+  }
+
+  const expectedPayload = `${contractId}:${amountCents}:${currency}:${timestamp}`;
+
+  // If immutable digest was attached, verify SHA-256 digest matches payload using timingSafeEqualHex
+  if (digest) {
+    const expectedDigest = crypto.createHash('sha256').update(expectedPayload, 'utf8').digest('hex');
+    if (!timingSafeEqualHex(expectedDigest, digest)) {
+      return false;
+    }
+  }
+
+  const expectedHmac = crypto.createHmac('sha256', secret).update(expectedPayload).digest('hex');
+  return timingSafeEqualHex(expectedHmac, hmac);
+}
+
+export interface ChallengeResponsePayload {
+  contractId: string;
+  preimage?: string;
+  timestamp: number;
+  signature?: string;
+}
+
+/**
+ * Maximum timestamp tolerance for replay protection (±300 seconds)
+ */
+export const REPLAY_PROTECTION_WINDOW_SECONDS = 300;
+export const REPLAY_PROTECTION_WINDOW_MS = REPLAY_PROTECTION_WINDOW_SECONDS * 1000;
+
+/**
+ * Generates signed challenge response with timestamp for replay protection
+ */
+export function generateChallengeResponse(
+  contractId: string,
+  preimage = '',
+  secret = DEFAULT_SECRET,
+  customTimestamp?: number
+): string {
+  const timestamp = customTimestamp ?? Date.now();
+  const rawPayload = `${contractId}:${preimage}:${timestamp}`;
+  const signature = crypto.createHmac('sha256', secret).update(rawPayload).digest('hex');
+  const payload = {
+    contractId,
+    preimage,
+    timestamp,
+    signature,
+  };
+  return Buffer.from(JSON.stringify(payload)).toString('base64');
+}
+
+/**
+ * Verifies challenge response enforcing strict ±300s window and timing-safe signature comparison
+ */
+export function verifyChallengeResponse(
+  responseHeader: string,
+  secret = DEFAULT_SECRET,
+  allowedContractId?: string
+): boolean {
+  if (!responseHeader || typeof responseHeader !== 'string') {
     return false;
   }
 
   try {
-    const raw = Buffer.from(receipt.slice(5), 'base64').toString('utf8');
-    const parsed = JSON.parse(raw);
-    const { contractId, amountCents, currency, timestamp, hmac } = parsed;
+    const raw = Buffer.from(responseHeader.trim(), 'base64').toString('utf8');
+    const parsed: ChallengeResponsePayload = JSON.parse(raw);
 
-    if (!contractId || !amountCents || !currency || !timestamp || !hmac) {
+    if (!parsed || typeof parsed !== 'object') {
       return false;
     }
 
-    // Enforce 24-hour freshness TTL (86,400,000 ms)
+    const { contractId, preimage = '', timestamp, signature } = parsed;
+
+    if (!contractId || !timestamp || !signature) {
+      return false;
+    }
+
+    // Replay protection: reject challenge responses outside ±300s timestamp window
     const now = Date.now();
-    const ageMs = now - timestamp;
-    if (ageMs > 24 * 60 * 60 * 1000 || ageMs < -60000) {
+    const diffMs = Math.abs(now - timestamp);
+    if (diffMs > REPLAY_PROTECTION_WINDOW_MS) {
       return false;
     }
 
-    const expectedPayload = `${contractId}:${amountCents}:${currency}:${timestamp}`;
-    const expectedHmac = crypto.createHmac('sha256', secret).update(expectedPayload).digest('hex');
-
-    const expectedBuf = Buffer.from(expectedHmac, 'hex');
-    const actualBuf = Buffer.from(hmac, 'hex');
-
-    if (expectedBuf.length !== actualBuf.length) {
+    // Contract ID check if specified
+    if (allowedContractId && !timingSafeEqualString(allowedContractId, contractId)) {
       return false;
     }
 
-    return crypto.timingSafeEqual(expectedBuf, actualBuf);
+    const expectedPayload = `${contractId}:${preimage}:${timestamp}`;
+    const expectedSignature = crypto.createHmac('sha256', secret).update(expectedPayload).digest('hex');
+
+    return timingSafeEqualHex(expectedSignature, signature);
   } catch {
     return false;
   }
@@ -195,6 +361,60 @@ export async function executeAgentPaymentRetry<T>(
 }
 
 /**
+ * Safely parses and verifies an authorization header without throwing unhandled exceptions.
+ * Supports L402, x402, Bearer, and raw receipt tokens.
+ */
+export function verifyAuthorizationHeader(
+  authHeader: unknown,
+  secret = DEFAULT_SECRET
+): boolean {
+  if (!authHeader || typeof authHeader !== 'string') {
+    return false;
+  }
+
+  const trimmed = authHeader.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  try {
+    // 1. L402 scheme: L402 <token>:<preimage> or L402 <challenge_response_base64>
+    if (/^L402\s+/i.test(trimmed)) {
+      const token = trimmed.replace(/^L402\s+/i, '').trim();
+      if (!token) return false;
+      if (token.startsWith('rcpt_')) {
+        return verifyPaymentReceipt(token, secret);
+      }
+      return verifyChallengeResponse(token, secret);
+    }
+
+    // 2. x402 scheme: x402 <receipt>
+    if (/^x402\s+/i.test(trimmed)) {
+      const receipt = trimmed.replace(/^x402\s+/i, '').trim();
+      return verifyPaymentReceipt(receipt, secret);
+    }
+
+    // 3. Bearer scheme: Bearer <receipt>
+    if (/^Bearer\s+/i.test(trimmed)) {
+      const token = trimmed.replace(/^Bearer\s+/i, '').trim();
+      if (token.startsWith('rcpt_')) {
+        return verifyPaymentReceipt(token, secret);
+      }
+      return verifyChallengeResponse(token, secret);
+    }
+
+    // 4. Raw receipt format
+    if (trimmed.startsWith('rcpt_')) {
+      return verifyPaymentReceipt(trimmed, secret);
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fastify preHandler HTTP 402 Interceptor
  */
 export const http402Interceptor = async (
@@ -203,36 +423,73 @@ export const http402Interceptor = async (
   options?: Http402InterceptorOptions
 ) => {
   const protectedPrefixes = options?.protectedPrefixes || DEFAULT_PROTECTED_PREFIXES;
-  const path = request.url.split('?')[0];
+  const url = typeof request.url === 'string' ? request.url : '';
+  const path = url.split('?')[0];
 
   const isProtected = protectedPrefixes.some(prefix => path === prefix || path.startsWith(prefix));
   if (!isProtected) {
     return;
   }
 
-  // Check 0: Payment-Identifier Idempotency Check
-  const paymentId = (request.headers['payment-identifier'] || request.headers['PAYMENT-IDENTIFIER']) as string | undefined;
-  if (paymentId) {
-    const fingerprint = computeRequestFingerprint(path, request.body);
-    const idResult = processPaymentIdentifier(paymentId, fingerprint, () => ({ success: true, orderId: 'ord_12345' }));
-    if (idResult.action === 'conflict') {
-      return reply.code(409).send({ error: 'IDEMPOTENCY_CONFLICT', message: idResult.error });
+  const hmacSecret = options?.hmacSecret || DEFAULT_SECRET;
+
+  // Check 0: Payment-Identifier Idempotency Check with defensive error boundary
+  try {
+    const rawPaymentId = request.headers['payment-identifier'] || request.headers['PAYMENT-IDENTIFIER'];
+    const paymentId = typeof rawPaymentId === 'string' ? rawPaymentId.trim() : undefined;
+    if (paymentId) {
+      const fingerprint = computeRequestFingerprint(path, request.body);
+      const idResult = processPaymentIdentifier(paymentId, fingerprint, () => ({ success: true, orderId: 'ord_12345' }));
+      if (idResult.action === 'conflict') {
+        return reply.code(409).send({ error: 'IDEMPOTENCY_CONFLICT', message: idResult.error });
+      }
+      if (idResult.action === 'return_cached') {
+        return reply.code(200).send(idResult.cachedResponse);
+      }
     }
-    if (idResult.action === 'return_cached') {
-      return reply.code(200).send(idResult.cachedResponse);
-    }
+  } catch {
+    // Malformed idempotency header or body should not crash server; proceed to security evaluation
   }
 
   // Check 0b: Sign-In-With-X (SIWX) wallet proof bypass
-  const siwxHeader = (request.headers['sign-in-with-x'] || request.headers['SIGN-IN-WITH-X']) as string | undefined;
-  if (siwxHeader) {
-    return;
+  try {
+    const rawSiwxHeader = request.headers['sign-in-with-x'] || request.headers['SIGN-IN-WITH-X'];
+    if (typeof rawSiwxHeader === 'string' && rawSiwxHeader.trim().length > 0) {
+      return;
+    }
+  } catch {
+    // Malformed SIWX header treated as unauthenticated
   }
 
-  // Check 1: Valid cryptographic payment receipt header (X-Payment-Receipt)
-  const paymentReceipt = request.headers['x-payment-receipt'] as string | undefined;
-  if (paymentReceipt && verifyPaymentReceipt(paymentReceipt, options?.hmacSecret || DEFAULT_SECRET)) {
-    return;
+  // Check 1: Standard Authorization header verification (L402, x402, Bearer)
+  try {
+    const authHeader = request.headers['authorization'] || request.headers['AUTHORIZATION'];
+    if (verifyAuthorizationHeader(authHeader, hmacSecret)) {
+      return;
+    }
+  } catch {
+    // Handled defensively
+  }
+
+  // Check 1b: X-Challenge-Response replay-protected challenge verification
+  try {
+    const rawChallengeResp = request.headers['x-challenge-response'] || request.headers['X-Challenge-Response'];
+    if (typeof rawChallengeResp === 'string' && verifyChallengeResponse(rawChallengeResp, hmacSecret)) {
+      return;
+    }
+  } catch {
+    // Handled defensively
+  }
+
+  // Check 1c: Valid cryptographic payment receipt header (X-Payment-Receipt)
+  try {
+    const rawPaymentReceipt = request.headers['x-payment-receipt'] || request.headers['X-Payment-Receipt'];
+    const paymentReceipt = typeof rawPaymentReceipt === 'string' ? rawPaymentReceipt.trim() : undefined;
+    if (paymentReceipt && verifyPaymentReceipt(paymentReceipt, hmacSecret)) {
+      return;
+    }
+  } catch {
+    // Handled defensively
   }
 
   // Check 2: Active Spend Mandate or Synthetic Voucher
@@ -271,11 +528,14 @@ export const http402Interceptor = async (
   };
 
   const paymentRequiredHeader = Buffer.from(JSON.stringify(challenge)).toString('base64');
+  const l402Authenticate = generateL402Challenge(contractId, `inv_${contractId}`);
 
   reply.status(402);
   reply.header(HEADER_PAY_TO, payTo);
   reply.header(HEADER_X_PAYMENT_CONTRACT_ID, contractId);
   reply.header(HEADER_PAYMENT_REQUIRED, paymentRequiredHeader);
+  reply.header(HEADER_X_PAYMENT_REQUIRED, paymentRequiredHeader);
+  reply.header(HEADER_WWW_AUTHENTICATE, l402Authenticate);
   reply.header(HEADER_X_PAYPAL_VAULT_SETUP_URL, vaultUrl);
   reply.header(HEADER_X_AEGIS_SPEND_POLICY, JSON.stringify(challenge.spend_policy));
   reply.header(HEADER_X_A2A_EXTENSIONS, X402_EXTENSION_URI);
@@ -1303,7 +1563,8 @@ export function processPaymentIdentifier(
   // 2. Lookup existing ID
   const existing = paymentIdempotencyStore.get(paymentId);
   if (existing) {
-    if (existing.fingerprint !== fingerprint) {
+    // Timing-safe hexadecimal comparison on SHA-256 fingerprints
+    if (!timingSafeEqualHex(existing.fingerprint, fingerprint)) {
       return {
         action: 'conflict',
         error: 'IDEMPOTENCY_CONFLICT: Payment identifier reused with different request payload or contract parameters',
