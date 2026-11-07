@@ -305,6 +305,14 @@ export class VaultOnboardingService {
 
     const orderId = createdOrder?.id || `ORD_${Date.now()}`;
 
+    // 3.5 Evaluate 3D Secure liability shift per 3d-secure.md
+    // liability_shift: POSSIBLE — proceed; NO — merchant bears liability, decline; UNKNOWN — issuer unavailable
+    const cardVerification = createdOrder?.payment_source?.card?.authentication_result ||
+      createdOrder?.attributes?.verification?.['3d_secure'];
+    if (cardVerification?.liability_shift === 'NO') {
+      throw new Error('LIABILITY_SHIFT_NO: Card issuer did not grant liability shift. Order capture declined for seller protection.');
+    }
+
     // 4. Capture headless order if not already COMPLETED
     let captureResponse = createdOrder;
     if (createdOrder?.status !== 'COMPLETED') {

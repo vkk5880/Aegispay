@@ -1,0 +1,404 @@
+import { ForensicsFactors, DisputeMatrixDecision, defaultDisputeMatrixService } from './dispute-matrix.js';
+import { defaultPayPalClient, PayPalApimaticClient } from './paypal-apimatic.js';
+
+export interface BoundingBoxCoordinates {
+  ymin: number;
+  xmin: number;
+  ymax: number;
+  xmax: number;
+}
+
+export interface DefectAnalysisResult {
+  valid: boolean;
+  defectAreaRatio: number; // Normalized area [0, 1]
+  defectSeverityScore: number; // S_defect in [0, 1]
+  centralityScore: number;
+  defectClass: 'NEGLIGIBLE' | 'COSMETIC' | 'FUNCTIONAL' | 'CRITICAL_DEFECT';
+  description: string;
+}
+
+export interface ExifTamperAnalysisResult {
+  exifTamperFlag: boolean; // I_exif_tamper in {0, 1}
+  softwareDetected?: string;
+  anomalyReasons: string[];
+  cameraDevice?: string;
+  originalTimestamp?: string;
+  digitizedTimestamp?: string;
+}
+
+export interface HateoasActionLink {
+  rel: string;
+  href: string;
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  title: string;
+  description: string;
+  tierRequired?: string;
+}
+
+export interface DisputeLifecycleHateoasMatrix {
+  disputeId: string;
+  stage: 'INQUIRY' | 'CLAIM' | 'CHARGEBACK' | 'PRE_ARBITRATION' | 'ARBITRATION' | 'RESOLVED';
+  status: string;
+  disputeAmountCents: number;
+  sellerResponseDueDate?: string;
+  hoursUntilSlaExpiry?: number;
+  slaBreachRisk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL_BREACH';
+  allowedActions: string[];
+  links: HateoasActionLink[];
+  recommendedAction: string;
+  matrixDecision?: DisputeMatrixDecision;
+}
+
+/**
+ * Known image manipulation and editing software identifiers to flag as evidence tampering.
+ * Stock camera tags (Apple, Samsung, Google Pixel, Sony, etc.) are treated as legitimate.
+ */
+const KNOWN_EDITING_SIGNATURES = [
+  'adobe photoshop',
+  'photoshop',
+  'gimp',
+  'canva',
+  'lightroom',
+  'pixelmator',
+  'snapseed',
+  'affinity photo',
+  'coreldraw',
+  'photopea',
+  'vsco',
+  'facetune',
+  'picsart',
+  'paint.net',
+];
+
+export class DisputeForensicsService {
+  private paypalClient: PayPalApimaticClient;
+
+  constructor(paypalClient?: PayPalApimaticClient) {
+    this.paypalClient = paypalClient || defaultPayPalClient;
+  }
+
+  /**
+   * Evaluates normalized defect bounding box coordinates [ymin, xmin, ymax, xmax]
+   * to determine defect severity score S_defect according to the AegisPay Two-Dimensional Matrix.
+   */
+  analyzeDefectBoundingBox(
+    box: [number, number, number, number] | BoundingBoxCoordinates
+  ): DefectAnalysisResult {
+    let ymin: number, xmin: number, ymax: number, xmax: number;
+
+    if (Array.isArray(box)) {
+      [ymin, xmin, ymax, xmax] = box;
+    } else {
+      ymin = box.ymin;
+      xmin = box.xmin;
+      ymax = box.ymax;
+      xmax = box.xmax;
+    }
+
+    // Clamp coordinates to normalized range [0.0, 1.0]
+    const clampedYmin = Math.max(0, Math.min(1, ymin));
+    const clampedXmin = Math.max(0, Math.min(1, xmin));
+    const clampedYmax = Math.max(0, Math.min(1, ymax));
+    const clampedXmax = Math.max(0, Math.min(1, xmax));
+
+    if (clampedYmin >= clampedYmax || clampedXmin >= clampedXmax) {
+      return {
+        valid: false,
+        defectAreaRatio: 0,
+        defectSeverityScore: 0.05,
+        centralityScore: 0,
+        defectClass: 'NEGLIGIBLE',
+        description: 'Invalid or inverted bounding box coordinates provided.',
+      };
+    }
+
+    const height = clampedYmax - clampedYmin;
+    const width = clampedXmax - clampedXmin;
+    const areaRatio = Number((height * width).toFixed(4));
+
+    // Calculate centrality (distance from center of image [0.5, 0.5])
+    const centerY = (clampedYmin + clampedYmax) / 2;
+    const centerX = (clampedXmin + clampedXmax) / 2;
+    const distanceFromCenter = Math.sqrt(Math.pow(centerY - 0.5, 2) + Math.pow(centerX - 0.5, 2));
+    const centralityScore = Number(Math.max(0, 1 - distanceFromCenter / 0.707).toFixed(3));
+
+    // Defect severity score calculation: 70% area ratio + 30% centrality
+    let rawScore = areaRatio * 0.7 + centralityScore * 0.3;
+    const defectSeverityScore = Number(Math.min(1.0, Math.max(0.05, rawScore)).toFixed(3));
+
+    let defectClass: DefectAnalysisResult['defectClass'];
+    let description: string;
+
+    if (defectSeverityScore < 0.20) {
+      defectClass = 'NEGLIGIBLE';
+      description = 'Minor surface variance or negligible cosmetic mark. Safe for Tier 4 forensic contest.';
+    } else if (defectSeverityScore < 0.50) {
+      defectClass = 'COSMETIC';
+      description = 'Localized cosmetic defect. Eligible for Tier 2 Keep-The-Item partial compromise.';
+    } else if (defectSeverityScore < 0.80) {
+      defectClass = 'FUNCTIONAL';
+      description = 'Substantial functional flaw or damage. Requires Tier 3 return item scan.';
+    } else {
+      defectClass = 'CRITICAL_DEFECT';
+      description = 'Critical structural defect rendering item unusable. Eligible for Tier 1 micro-refund or return.';
+    }
+
+    return {
+      valid: true,
+      defectAreaRatio: areaRatio,
+      defectSeverityScore,
+      centralityScore,
+      defectClass,
+      description,
+    };
+  }
+
+  /**
+   * Scans EXIF metadata or raw image buffer for editing software signatures and temporal anomalies.
+   */
+  detectExifTampering(metadata: {
+    software?: string;
+    make?: string;
+    model?: string;
+    dateTimeOriginal?: string;
+    dateTimeDigitized?: string;
+    modifyDate?: string;
+    rawBuffer?: Buffer | Uint8Array;
+  }): ExifTamperAnalysisResult {
+    const anomalyReasons: string[] = [];
+    let softwareDetected: string | undefined;
+
+    // 1. Scan software string
+    const software = (metadata.software || '').toLowerCase();
+    for (const signature of KNOWN_EDITING_SIGNATURES) {
+      if (software.includes(signature)) {
+        softwareDetected = metadata.software;
+        anomalyReasons.push(`Image edited with third-party graphics tool: "${metadata.software}"`);
+        break;
+      }
+    }
+
+    // 2. Scan raw buffer for ASCII signatures if provided
+    if (!softwareDetected && metadata.rawBuffer) {
+      const bufferString = Buffer.from(metadata.rawBuffer).toString('binary').toLowerCase();
+      for (const signature of KNOWN_EDITING_SIGNATURES) {
+        if (bufferString.includes(signature)) {
+          softwareDetected = signature;
+          anomalyReasons.push(`Binary buffer contains metadata signature for: "${signature}"`);
+          break;
+        }
+      }
+    }
+
+    // 3. Temporal discrepancy check between capture and digitization/modification
+    if (metadata.dateTimeOriginal && metadata.modifyDate) {
+      try {
+        const origTime = new Date(metadata.dateTimeOriginal.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')).getTime();
+        const modTime = new Date(metadata.modifyDate.replace(/^(\d{4}):(\d{2}):(\d{2})/, '$1-$2-$3')).getTime();
+        if (!isNaN(origTime) && !isNaN(modTime)) {
+          const diffHours = Math.abs(modTime - origTime) / (1000 * 60 * 60);
+          if (diffHours > 72) {
+            anomalyReasons.push(`EXIF timestamp discrepancy of ${Math.round(diffHours)} hours between capture and modification.`);
+          }
+        }
+      } catch {
+        // Fallback for non-standard date strings
+      }
+    }
+
+    const exifTamperFlag = anomalyReasons.length > 0;
+    const cameraDevice = [metadata.make, metadata.model].filter(Boolean).join(' ');
+
+    return {
+      exifTamperFlag,
+      softwareDetected,
+      anomalyReasons,
+      cameraDevice: cameraDevice || undefined,
+      originalTimestamp: metadata.dateTimeOriginal,
+      digitizedTimestamp: metadata.dateTimeDigitized,
+    };
+  }
+
+  /**
+   * Evaluates dispute lifecycle stage against PayPal HATEOAS rules and SLA deadlines
+   * to produce dynamically valid action links and recommended arbitration steps.
+   */
+  evaluateHateoasMatrix(params: {
+    disputeId: string;
+    stage?: 'INQUIRY' | 'CLAIM' | 'CHARGEBACK' | 'PRE_ARBITRATION' | 'ARBITRATION' | 'RESOLVED';
+    status?: string;
+    disputeAmountCents: number;
+    sellerResponseDueDate?: string;
+    factors?: Partial<ForensicsFactors>;
+  }): DisputeLifecycleHateoasMatrix {
+    const stage = params.stage || 'INQUIRY';
+    const disputeId = params.disputeId;
+    const amountCents = params.disputeAmountCents;
+
+    // Calculate SLA hours remaining
+    let hoursUntilSlaExpiry: number | undefined;
+    let slaBreachRisk: DisputeLifecycleHateoasMatrix['slaBreachRisk'] = 'LOW';
+
+    if (params.sellerResponseDueDate) {
+      const dueDate = new Date(params.sellerResponseDueDate).getTime();
+      const now = Date.now();
+      hoursUntilSlaExpiry = Math.max(0, Math.round((dueDate - now) / (1000 * 60 * 60)));
+
+      if (hoursUntilSlaExpiry <= 0) {
+        slaBreachRisk = 'CRITICAL_BREACH';
+      } else if (hoursUntilSlaExpiry <= 20) {
+        // Pre-chargeback 20-hour alert window per disputes-refunds.md
+        slaBreachRisk = 'HIGH';
+      } else if (hoursUntilSlaExpiry <= 72) {
+        slaBreachRisk = 'MEDIUM';
+      }
+    }
+
+    // Default factors for matrix decision
+    const fullFactors: ForensicsFactors = {
+      defect_severity_score: params.factors?.defect_severity_score ?? 0.25,
+      non_delivery_score: params.factors?.non_delivery_score ?? 0.0,
+      policy_valid_score: params.factors?.policy_valid_score ?? 0.85,
+      exif_tamper_flag: params.factors?.exif_tamper_flag ?? false,
+      identity_match_score: params.factors?.identity_match_score ?? 0.9,
+      buyer_dispute_velocity_score: params.factors?.buyer_dispute_velocity_score ?? 0.1,
+      dispute_amount_cents: amountCents,
+    };
+
+    const matrixDecision = defaultDisputeMatrixService.calculateLiabilityAndAbuse(fullFactors);
+
+    const allowedActions: string[] = [];
+    const links: HateoasActionLink[] = [];
+
+    // Construct stage-specific HATEOAS links matching PayPal Disputes API
+    if (stage === 'INQUIRY') {
+      // INQUIRY: up to 20 days. Parties resolve directly before PayPal adjudication.
+      allowedActions.push('send_message', 'make_offer', 'provide_evidence', 'escalate_to_claim');
+
+      links.push({
+        rel: 'send-message',
+        href: `/api/disputes/${disputeId}/message`,
+        method: 'POST',
+        title: 'Send Buyer Message',
+        description: 'Post a direct communication message into the PayPal dispute thread.',
+      });
+
+      links.push({
+        rel: 'make-offer',
+        href: `/api/disputes/${disputeId}/offer`,
+        method: 'POST',
+        title: 'Make Settlement Offer',
+        description: 'Propose a partial refund or return compromise before claim escalation.',
+        tierRequired: matrixDecision.selected_tier_action,
+      });
+
+      links.push({
+        rel: 'provide-evidence',
+        href: `/api/disputes/${disputeId}/evidence`,
+        method: 'POST',
+        title: 'Submit Evidence Dossier',
+        description: 'Upload carrier tracking and defect bounding box analysis.',
+      });
+
+      links.push({
+        rel: 'escalate',
+        href: `/api/disputes/${disputeId}/escalate`,
+        method: 'POST',
+        title: 'Escalate to Formal Claim',
+        description: 'Advance dispute from informal INQUIRY to formal PayPal CLAIM adjudication.',
+      });
+    } else if (stage === 'CLAIM') {
+      // CLAIM: PayPal adjudicates.
+      allowedActions.push('accept_claim', 'make_offer', 'provide_evidence', 'appeal');
+
+      links.push({
+        rel: 'accept-claim',
+        href: `/api/disputes/${disputeId}/accept`,
+        method: 'POST',
+        title: 'Accept Claim & Full Refund',
+        description: 'Immediately concede claim and issue full refund from merchant balance.',
+      });
+
+      links.push({
+        rel: 'make-offer',
+        href: `/api/disputes/${disputeId}/offer`,
+        method: 'POST',
+        title: 'Propose Settlement Offer',
+        description: 'Offer a partial refund amount without conceding liability.',
+      });
+
+      links.push({
+        rel: 'provide-evidence',
+        href: `/api/disputes/${disputeId}/evidence`,
+        method: 'POST',
+        title: 'Submit Adjudication Evidence',
+        description: 'Transmit compiled PDF forensic dossier to PayPal resolution center.',
+      });
+
+      links.push({
+        rel: 'appeal',
+        href: `/api/disputes/${disputeId}/appeal`,
+        method: 'POST',
+        title: 'Submit Claim Appeal',
+        description: 'Challenge preliminary adjudication with secondary proof.',
+      });
+    } else if (stage === 'CHARGEBACK') {
+      // CHARGEBACK: external bank / card issuer dispute.
+      allowedActions.push('provide_evidence', 'accept_claim');
+
+      links.push({
+        rel: 'provide-evidence',
+        href: `/api/disputes/${disputeId}/evidence`,
+        method: 'POST',
+        title: 'Submit Issuer Evidence',
+        description: 'Provide proof of delivery and 3D Secure liability shift to issuing bank.',
+      });
+
+      links.push({
+        rel: 'accept-claim',
+        href: `/api/disputes/${disputeId}/accept`,
+        method: 'POST',
+        title: 'Accept Chargeback',
+        description: 'Accept the bank chargeback to mitigate dispute arbitration fees.',
+      });
+    } else {
+      allowedActions.push('provide_evidence', 'view_dossier');
+      links.push({
+        rel: 'view-dossier',
+        href: `/api/disputes/${disputeId}/dossier`,
+        method: 'GET',
+        title: 'View Forensic Dossier',
+        description: 'Retrieve immutable arbitration ledger and PDF dossier record.',
+      });
+    }
+
+    let recommendedAction = 'Review claim details';
+    if (matrixDecision.selected_tier_action === 'TIER1_REFUND') {
+      recommendedAction = 'Execute Tier 1 Instant Refund to prevent chargeback fees.';
+    } else if (matrixDecision.selected_tier_action === 'TIER2_PARTIAL_OFFER') {
+      recommendedAction = `Propose Tier 2 Partial Compromise Offer ($${((matrixDecision.partial_offer_amount_cents || 0) / 100).toFixed(2)}).`;
+    } else if (matrixDecision.selected_tier_action === 'TIER3_RETURN_OFFER') {
+      recommendedAction = 'Generate USPS/FedEx return label and condition refund on scan.';
+    } else if (matrixDecision.selected_tier_action === 'TIER4_CONTEST_PDF') {
+      recommendedAction = 'Transmit Tier 4 Compiled PDF Forensic Evidence Defense.';
+    } else if (matrixDecision.selected_tier_action === 'TIER5_SLA_ESCALATE') {
+      recommendedAction = 'Escalate to Senior Arbitration Analyst on Bryntum SLA Scheduler.';
+    }
+
+    return {
+      disputeId,
+      stage,
+      status: params.status || 'UNDER_REVIEW',
+      disputeAmountCents: amountCents,
+      sellerResponseDueDate: params.sellerResponseDueDate,
+      hoursUntilSlaExpiry,
+      slaBreachRisk,
+      allowedActions,
+      links,
+      recommendedAction,
+      matrixDecision,
+    };
+  }
+}
+
+export const defaultDisputeForensicsService = new DisputeForensicsService();
