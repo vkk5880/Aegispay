@@ -13,6 +13,9 @@ import {
   ChevronRight,
   ShieldCheck,
   XCircle,
+  CreditCard,
+  Lock,
+  ExternalLink,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -26,12 +29,23 @@ export interface TransmutedResolutionAction {
 
 export interface TransmutedError {
   rawCode: string;
-  category: 'BUDGET_OVERAGE' | 'MANDATE_EXPIRED' | 'MERCHANT_CAP' | 'ANOMALY_RISK' | 'UNAUTHORIZED_CATEGORY' | 'PAYPAL_API' | 'UNKNOWN';
+  category:
+    | 'BUDGET_OVERAGE'
+    | 'MANDATE_EXPIRED'
+    | 'MERCHANT_CAP'
+    | 'ANOMALY_RISK'
+    | 'UNAUTHORIZED_CATEGORY'
+    | 'PAYPAL_API'
+    | 'CARD_DECLINED'
+    | '3D_SECURE_REQUIRED'
+    | 'RATE_LIMIT'
+    | 'IDEMPOTENCY_CONFLICT'
+    | 'UNKNOWN';
   title: string;
   friendlyMessage: string;
   badge: {
     label: string;
-    variant: 'amber' | 'rose' | 'indigo' | 'violet' | 'slate';
+    variant: 'amber' | 'rose' | 'indigo' | 'violet' | 'slate' | 'emerald';
   };
   details?: string;
   overageCents?: number;
@@ -50,6 +64,7 @@ export interface FriendlyErrorTransmuterProps {
 /**
  * Transmutes cryptic Redis Lua enforcer error codes and PayPal API errors
  * into structured, empathetic, user-friendly recovery instructions with 1-click resolution buttons.
+ * Grounded in PayPal Doctor & Explain-Error diagnostic specifications.
  */
 export function transmuteError(rawInput: string | Error | any): TransmutedError {
   const errString = typeof rawInput === 'string'
@@ -189,20 +204,116 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
     };
   }
 
-  // 6. PayPal API errors (PAYER_ACTION_REQUIRED, INSTRUMENT_DECLINED, etc.)
+  // 6. INSTRUMENT_DECLINED — PayPal card / funding source decline
+  if (errString.includes('INSTRUMENT_DECLINED')) {
+    return {
+      rawCode: 'INSTRUMENT_DECLINED',
+      category: 'CARD_DECLINED',
+      title: 'Payment Method Declined by Card Issuer',
+      friendlyMessage:
+        'Your card or funding instrument was declined by the issuing institution. As per PayPal security protocol, we do not retry the same instrument — please switch to an alternate card or PayPal balance.',
+      badge: { label: 'Card Decline Recovery', variant: 'rose' },
+      details: 'Orders API v2 returned 422 INSTRUMENT_DECLINED. Compensating rollback activated with zero liability.',
+      actions: [
+        {
+          id: 'SWITCH_PAYMENT_METHOD',
+          label: 'Switch Payment Method',
+          variant: 'primary',
+          icon: CreditCard,
+        },
+        {
+          id: 'USE_PAYPAL_BALANCE',
+          label: 'Use PayPal Balance / Venmo',
+          variant: 'secondary',
+          icon: Coins,
+        },
+      ],
+    };
+  }
+
+  // 7. PAYER_ACTION_REQUIRED & 3D Secure verification
+  if (errString.includes('PAYER_ACTION_REQUIRED') || errString.includes('3D_SECURE_REQUIRED') || errString.includes('LIABILITY_SHIFT_NO')) {
+    return {
+      rawCode: 'PAYER_ACTION_REQUIRED',
+      category: '3D_SECURE_REQUIRED',
+      title: 'Strong Customer Authentication (3DS) Required',
+      friendlyMessage:
+        'European PSD2 regulations require 3D Secure cardholder confirmation. Please complete the quick verification step with your bank.',
+      badge: { label: 'PSD2 / 3DS Shield', variant: 'indigo' },
+      details: 'Payer authentication challenge issued to ensure merchant liability shift protection.',
+      actions: [
+        {
+          id: 'COMPLETE_3DS_ACTION',
+          label: 'Authenticate with Bank (3DS)',
+          variant: 'primary',
+          icon: ExternalLink,
+        },
+        {
+          id: 'CHOOSE_ALTERNATIVE_METHOD',
+          label: 'Choose Different Card',
+          variant: 'outline',
+          icon: CreditCard,
+        },
+      ],
+    };
+  }
+
+  // 8. RATE_LIMIT_REACHED (429)
+  if (errString.includes('RATE_LIMIT_REACHED') || errString.includes('429')) {
+    return {
+      rawCode: 'RATE_LIMIT_REACHED',
+      category: 'RATE_LIMIT',
+      title: 'PayPal API Rate Limit Reached',
+      friendlyMessage:
+        'The PayPal gateway is experiencing high request volume. Our retry engine is applying exponential backoff with Retry-After header compliance.',
+      badge: { label: 'Rate Limiter', variant: 'amber' },
+      details: 'Temporary HTTP 429 throttling. Will auto-resume automatically.',
+      actions: [
+        {
+          id: 'RETRY_WITH_BACKOFF',
+          label: 'Retry with Backoff',
+          variant: 'primary',
+          icon: RefreshCw,
+        },
+      ],
+    };
+  }
+
+  // 9. PREVIOUS_REQUEST_IN_PROGRESS or DUPLICATE_TRANSACTION (409)
+  if (errString.includes('PREVIOUS_REQUEST_IN_PROGRESS') || errString.includes('DUPLICATE_TRANSACTION')) {
+    return {
+      rawCode: 'PREVIOUS_REQUEST_IN_PROGRESS',
+      category: 'IDEMPOTENCY_CONFLICT',
+      title: 'Transaction Request In Progress',
+      friendlyMessage:
+        'A request with this exact PayPal-Request-Id is currently processing or already completed. We will retrieve the confirmed order rather than submitting a duplicate charge.',
+      badge: { label: 'Idempotency Protection', variant: 'emerald' },
+      details: 'Guarantees 0% double-charging via UUID idempotency headers.',
+      actions: [
+        {
+          id: 'RECOVER_EXISTING_ORDER',
+          label: 'Recover Confirmed Order',
+          variant: 'primary',
+          icon: ShieldCheck,
+        },
+      ],
+    };
+  }
+
+  // 10. General PayPal API errors (Vault, Permissions, Order State)
   if (
-    errString.includes('PAYER_ACTION_REQUIRED') ||
-    errString.includes('INSTRUMENT_DECLINED') ||
-    errString.includes('AUTHORIZATION_AMOUNT_EXCEEDED') ||
+    errString.includes('NOT_ENABLED_TO_VAULT_PAYMENT_SOURCE') ||
+    errString.includes('TRANSACTION_REFUSED') ||
+    errString.includes('ORDER_ALREADY_CAPTURED') ||
     errString.includes('PAYPAL')
   ) {
     return {
-      rawCode: 'PAYPAL_API_ERROR',
+      rawCode: 'PAYPAL_API_NOTICE',
       category: 'PAYPAL_API',
-      title: 'PayPal Payment Authorization Notice',
+      title: 'PayPal Clearinghouse Notice',
       friendlyMessage:
-        'PayPal payment verification requested an updated payment method or authentication check. Zero funds were captured.',
-      badge: { label: 'PayPal Vault Gateway', variant: 'violet' },
+        'PayPal payment gateway processed your authorization request with zero unauthorized charges.',
+      badge: { label: 'PayPal Gateway', variant: 'violet' },
       details: errString.length < 180 ? errString : 'PayPal API returned an authorization verification code.',
       actions: [
         {
@@ -213,7 +324,7 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
         },
         {
           id: 'CHANGE_PAYPAL_FUNDING',
-          label: 'Update PayPal Funding Source',
+          label: 'Update Funding Method',
           variant: 'secondary',
           icon: Coins,
         },
@@ -221,7 +332,7 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
     };
   }
 
-  // 7. Fallback / generic error transmutation
+  // 11. Fallback / generic error transmutation
   return {
     rawCode: errString.slice(0, 48) || 'SYSTEM_FAULT',
     category: 'UNKNOWN',
@@ -264,6 +375,7 @@ export function FriendlyErrorTransmuter({
     indigo: 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300 border-indigo-300 dark:border-indigo-500/40',
     violet: 'bg-violet-100 dark:bg-violet-950/60 text-violet-800 dark:text-violet-300 border-violet-300 dark:border-violet-500/40',
     slate: 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 border-slate-300 dark:border-slate-700',
+    emerald: 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40',
   }[transmuted.badge.variant];
 
   const borderStyles = {
@@ -272,6 +384,10 @@ export function FriendlyErrorTransmuter({
     MERCHANT_CAP: 'border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 dark:from-[#131109] dark:via-[#0c101a] dark:to-[#0f172a]',
     ANOMALY_RISK: 'border-rose-400/80 dark:border-rose-500/40 bg-gradient-to-br from-rose-50/90 via-white to-rose-50/40 dark:from-[#180a0e] dark:via-[#0c101a] dark:to-[#0f172a]',
     UNAUTHORIZED_CATEGORY: 'border-indigo-400/80 dark:border-indigo-500/40 bg-gradient-to-br from-indigo-50/90 via-white to-indigo-50/40 dark:from-[#0d1024] dark:via-[#0c101a] dark:to-[#0f172a]',
+    CARD_DECLINED: 'border-rose-500/80 dark:border-rose-500/40 bg-gradient-to-br from-rose-50/90 via-white to-rose-50/40 dark:from-[#1c0a0f] dark:via-[#0c101a] dark:to-[#0f172a]',
+    '3D_SECURE_REQUIRED': 'border-indigo-400/80 dark:border-indigo-500/40 bg-gradient-to-br from-indigo-50/90 via-white to-indigo-50/40 dark:from-[#0d1024] dark:via-[#0c101a] dark:to-[#0f172a]',
+    RATE_LIMIT: 'border-amber-400/80 dark:border-amber-500/40 bg-gradient-to-br from-amber-50/90 via-white to-amber-50/40 dark:from-[#131109] dark:via-[#0c101a] dark:to-[#0f172a]',
+    IDEMPOTENCY_CONFLICT: 'border-emerald-400/80 dark:border-emerald-500/40 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 dark:from-[#0a1810] dark:via-[#0c101a] dark:to-[#0f172a]',
     PAYPAL_API: 'border-violet-400/80 dark:border-violet-500/40 bg-gradient-to-br from-violet-50/90 via-white to-violet-50/40 dark:from-[#130d24] dark:via-[#0c101a] dark:to-[#0f172a]',
     UNKNOWN: 'border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c101a]',
   }[transmuted.category];
@@ -286,8 +402,12 @@ export function FriendlyErrorTransmuter({
           <div className="p-2.5 rounded-xl bg-white dark:bg-[#080d1a] border border-slate-200 dark:border-slate-800 shadow-xs flex-shrink-0 mt-0.5">
             {transmuted.category === 'MANDATE_EXPIRED' ? (
               <Clock className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-            ) : transmuted.category === 'ANOMALY_RISK' ? (
+            ) : transmuted.category === 'ANOMALY_RISK' || transmuted.category === 'CARD_DECLINED' ? (
               <ShieldAlert className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+            ) : transmuted.category === '3D_SECURE_REQUIRED' ? (
+              <Lock className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+            ) : transmuted.category === 'IDEMPOTENCY_CONFLICT' ? (
+              <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             ) : transmuted.category === 'PAYPAL_API' ? (
               <Coins className="w-5 h-5 text-violet-600 dark:text-violet-400" />
             ) : (

@@ -35,9 +35,29 @@ test('FriendlyErrorTransmuter transmuteError converts Redis Lua and PayPal error
   assert.ok(catErr.friendlyMessage.includes('gaming_consoles'));
 
   // Test 6: PayPal API error
-  const paypalErr = transmuteError('INSTRUMENT_DECLINED: Payer action required');
+  const paypalErr = transmuteError('PAYPAL_API_ERROR: TRANSACTION_REFUSED');
   assert.equal(paypalErr.category, 'PAYPAL_API');
   assert.ok(paypalErr.actions.some((a) => a.id === 'RETRY_PAYPAL_VAULT'));
+
+  // Test 7: INSTRUMENT_DECLINED (Card decline recovery)
+  const declinedErr = transmuteError('INSTRUMENT_DECLINED: card refused');
+  assert.equal(declinedErr.category, 'CARD_DECLINED');
+  assert.ok(declinedErr.actions.some((a) => a.id === 'SWITCH_PAYMENT_METHOD'));
+
+  // Test 8: 3D Secure / PSD2 liability shift
+  const secureErr = transmuteError('PAYER_ACTION_REQUIRED: 3D_SECURE_REQUIRED');
+  assert.equal(secureErr.category, '3D_SECURE_REQUIRED');
+  assert.ok(secureErr.actions.some((a) => a.id === 'COMPLETE_3DS_ACTION'));
+
+  // Test 9: Rate limit (429)
+  const rateLimitErr = transmuteError('RATE_LIMIT_REACHED: 429 too many requests');
+  assert.equal(rateLimitErr.category, 'RATE_LIMIT');
+  assert.ok(rateLimitErr.actions.some((a) => a.id === 'RETRY_WITH_BACKOFF'));
+
+  // Test 10: Idempotency conflict (409)
+  const idempotencyErr = transmuteError('PREVIOUS_REQUEST_IN_PROGRESS');
+  assert.equal(idempotencyErr.category, 'IDEMPOTENCY_CONFLICT');
+  assert.ok(idempotencyErr.actions.some((a) => a.id === 'RECOVER_EXISTING_ORDER'));
 });
 
 test('FriendlyErrorTransmuter renders banner with 1-click action buttons', () => {
