@@ -8,7 +8,9 @@ import {
 } from '@paypal/paypal-server-sdk';
 import dotenv from 'dotenv';
 
+
 dotenv.config();
+
 
 export interface PayPalConfig {
   clientId: string;
@@ -17,10 +19,12 @@ export interface PayPalConfig {
   webhookId?: string;
 }
 
+
 export interface CachedToken {
   accessToken: string;
   expiresAt: number;
 }
+
 
 export interface DisputeEvidencePayload {
   evidence_type?: string;
@@ -38,6 +42,106 @@ export interface DisputeEvidencePayload {
   };
 }
 
+
+
+
+export type PayPalMoney = { value: string; currency_code: string };
+
+
+export interface CatalogProductItem {
+  id: string;
+  name: string;
+  description?: string;
+  type?: 'PHYSICAL' | 'DIGITAL' | 'SERVICE';
+  category?: string;
+  create_time: string;
+}
+
+
+export interface BillingPlanItem {
+  id: string;
+  product_id: string;
+  name: string;
+  status: 'CREATED' | 'INACTIVE' | 'ACTIVE';
+  create_time: string;
+  billing_cycles: Array<{
+    frequency: { interval_unit: 'DAY' | 'WEEK' | 'MONTH' | 'YEAR'; interval_count: number };
+    tenure_type: 'REGULAR' | 'TRIAL';
+    sequence: number;
+    total_cycles: number;
+    pricing_scheme?: { fixed_price?: PayPalMoney };
+  }>;
+  payment_preferences?: { setup_fee?: PayPalMoney };
+}
+
+
+export interface InvoiceItemSummary {
+  id: string;
+  status: string;
+  detail: {
+    invoice_number: string;
+    invoice_date?: string;
+    currency_code: string;
+    payment_term?: { term_type?: string; due_date?: string };
+  };
+  amount?: { currency_code: string; value: string; breakdown?: { tax_total?: PayPalMoney } };
+  due_amount?: PayPalMoney;
+  primary_recipients?: Array<{
+    billing_info?: {
+      name?: { full_name?: string };
+      business_name?: string;
+      email_address?: string;
+    };
+  }>;
+  items?: Array<{
+    id?: string;
+    name: string;
+    quantity: string | number;
+    unit_amount?: PayPalMoney;
+    unit_of_measure?: string;
+    discount?: { percent?: string | number; amount?: PayPalMoney };
+    tax?: { percent?: string | number; amount?: PayPalMoney };
+  }>;
+  payments?: {
+    paid_amount?: PayPalMoney;
+    transactions?: Array<{ payment_date?: string; method?: string; amount?: PayPalMoney }>;
+  };
+  refunds?: {
+    refund_amount?: PayPalMoney;
+  };
+}
+
+
+export interface AccountBalancesResult {
+  as_of_time?: string;
+  balances: Array<{
+    currency: string;
+    total_balance: PayPalMoney;
+    available_balance: PayPalMoney;
+    withheld_balance: PayPalMoney;
+  }>;
+}
+
+
+export interface TransactionSearchResult {
+  transaction_info: {
+    transaction_id: string;
+    transaction_initiation_date: string;
+    transaction_event_code: string;
+    transaction_status: string;
+    transaction_amount: PayPalMoney;
+    fee_amount?: PayPalMoney;
+    ending_balance?: PayPalMoney;
+    transaction_subject?: string;
+    transaction_note?: string;
+    custom_field?: string;
+  };
+  payer_info?: {
+    email_address?: string;
+  };
+}
+
+
 export class PayPalApimaticClient {
   private client: Client;
   private ordersController: OrdersController;
@@ -46,6 +150,7 @@ export class PayPalApimaticClient {
   private config: PayPalConfig;
   private tokenCache: CachedToken | null = null;
   private clientTokenCache: CachedToken | null = null;
+
 
   constructor(customConfig?: Partial<PayPalConfig>) {
     this.config = {
@@ -56,7 +161,9 @@ export class PayPalApimaticClient {
       webhookId: customConfig?.webhookId || process.env.PAYPAL_WEBHOOK_ID || '',
     };
 
+
     const env = this.config.environment === 'production' ? Environment.Production : Environment.Sandbox;
+
 
     this.client = new Client({
       clientCredentialsAuthCredentials: {
@@ -66,16 +173,19 @@ export class PayPalApimaticClient {
       environment: env,
     });
 
+
     this.ordersController = new OrdersController(this.client);
     this.paymentsController = new PaymentsController(this.client);
     this.vaultController = new VaultController(this.client);
   }
+
 
   private getBaseUrl(): string {
     return this.config.environment === 'production'
       ? 'https://api-m.paypal.com'
       : 'https://api-m.sandbox.paypal.com';
   }
+
 
   /**
    * Client credential OAuth2 token fetching with 15-minute token caching.
@@ -87,10 +197,12 @@ export class PayPalApimaticClient {
       return this.tokenCache.accessToken;
     }
 
+
     if (!this.config.clientId || !this.config.clientSecret) {
       // Allow fallback / mock token for tests/dev without live credentials
       return 'mock_access_token_sandbox';
     }
+
 
     const auth = Buffer.from(`${this.config.clientId}:${this.config.clientSecret}`).toString('base64');
     const response = await fetch(`${this.getBaseUrl()}/v1/oauth2/token`, {
@@ -102,10 +214,12 @@ export class PayPalApimaticClient {
       body: 'grant_type=client_credentials',
     });
 
+
     if (!response.ok) {
       const errText = await response.text();
       throw new Error(`Failed to fetch PayPal OAuth2 token: ${response.status} ${errText}`);
     }
+
 
     const data = await response.json() as { access_token: string; expires_in: number };
     // Cache token for (expires_in - buffer) or 15 minutes (900s)
@@ -115,8 +229,10 @@ export class PayPalApimaticClient {
       expiresAt: now + ttlMs,
     };
 
+
     return data.access_token;
   }
+
 
   /**
    * Generates or retrieves 15-min cached client token for frontend PayPal SDK mount
@@ -127,10 +243,12 @@ export class PayPalApimaticClient {
       return this.clientTokenCache.accessToken;
     }
 
+
     const accessToken = await this.getAccessToken();
     if (accessToken === 'mock_access_token_sandbox') {
       return 'mock_client_token_15min';
     }
+
 
     const response = await fetch(`${this.getBaseUrl()}/v1/identity/generate-token`, {
       method: 'POST',
@@ -141,10 +259,12 @@ export class PayPalApimaticClient {
       },
     });
 
+
     if (!response.ok) {
       // Fallback to client id if generate-token not enabled on client credentials
       return this.config.clientId;
     }
+
 
     const data = await response.json() as { client_token: string; expires_in?: number };
     const ttlMs = (data.expires_in || 900) * 1000;
@@ -154,6 +274,7 @@ export class PayPalApimaticClient {
     };
     return data.client_token;
   }
+
 
   /**
    * Orders v2 Multi-Purchase Unit creation (intent: "AUTHORIZE" or "CAPTURE")
@@ -193,6 +314,7 @@ export class PayPalApimaticClient {
     const intent = params.intent === 'CAPTURE'
       ? CheckoutPaymentIntent.Capture
       : CheckoutPaymentIntent.Authorize;
+
 
     const reqBody: any = {
       intent,
@@ -240,6 +362,7 @@ export class PayPalApimaticClient {
       })),
     };
 
+
     if (params.paymentSourceToken) {
       reqBody.paymentSource = {
         token: {
@@ -248,6 +371,7 @@ export class PayPalApimaticClient {
         },
       };
     }
+
 
     try {
       const response = await this.ordersController.createOrder({
@@ -272,12 +396,14 @@ export class PayPalApimaticClient {
     }
   }
 
+
   /**
    * Alias for createMultiPurchaseUnitOrder to satisfy APIMatic SDK createOrder contract
    */
   async createOrder(params: Parameters<PayPalApimaticClient['createMultiPurchaseUnitOrder']>[0]) {
     return this.createMultiPurchaseUnitOrder(params);
   }
+
 
   /**
    * Capture an approved order directly (POST /v2/checkout/orders/{id}/capture)
@@ -324,6 +450,7 @@ export class PayPalApimaticClient {
     }
   }
 
+
   /**
    * Mandatory server read-back verification (GET /v2/checkout/orders/{id})
    */
@@ -349,6 +476,7 @@ export class PayPalApimaticClient {
       throw err;
     }
   }
+
 
   /**
    * Authorize an approved order (POST /v2/checkout/orders/{id}/authorize)
@@ -384,6 +512,7 @@ export class PayPalApimaticClient {
     }
   }
 
+
   /**
    * Capture an authorized payment (POST /v2/payments/authorizations/{id}/capture)
    */
@@ -413,6 +542,7 @@ export class PayPalApimaticClient {
     }
   }
 
+
   /**
    * Void an authorization (POST /v2/payments/authorizations/{id}/void)
    */
@@ -432,6 +562,7 @@ export class PayPalApimaticClient {
       throw err;
     }
   }
+
 
   /**
    * Refund a captured payment (POST /v2/payments/captures/{id}/refund)
@@ -460,6 +591,7 @@ export class PayPalApimaticClient {
       throw err;
     }
   }
+
 
   /**
    * Vault v3 Setup Token creation (POST /v3/vault/setup-tokens)
@@ -500,6 +632,7 @@ export class PayPalApimaticClient {
     }
   }
 
+
   /**
    * Vault v3 Payment Token creation (POST /v3/vault/payment-tokens)
    */
@@ -532,6 +665,7 @@ export class PayPalApimaticClient {
     }
   }
 
+
   /**
    * Disputes v1 actions: GET /v1/customer/disputes/{id}
    */
@@ -554,6 +688,7 @@ export class PayPalApimaticClient {
       };
     }
 
+
     const token = await this.getAccessToken();
     const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}`, {
       method: 'GET',
@@ -563,12 +698,14 @@ export class PayPalApimaticClient {
       },
     });
 
+
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to get PayPal dispute: ${res.status} ${errText}`);
     }
     return res.json();
   }
+
 
   /**
    * Disputes v1 actions: POST /v1/customer/disputes/{id}/provide-evidence (supporting multipart/form-data)
@@ -583,6 +720,7 @@ export class PayPalApimaticClient {
       };
     }
 
+
     const token = await this.getAccessToken();
     if (payload.file) {
       // Build multipart/form-data
@@ -593,6 +731,7 @@ export class PayPalApimaticClient {
         notes: payload.notes || 'Automated multi-modal evidentiary submission by AegisPay arbiter.',
       });
 
+
       const bodyParts: Buffer[] = [];
       bodyParts.push(Buffer.from(
         `--${boundary}\r\n` +
@@ -600,6 +739,7 @@ export class PayPalApimaticClient {
         `Content-Type: application/json\r\n\r\n` +
         `${metadata}\r\n`
       ));
+
 
       bodyParts.push(Buffer.from(
         `--${boundary}\r\n` +
@@ -609,7 +749,9 @@ export class PayPalApimaticClient {
       bodyParts.push(Buffer.from(payload.file.buffer));
       bodyParts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
 
+
       const multipartBuffer = Buffer.concat(bodyParts);
+
 
       const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/provide-evidence`, {
         method: 'POST',
@@ -619,6 +761,7 @@ export class PayPalApimaticClient {
         },
         body: multipartBuffer,
       });
+
 
       if (!res.ok) {
         const errText = await res.text();
@@ -639,6 +782,7 @@ export class PayPalApimaticClient {
         }),
       });
 
+
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(`Failed to provide dispute evidence: ${res.status} ${errText}`);
@@ -646,6 +790,7 @@ export class PayPalApimaticClient {
       return res.json();
     }
   }
+
 
   /**
    * Disputes v1 actions: POST /v1/customer/disputes/{id}/make-offer
@@ -663,6 +808,7 @@ export class PayPalApimaticClient {
       };
     }
 
+
     const token = await this.getAccessToken();
     const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/make-offer`, {
       method: 'POST',
@@ -673,12 +819,14 @@ export class PayPalApimaticClient {
       body: JSON.stringify(offer),
     });
 
+
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to make dispute offer: ${res.status} ${errText}`);
     }
     return res.json();
   }
+
 
   /**
    * Disputes v1 actions: POST /v1/customer/disputes/{id}/acknowledge-return-item
@@ -692,6 +840,7 @@ export class PayPalApimaticClient {
       };
     }
 
+
     const token = await this.getAccessToken();
     const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/acknowledge-return-item`, {
       method: 'POST',
@@ -704,12 +853,14 @@ export class PayPalApimaticClient {
       }),
     });
 
+
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to acknowledge return item: ${res.status} ${errText}`);
     }
     return res.json();
   }
+
 
   /**
    * Disputes v1 sandbox actions: POST /v1/customer/disputes/{id}/adjudicate
@@ -724,6 +875,7 @@ export class PayPalApimaticClient {
       };
     }
 
+
     const token = await this.getAccessToken();
     const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/adjudicate`, {
       method: 'POST',
@@ -736,12 +888,14 @@ export class PayPalApimaticClient {
       }),
     });
 
+
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to adjudicate dispute: ${res.status} ${errText}`);
     }
     return res.json();
   }
+
 
   /**
    * Disputes v1 sandbox testing helper: POST /v1/customer/disputes/{id}/require-evidence
@@ -753,6 +907,7 @@ export class PayPalApimaticClient {
         dispute_id: disputeId,
       };
     }
+
 
     const token = await this.getAccessToken();
     const res = await fetch(`${this.getBaseUrl()}/v1/customer/disputes/${disputeId}/require-evidence`, {
@@ -766,12 +921,14 @@ export class PayPalApimaticClient {
       }),
     });
 
+
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to require evidence on dispute: ${res.status} ${errText}`);
     }
     return res.json();
   }
+
 
   /**
    * Shipment Tracking v1: POST /v1/shipping/trackers-batch
@@ -794,6 +951,7 @@ export class PayPalApimaticClient {
       };
     }
 
+
     const token = await this.getAccessToken();
     const res = await fetch(`${this.getBaseUrl()}/v1/shipping/trackers-batch`, {
       method: 'POST',
@@ -806,12 +964,14 @@ export class PayPalApimaticClient {
       }),
     });
 
+
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Failed to add shipment tracking batch: ${res.status} ${errText}`);
     }
     return res.json();
   }
+
 
   /**
    * Webhook signature verification (POST /v1/notifications/verify-webhook-signature)
@@ -827,10 +987,12 @@ export class PayPalApimaticClient {
   }): Promise<boolean> {
     const webhookId = params.webhookId || this.config.webhookId;
 
+
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
       // In mock/sandbox offline mode, if test headers are present, accept as verified
       return !!params.transmissionSig;
     }
+
 
     try {
       const token = await this.getAccessToken();
@@ -851,6 +1013,7 @@ export class PayPalApimaticClient {
         }),
       });
 
+
       if (!res.ok) {
         return false;
       }
@@ -860,6 +1023,166 @@ export class PayPalApimaticClient {
       return false;
     }
   }
+
+
+  /**
+   * List catalog products with full details per product.
+   */
+  async listProducts(pageSize = 20): Promise<CatalogProductItem[]> {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
+      return [
+        { id: 'PROD-1', name: 'Standard Subscription', type: 'DIGITAL', category: 'SOFTWARE', create_time: new Date().toISOString() },
+        { id: 'PROD-2', name: 'Physical Hardware Lock', type: 'PHYSICAL', category: 'ELECTRONICS', create_time: new Date().toISOString() }
+      ];
+    }
+    const token = await this.getAccessToken();
+    const res = await fetch(`${this.getBaseUrl()}/v1/catalogs/products?page_size=${pageSize}&total_required=true`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`PayPal listProducts failed: ${res.status}`);
+    const data = await res.json() as { products?: Array<{ id: string }> };
+    const summaries = data.products || [];
+    return Promise.all(
+      summaries.map(async (p) => {
+        const itemRes = await fetch(`${this.getBaseUrl()}/v1/catalogs/products/${encodeURIComponent(p.id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!itemRes.ok) return { id: p.id, name: p.id, create_time: new Date().toISOString() };
+        return await itemRes.json() as CatalogProductItem;
+      })
+    );
+  }
+
+
+  /**
+   * List billing subscription plans with full cycle specifications.
+   */
+  async listPlans(pageSize = 20): Promise<BillingPlanItem[]> {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
+      return [
+        {
+          id: 'PLAN-1',
+          product_id: 'PROD-1',
+          name: 'Pro Monthly Plan',
+          status: 'ACTIVE',
+          create_time: new Date().toISOString(),
+          billing_cycles: [
+            { frequency: { interval_unit: 'MONTH', interval_count: 1 }, tenure_type: 'REGULAR', sequence: 1, total_cycles: 0, pricing_scheme: { fixed_price: { value: '29.00', currency_code: 'USD' } } }
+          ]
+        }
+      ];
+    }
+    const token = await this.getAccessToken();
+    const res = await fetch(`${this.getBaseUrl()}/v1/billing/plans?page_size=${pageSize}&total_required=true`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`PayPal listPlans failed: ${res.status}`);
+    const data = await res.json() as { plans?: Array<{ id: string }> };
+    const summaries = data.plans || [];
+    return Promise.all(
+      summaries.map(async (plan) => {
+        const itemRes = await fetch(`${this.getBaseUrl()}/v1/billing/plans/${encodeURIComponent(plan.id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!itemRes.ok) return { id: plan.id, product_id: '', name: plan.id, status: 'ACTIVE', create_time: new Date().toISOString(), billing_cycles: [] };
+        return await itemRes.json() as BillingPlanItem;
+      })
+    );
+  }
+
+
+  /**
+   * List invoices with detailed line items and payment histories.
+   */
+  async listInvoices(pageSize = 20): Promise<InvoiceItemSummary[]> {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
+      return [
+        {
+          id: 'INV-DEMO-1',
+          status: 'PAID',
+          detail: { invoice_number: 'INV-001', invoice_date: '2026-11-01', currency_code: 'USD' },
+          amount: { currency_code: 'USD', value: '450.00' },
+          primary_recipients: [{ billing_info: { name: { full_name: 'Acme Corp' }, business_name: 'Acme Corp', email_address: 'billing@acme.com' } }]
+        }
+      ];
+    }
+    const token = await this.getAccessToken();
+    const res = await fetch(`${this.getBaseUrl()}/v2/invoicing/invoices?page_size=${pageSize}&total_required=true`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`PayPal listInvoices failed: ${res.status}`);
+    const data = await res.json() as { items?: Array<{ id: string }> };
+    const summaries = data.items || [];
+    return Promise.all(
+      summaries.map(async (inv) => {
+        const itemRes = await fetch(`${this.getBaseUrl()}/v2/invoicing/invoices/${encodeURIComponent(inv.id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!itemRes.ok) return { id: inv.id, status: 'SENT', detail: { invoice_number: inv.id, currency_code: 'USD' } };
+        return await itemRes.json() as InvoiceItemSummary;
+      })
+    );
+  }
+
+
+  /**
+   * Get account balances across all held currencies.
+   */
+  async getBalances(): Promise<AccountBalancesResult> {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
+      return {
+        as_of_time: new Date().toISOString(),
+        balances: [
+          { currency: 'USD', total_balance: { value: '15400.00', currency_code: 'USD' }, available_balance: { value: '14800.00', currency_code: 'USD' }, withheld_balance: { value: '600.00', currency_code: 'USD' } },
+          { currency: 'EUR', total_balance: { value: '3200.00', currency_code: 'EUR' }, available_balance: { value: '3200.00', currency_code: 'EUR' }, withheld_balance: { value: '0.00', currency_code: 'EUR' } }
+        ]
+      };
+    }
+    const token = await this.getAccessToken();
+    const res = await fetch(`${this.getBaseUrl()}/v1/reporting/balances`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`PayPal getBalances failed: ${res.status}`);
+    return await res.json() as AccountBalancesResult;
+  }
+
+
+  /**
+   * Search transactions over an interval (up to 31 days).
+   */
+  async searchTransactions(startDate: Date | string, endDate: Date | string): Promise<TransactionSearchResult[]> {
+    const startStr = typeof startDate === 'string' ? startDate : startDate.toISOString();
+    const endStr = typeof endDate === 'string' ? endDate : endDate.toISOString();
+
+
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
+      return [
+        {
+          transaction_info: {
+            transaction_id: 'TXN-DEMO-001',
+            transaction_initiation_date: new Date().toISOString(),
+            transaction_event_code: 'T0001',
+            transaction_status: 'S',
+            transaction_amount: { value: '150.00', currency_code: 'USD' },
+            fee_amount: { value: '4.50', currency_code: 'USD' },
+            ending_balance: { value: '15400.00', currency_code: 'USD' },
+            transaction_subject: 'Affiliate settlement'
+          },
+          payer_info: { email_address: 'affiliate@partner.com' }
+        }
+      ];
+    }
+    const token = await this.getAccessToken();
+    const res = await fetch(`${this.getBaseUrl()}/v1/reporting/transactions?start_date=${encodeURIComponent(startStr)}&end_date=${encodeURIComponent(endStr)}&fields=all`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error(`PayPal searchTransactions failed: ${res.status}`);
+    const data = await res.json() as { transaction_details?: TransactionSearchResult[] };
+    return data.transaction_details || [];
+  }
+
+
 }
+
 
 export const defaultPayPalClient = new PayPalApimaticClient();

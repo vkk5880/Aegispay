@@ -12,6 +12,21 @@
   --muted-foreground: #64748b;
   --accent: #0284c7;
   --accent-foreground: #ffffff;
+  --pp-navy: #001c64;
+  --pp-blue: #0070e0;
+  --pp-blue-dark: #003087;
+  --pp-sky: #009cde;
+  --pp-highlight: #e6f0fc;
+  --pp-canvas: #f5f7fa;
+  --pp-surface: #ffffff;
+  --pp-border: #dbe1e8;
+  --pp-gridline: #e9edf2;
+  --pp-ink: #001435;
+  --pp-muted: #545d68;
+  --pp-success: #00875a;
+  --pp-warning: #b45309;
+  --pp-danger: #c4122f;
+  --pp-font: "PayPal Open", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
 
 .dark {
