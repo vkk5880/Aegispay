@@ -1844,6 +1844,15 @@ export const AcpMcpToolArgumentsSchema = z.object({
 
 export type AcpMcpToolArguments = z.infer<typeof AcpMcpToolArgumentsSchema>;
 
+export const McpToolCallSchema = z.object({
+  id: z.string(),
+  toolName: z.string(),
+  agentSummary: z.string().optional(),
+  args: z.record(z.string(), z.any()).optional().default({}),
+}).passthrough();
+
+export type McpToolCall = z.infer<typeof McpToolCallSchema>;
+
 export const AcpRpcErrorDataSchema = z.object({
   type: z.enum(['invalid_request', 'request_not_idempotent', 'processing_error', 'service_unavailable']),
   code: z.string(),
