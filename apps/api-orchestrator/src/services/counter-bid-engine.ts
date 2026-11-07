@@ -30,7 +30,6 @@ export interface CounterVoucher {
   original_retail_cents: number;
   buyer_original_bid_cents: number;
   merchant_counter_cents: number;
-  merchant_floor_cents: number;
   discount_from_retail_pct: number;
   turn: number;
   expires_at: string;
@@ -88,6 +87,33 @@ export class CounterBidEngine {
 
     const remainingBudget =
       request.mandate.max_total_spend_cents - request.mandate.cumulative_spent_cents;
+
+    // Enforce maximum 2 negotiation turns per voucher to avoid denial-of-service loops
+    const merchantTurnsCount = history.filter((h) => h.proposer === 'MERCHANT').length;
+    if (currentTurn > 2 || merchantTurnsCount >= 2) {
+      return {
+        status: 'REJECTED_OUT_OF_BOUNDS',
+        turn: currentTurn,
+        max_turns_reached: true,
+        ed25519_mandate_verified: isEd25519Valid,
+        policy_compliance: {
+          within_total_budget: false,
+          within_merchant_cap: false,
+          mandate_active: isMandateActive,
+          remaining_budget_cents: remainingBudget,
+        },
+        history: [
+          ...history,
+          {
+            turn_number: currentTurn,
+            proposer: 'MERCHANT',
+            offer_cents: 0,
+            timestamp: new Date().toISOString(),
+            notes: `Negotiation turn limit exceeded (max 2 turns per voucher). Negotiation halted.`,
+          },
+        ],
+      };
+    }
 
     // Record buyer initial turn if history is empty
     if (history.length === 0) {
@@ -166,7 +192,6 @@ export class CounterBidEngine {
       original_retail_cents: request.retail_offer_cents,
       buyer_original_bid_cents: request.buyer_bid_cents,
       merchant_counter_cents: merchantCounterCents,
-      merchant_floor_cents: request.merchant_min_floor_cents,
       discount_from_retail_pct: discountFromRetailPct,
       turn: currentTurn,
       expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min expiry

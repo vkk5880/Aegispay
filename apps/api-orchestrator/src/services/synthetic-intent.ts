@@ -12,6 +12,11 @@ export interface SyntheticIntentProposal {
   merchant_min_floor_discount_pct?: number; // e.g. 0.12 (up to 12% off floor allowed)
 }
 
+export function isValidPayPalVaultSetupToken(tokenId: string): boolean {
+  if (!tokenId || typeof tokenId !== 'string') return false;
+  return /^(vault_setup_|vlt_st_|SETUP-TOKEN-)/i.test(tokenId);
+}
+
 export interface SyntheticIntentEvaluation {
   eligible_for_synthetic_intent: boolean;
   overage_percentage: number;
@@ -19,7 +24,6 @@ export interface SyntheticIntentEvaluation {
   voucher_id?: string;
   paypal_vault_setup_token_id?: string;
   buyer_bid_cents?: number;
-  merchant_min_floor_cents?: number;
   auto_cleared?: boolean;
   negotiation_status?: 'OPEN_BID' | 'ACCEPTED_AND_CAPTURED' | 'COUNTERED' | 'EXPIRED';
   resulting_paypal_order_id?: string;
@@ -73,6 +77,10 @@ export class SyntheticIntentEngine {
     }) as any;
 
     const setupTokenId = setupTokenResponse?.id || `vault_setup_${Date.now()}`;
+    if (!isValidPayPalVaultSetupToken(setupTokenId)) {
+      throw new Error(`INVALID_VAULT_SETUP_TOKEN_BINDING: Setup token ${setupTokenId} is invalid`);
+    }
+
     const voucherId = `syn_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
 
     // Evaluate autonomous merchant margin floor:
@@ -134,7 +142,6 @@ export class SyntheticIntentEngine {
       voucher_id: voucherId,
       paypal_vault_setup_token_id: setupTokenId,
       buyer_bid_cents: bidCents,
-      merchant_min_floor_cents: merchantFloorCents,
       auto_cleared: autoCleared,
       negotiation_status: negotiationStatus,
       resulting_paypal_order_id: resultingOrderId,
