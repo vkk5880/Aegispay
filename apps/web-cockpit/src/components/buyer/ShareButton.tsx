@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Share2, Check, AlertCircle } from 'lucide-react';
 
 export interface ScoredProductShareLike {
@@ -29,22 +29,74 @@ export function ShareButton({
   className = '',
 }: ShareButtonProps) {
   const [state, setState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const mountedRef = useRef<boolean>(true);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const copySafely = async (textToCopy: string): Promise<boolean> => {
+    // 1. Try modern asynchronous Clipboard API if available and securely permitted
+    if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(textToCopy);
+        return true;
+      } catch {
+        // Fall back to execCommand if clipboard writeText fails (e.g., permissions or non-secure context)
+      }
+    }
+
+    // 2. Fallback to textarea + document.execCommand('copy') in browser environments
+    if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = textToCopy;
+        textArea.style.position = 'fixed';
+        textArea.style.top = '0';
+        textArea.style.left = '0';
+        textArea.style.opacity = '0';
+        textArea.style.pointerEvents = 'none';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        if (successful) return true;
+      } catch {
+        return false;
+      }
+    }
+
+    return false;
+  };
 
   const handleShare = async () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
     try {
       const payload = {
-        query,
+        query: (query || '').trim(),
         winner: {
-          title: recommendation.title,
-          price: recommendation.price,
-          source: recommendation.source,
-          link: recommendation.link || '',
-          score: recommendation.score ?? 0,
-          justification: recommendation.justification || '',
-          rating: recommendation.rating ?? 0,
-          review_count: recommendation.review_count ?? 0,
+          title: recommendation?.title || '',
+          price: typeof recommendation?.price === 'number' ? recommendation.price : 0,
+          source: recommendation?.source || '',
+          link: recommendation?.link || '',
+          score: typeof recommendation?.score === 'number' ? recommendation.score : 0,
+          justification: recommendation?.justification || '',
+          rating: typeof recommendation?.rating === 'number' ? recommendation.rating : 0,
+          review_count: typeof recommendation?.review_count === 'number' ? recommendation.review_count : 0,
         },
-        total_compared: totalCompared,
+        total_compared: typeof totalCompared === 'number' ? totalCompared : 0,
         timestamp: new Date().toISOString(),
       };
 
@@ -54,20 +106,24 @@ export function ShareButton({
         b64 = window.btoa(unescape(encodeURIComponent(jsonStr)));
       }
 
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
       const url = `${origin}/share?d=${encodeURIComponent(b64)}`;
 
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(url);
-        setState('copied');
-      } else {
-        setState('error');
+      const copied = await copySafely(url);
+      if (mountedRef.current) {
+        setState(copied ? 'copied' : 'error');
       }
     } catch {
-      setState('error');
+      if (mountedRef.current) {
+        setState('error');
+      }
     }
 
-    setTimeout(() => setState('idle'), 2500);
+    timerRef.current = setTimeout(() => {
+      if (mountedRef.current) {
+        setState('idle');
+      }
+    }, 2500);
   };
 
   return (

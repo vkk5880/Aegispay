@@ -48,7 +48,7 @@ export function ProductGrid({
     );
   }
 
-  if (!products || products.length === 0) {
+  if (!products || !Array.isArray(products) || products.length === 0) {
     return (
       <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800">
         <p className="text-slate-400 font-mono text-sm">
@@ -58,15 +58,25 @@ export function ProductGrid({
     );
   }
 
-  // Sort products based on user preference
+  // Sort products safely based on user preference, handling undefined/NaN defensively
   const sorted = [...products].sort((a, b) => {
+    if (!a && !b) return 0;
+    if (!a) return 1;
+    if (!b) return -1;
+
     if (sortBy === 'PRICE_ASC') {
-      return a.price_cents - b.price_cents;
+      const priceA = typeof a.price_cents === 'number' && !isNaN(a.price_cents) ? a.price_cents : 0;
+      const priceB = typeof b.price_cents === 'number' && !isNaN(b.price_cents) ? b.price_cents : 0;
+      return priceA - priceB;
     }
     if (sortBy === 'REBATE') {
-      return (b.commission_rebate_cents || 0) - (a.commission_rebate_cents || 0);
+      const rebateA = typeof a.commission_rebate_cents === 'number' && !isNaN(a.commission_rebate_cents) ? a.commission_rebate_cents : 0;
+      const rebateB = typeof b.commission_rebate_cents === 'number' && !isNaN(b.commission_rebate_cents) ? b.commission_rebate_cents : 0;
+      return rebateB - rebateA;
     }
-    return (b.composite_score || 0) - (a.composite_score || 0);
+    const scoreA = typeof a.composite_score === 'number' && !isNaN(a.composite_score) ? a.composite_score : 0;
+    const scoreB = typeof b.composite_score === 'number' && !isNaN(b.composite_score) ? b.composite_score : 0;
+    return scoreB - scoreA;
   });
 
   return (
@@ -99,7 +109,7 @@ export function ProductGrid({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {sorted.map((p, idx) => (
           <ProductCard
-            key={p.product_id}
+            key={p.product_id || `product-idx-${idx}`}
             product={p}
             isWinner={idx === 0 && sortBy === 'SCORE'}
             onAddToCart={onAddToCart}

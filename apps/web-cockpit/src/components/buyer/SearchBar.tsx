@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X, Loader2, ArrowRight } from 'lucide-react';
 
 export interface SearchBarProps {
@@ -10,6 +10,7 @@ export interface SearchBarProps {
   initialValue?: string;
   className?: string;
   suggestions?: string[];
+  debounceMs?: number;
 }
 
 const DEFAULT_SUGGESTIONS = [
@@ -26,28 +27,86 @@ export function SearchBar({
   initialValue = '',
   className = '',
   suggestions = DEFAULT_SUGGESTIONS,
+  debounceMs = 0,
 }: SearchBarProps) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstMountRef = useRef<boolean>(true);
+  const lastSearchedRef = useRef<string>(initialValue.trim());
 
+  const clearDebounceTimer = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
+    }
+  }, []);
+
+  // Update value if initialValue changes externally
   useEffect(() => {
     setValue(initialValue);
-  }, [initialValue]);
+    lastSearchedRef.current = initialValue.trim();
+    clearDebounceTimer();
+  }, [initialValue, clearDebounceTimer]);
+
+  // Clean up debounce timer on component unmount
+  useEffect(() => {
+    return () => {
+      clearDebounceTimer();
+    };
+  }, [clearDebounceTimer]);
+
+  const triggerSearch = useCallback(
+    (queryToSearch: string) => {
+      clearDebounceTimer();
+      const trimmed = (queryToSearch || '').trim();
+      if (!trimmed) {
+        return;
+      }
+      if (trimmed === lastSearchedRef.current && !loading) {
+        return;
+      }
+      lastSearchedRef.current = trimmed;
+      onSearch(trimmed);
+    },
+    [clearDebounceTimer, loading, onSearch]
+  );
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const nextVal = e.target.value;
+    setValue(nextVal);
+
+    if (debounceMs > 0) {
+      clearDebounceTimer();
+      const trimmed = nextVal.trim();
+      if (!trimmed) {
+        // Prevent API flooding on whitespace or empty query
+        return;
+      }
+      debounceTimerRef.current = setTimeout(() => {
+        triggerSearch(nextVal);
+      }, debounceMs);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!value.trim() || loading) return;
-    onSearch(value.trim());
+    clearDebounceTimer();
+    const trimmed = (value || '').trim();
+    if (!trimmed || loading) return;
+    triggerSearch(trimmed);
   };
 
   const handleClear = () => {
+    clearDebounceTimer();
     setValue('');
     inputRef.current?.focus();
   };
 
   const handleSelectSuggestion = (s: string) => {
+    clearDebounceTimer();
     setValue(s);
-    onSearch(s);
+    triggerSearch(s);
   };
 
   return (
@@ -65,7 +124,7 @@ export function SearchBar({
           ref={inputRef}
           type="text"
           value={value}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={handleInputChange}
           disabled={loading}
           placeholder={placeholder}
           className="flex-1 bg-transparent px-2 py-2.5 text-xs sm:text-sm text-white outline-none placeholder:text-slate-500 min-w-0"
@@ -76,6 +135,7 @@ export function SearchBar({
             type="button"
             onClick={handleClear}
             className="p-1 rounded-lg text-slate-400 hover:text-white mr-1 transition-colors cursor-pointer"
+            aria-label="Clear search query"
           >
             <X className="w-3.5 h-3.5" />
           </button>

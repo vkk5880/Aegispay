@@ -7,6 +7,7 @@ import {
   Sparkles,
   Check,
   Truck,
+  ImageOff,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
@@ -27,6 +28,7 @@ export function ProductCard({
   className = '',
 }: ProductCardProps) {
   const [added, setAdded] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const formatPrice = (cents: number) => {
     return (cents / 100).toLocaleString('en-US', {
@@ -61,6 +63,8 @@ export function ProductCard({
       )
     : 0;
 
+  const hasCleanUrl = Boolean(product.cleaned_url && product.cleaned_url.trim().length > 0);
+
   return (
     <div
       className={`p-5 rounded-2xl bg-slate-900/70 border transition-all card-hover flex flex-col justify-between relative shadow-xl ${
@@ -79,16 +83,23 @@ export function ProductCard({
 
       <div>
         {/* Product Image & Radial Score Badge */}
-        <div className="relative w-full h-48 rounded-xl overflow-hidden bg-slate-950 mb-4 border border-slate-800">
-          {product.cleaned_url ? (
+        <div className="relative w-full h-48 rounded-xl overflow-hidden bg-slate-950 mb-4 border border-slate-800 flex items-center justify-center">
+          {hasCleanUrl && !imgError ? (
             <img
               src={product.cleaned_url}
-              alt={product.title}
+              alt={product.title || 'Product'}
+              onError={() => setImgError(true)}
               className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-slate-600 font-mono text-xs">
-              [ Studio Image Verified ]
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 text-center">
+              <ImageOff className="w-8 h-8 text-slate-600 mb-2" />
+              <span className="text-slate-400 font-mono text-xs font-semibold">
+                [ Studio Image Verified ]
+              </span>
+              <span className="text-slate-600 font-mono text-[10px] mt-0.5">
+                Authentic Spec Guaranteed
+              </span>
             </div>
           )}
 

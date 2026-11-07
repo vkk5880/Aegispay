@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Lock,
   Clock,
@@ -36,38 +36,76 @@ export function PriceLockCard({
   className = '',
 }: PriceLockCardProps) {
   const [timeLeft, setTimeLeft] = useState<string>('71:59:59');
+  const [isExpired, setIsExpired] = useState<boolean>(false);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [status, setStatus] = useState<'LOCKED' | 'CAPTURED' | 'VOIDED'>('LOCKED');
+  const mountedRef = useRef<boolean>(true);
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
     const updateCountdown = () => {
-      const diff = new Date(priceLock.expires_at).getTime() - Date.now();
-      if (diff <= 0) {
+      if (!mountedRef.current) return;
+
+      const targetTime = new Date(priceLock.expires_at).getTime();
+      if (isNaN(targetTime)) {
         setTimeLeft('Expired');
+        setIsExpired(true);
+        if (intervalId) clearInterval(intervalId);
         return;
       }
-      const h = Math.floor(diff / 3600000).toString().padStart(2, '0');
-      const m = Math.floor((diff % 3600000) / 60000).toString().padStart(2, '0');
-      const s = Math.floor((diff % 60000) / 1000).toString().padStart(2, '0');
+
+      const diff = targetTime - Date.now();
+      if (diff <= 0) {
+        setTimeLeft('Expired');
+        setIsExpired(true);
+        if (intervalId) clearInterval(intervalId);
+        return;
+      }
+
+      const clampedDiff = Math.max(0, diff);
+      const h = Math.floor(clampedDiff / 3600000).toString().padStart(2, '0');
+      const m = Math.floor((clampedDiff % 3600000) / 60000).toString().padStart(2, '0');
+      const s = Math.floor((clampedDiff % 60000) / 1000).toString().padStart(2, '0');
       setTimeLeft(`${h}:${m}:${s}`);
+      setIsExpired(false);
     };
 
     updateCountdown();
-    const interval = setInterval(updateCountdown, 1000);
-    return () => clearInterval(interval);
+    intervalId = setInterval(updateCountdown, 1000);
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [priceLock.expires_at]);
 
   const handleCapture = async () => {
+    if (isExpired || isCapturing) return;
     setIsCapturing(true);
     try {
       if (onExecuteCheckout) {
         await onExecuteCheckout();
       }
-      setStatus('CAPTURED');
+      if (mountedRef.current) {
+        setStatus('CAPTURED');
+      }
     } catch {
-      setStatus('CAPTURED');
+      if (mountedRef.current) {
+        setStatus('CAPTURED');
+      }
     } finally {
-      setIsCapturing(false);
+      if (mountedRef.current) {
+        setIsCapturing(false);
+      }
     }
   };
 
@@ -75,7 +113,9 @@ export function PriceLockCard({
     if (onVoidLock) {
       await onVoidLock();
     }
-    setStatus('VOIDED');
+    if (mountedRef.current) {
+      setStatus('VOIDED');
+    }
   };
 
   const formatPrice = (cents: number) => {
@@ -95,6 +135,8 @@ export function PriceLockCard({
           ? 'bg-emerald-950/20 border-emerald-500/50'
           : status === 'VOIDED'
           ? 'bg-red-950/20 border-red-500/40 opacity-70'
+          : isExpired
+          ? 'bg-slate-900/60 border-slate-700/60 opacity-80'
           : 'bg-cyan-950/25 border-cyan-500/40 shadow-xl shadow-cyan-950/30'
       } ${className}`}
     >
@@ -115,8 +157,12 @@ export function PriceLockCard({
         </div>
 
         {/* Live Timer */}
-        <div className="flex items-center gap-1.5 font-mono text-xs px-2.5 py-1 rounded-lg bg-slate-900/80 border border-slate-700/60 text-slate-300">
-          <Clock className="w-3.5 h-3.5 text-cyan-400" />
+        <div className={`flex items-center gap-1.5 font-mono text-xs px-2.5 py-1 rounded-lg border ${
+          isExpired
+            ? 'bg-red-950/40 border-red-700/50 text-red-300'
+            : 'bg-slate-900/80 border-slate-700/60 text-slate-300'
+        }`}>
+          <Clock className={`w-3.5 h-3.5 ${isExpired ? 'text-red-400' : 'text-cyan-400'}`} />
           <span className="font-bold">{timeLeft}</span>
         </div>
       </div>
@@ -149,11 +195,15 @@ export function PriceLockCard({
         <div className="flex items-center gap-2 pt-2">
           <button
             onClick={handleCapture}
-            disabled={isCapturing}
-            className="flex-1 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 cursor-pointer"
+            disabled={isCapturing || isExpired}
+            className={`flex-1 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 ${
+              isExpired ? 'cursor-not-allowed' : 'cursor-pointer'
+            }`}
           >
             {isCapturing ? (
               <span>Capturing Escrow...</span>
+            ) : isExpired ? (
+              <span>Price Lock Expired</span>
             ) : (
               <>
                 <ShieldCheck className="w-3.5 h-3.5" />
