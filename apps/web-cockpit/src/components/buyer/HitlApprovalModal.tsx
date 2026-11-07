@@ -53,17 +53,101 @@ export function HitlApprovalModal({
   const [secondsLeft, setSecondsLeft] = useState<number>(totalSeconds);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
 
   const onTimeoutRef = useRef(onTimeout);
+  const onDeclineRef = useRef(onDecline);
   const requestRef = useRef(request);
 
   useEffect(() => {
     onTimeoutRef.current = onTimeout;
+    onDeclineRef.current = onDecline;
     requestRef.current = request;
-  }, [onTimeout, request]);
+  }, [onTimeout, onDecline, request]);
 
   const timeoutSeconds = request?.timeout_seconds ?? 60;
   const requestId = request?.id;
+
+  // Background scroll lock
+  useEffect(() => {
+    if (!isOpen || !requestId) return;
+
+    if (typeof document !== 'undefined') {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
+    }
+  }, [isOpen, requestId]);
+
+  // Focus trapping and Escape key dismiss
+  useEffect(() => {
+    if (!isOpen || !requestId) return;
+
+    if (typeof document !== 'undefined') {
+      previousActiveElementRef.current = document.activeElement as HTMLElement | null;
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (onDeclineRef.current && requestRef.current) {
+            onDeclineRef.current(requestRef.current.id, requestRef.current);
+          }
+          return;
+        }
+
+        if (e.key === 'Tab' && modalRef.current) {
+          const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+
+          if (focusableElements.length === 0) return;
+
+          const firstElement = focusableElements[0];
+          const lastElement = focusableElements[focusableElements.length - 1];
+
+          if (e.shiftKey) {
+            if (document.activeElement === firstElement || !modalRef.current.contains(document.activeElement)) {
+              e.preventDefault();
+              lastElement.focus();
+            }
+          } else {
+            if (document.activeElement === lastElement || !modalRef.current.contains(document.activeElement)) {
+              e.preventDefault();
+              firstElement.focus();
+            }
+          }
+        }
+      };
+
+      window.addEventListener('keydown', handleKeyDown);
+
+      // Focus first interactive element or modal container
+      const timer = setTimeout(() => {
+        if (modalRef.current) {
+          const firstFocusable = modalRef.current.querySelector<HTMLElement>(
+            'button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+          if (firstFocusable) {
+            firstFocusable.focus();
+          } else {
+            modalRef.current.focus();
+          }
+        }
+      }, 0);
+
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        clearTimeout(timer);
+        if (previousActiveElementRef.current && typeof previousActiveElementRef.current.focus === 'function') {
+          previousActiveElementRef.current.focus();
+        }
+      };
+    }
+  }, [isOpen, requestId]);
 
   useEffect(() => {
     if (!isOpen || !requestId) {
@@ -137,9 +221,12 @@ export function HitlApprovalModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fade-in">
       <div
-        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#080e1b] border-2 border-cyan-400 dark:border-cyan-500/50 shadow-2xl overflow-hidden relative"
+        ref={modalRef}
+        tabIndex={-1}
+        className="w-full max-w-lg rounded-3xl bg-white dark:bg-[#080e1b] border-2 border-cyan-400 dark:border-cyan-500/50 shadow-2xl overflow-hidden relative focus:outline-none"
         role="dialog"
         aria-modal="true"
+        aria-labelledby="hitl-approval-title"
       >
         {/* Top Header Glow Bar */}
         <div className="h-2 w-full bg-gradient-to-r from-cyan-500 via-amber-500 to-rose-500" />
@@ -165,7 +252,10 @@ export function HitlApprovalModal({
                 <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                   {request.type.replace(/_/g, ' ')}
                 </span>
-                <h2 className="text-lg font-black text-slate-900 dark:text-white tracking-tight mt-1">
+                <h2
+                  id="hitl-approval-title"
+                  className="text-lg font-black text-slate-900 dark:text-white tracking-tight mt-1"
+                >
                   {request.title ||
                     (isCounterOffer
                       ? 'Merchant Counter-Offer Received'

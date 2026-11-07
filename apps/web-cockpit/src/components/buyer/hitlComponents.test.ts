@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { HitlApprovalModal } from './HitlApprovalModal.js';
+import { PayPalV6SdkMount } from './PayPalV6SdkMount.js';
+import { DisputeModal, validateEvidenceFile } from './DisputeModal.js';
 import { FriendlyErrorTransmuter, transmuteError } from '../common/FriendlyErrorTransmuter.js';
 
 test('FriendlyErrorTransmuter transmuteError converts Redis Lua and PayPal errors', () => {
@@ -258,4 +260,154 @@ test('ShareButton renders share trigger and aria attributes', async () => {
 
   assert.ok(html.includes('Share Result'));
   assert.ok(html.includes('aria-label="Share comparison decision link"'));
+});
+
+test('HitlApprovalModal accessibility audit: verifies role dialog, aria-modal, and focus target attributes', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(HitlApprovalModal, {
+      isOpen: true,
+      request: {
+        id: 'hitl_a11y_test',
+        type: 'CAP_OVERAGE_EXCEPTION',
+        title: 'Spend Cap Exception Requested',
+        message: 'Agent requested $520.00 spend ($20 over cap).',
+        original_amount_cents: 50000,
+        requested_amount_cents: 52000,
+        delta_cents: 2000,
+        timeout_seconds: 45,
+      },
+      onApprove: () => {},
+      onDecline: () => {},
+    })
+  );
+
+  assert.ok(html.includes('role="dialog"'));
+  assert.ok(html.includes('aria-modal="true"'));
+  assert.ok(html.includes('aria-labelledby="hitl-approval-title"'));
+  assert.ok(html.includes('id="hitl-approval-title"'));
+  assert.ok(html.includes('Spend Cap Exception Requested'));
+  assert.ok(html.includes('45s'));
+  assert.ok(html.includes('Block Spend'));
+  assert.ok(html.includes('Approve 1-Time'));
+});
+
+test('PayPalV6SdkMount renders session timer, funding sources, and hold amount', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(PayPalV6SdkMount, {
+      orderAmountCents: 45000,
+      orderIntent: 'AUTHORIZE',
+      currency: 'USD',
+      clientId: 'sb-test-client',
+    })
+  );
+
+  assert.ok(html.includes('PayPal JS SDK v6 Web Components Mount'));
+  assert.ok(html.includes('15-Min Session Token'));
+  assert.ok(html.includes('Session Window:'));
+  assert.ok(html.includes('$450.00'));
+  assert.ok(html.includes('AUTHORIZE (72h Price-Drop Watcher)'));
+  assert.ok(html.includes('PayPal'));
+  assert.ok(html.includes('Venmo'));
+  assert.ok(html.includes('Pay Later'));
+  assert.ok(html.includes('Authorize with PayPal'));
+  assert.ok(html.includes('APIMatic Context Security'));
+  assert.ok(html.includes('15-MIN EPHEMERAL GRANTED'));
+});
+
+test('DisputeModal renders accessible dialog and form inputs', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(DisputeModal, {
+      isOpen: true,
+      disputeId: 'PP-D-998811',
+      orderId: 'PP-ORD-V6-123',
+      disputeAmountCents: 8500,
+      onClose: () => {},
+      onSubmitEvidence: () => {},
+    })
+  );
+
+  assert.ok(html.includes('role="dialog"'));
+  assert.ok(html.includes('aria-modal="true"'));
+  assert.ok(html.includes('aria-labelledby="dispute-modal-title"'));
+  assert.ok(html.includes('Submit Dispute Evidence Bundle'));
+  assert.ok(html.includes('PP-D-998811'));
+  assert.ok(html.includes('PP-ORD-V6-123'));
+  assert.ok(html.includes('MERCHANDISE_NOT_AS_DESCRIBED'));
+  assert.ok(html.includes('Cancel'));
+  assert.ok(html.includes('Submit Evidence'));
+});
+
+test('DisputeModal validateEvidenceFile strictly enforces file size limits and MIME types', () => {
+  // Test 1: Null/undefined file
+  const nullCheck = validateEvidenceFile(null as any);
+  assert.equal(nullCheck.valid, false);
+  assert.ok(nullCheck.error?.includes('No file provided'));
+
+  // Test 2: Empty file (0 bytes)
+  const emptyCheck = validateEvidenceFile({
+    name: 'empty.png',
+    size: 0,
+    type: 'image/png',
+  });
+  assert.equal(emptyCheck.valid, false);
+  assert.ok(emptyCheck.error?.includes('empty'));
+
+  // Test 3: Oversized file (>10MB)
+  const oversizedCheck = validateEvidenceFile({
+    name: 'heavy_damage_video.mp4',
+    size: 11 * 1024 * 1024,
+    type: 'video/mp4',
+  });
+  assert.equal(oversizedCheck.valid, false);
+  assert.ok(oversizedCheck.error?.includes('exceeds the 10MB maximum limit'));
+
+  // Test 4: Disallowed MIME type (executable / script / html)
+  const scriptCheck = validateEvidenceFile({
+    name: 'exploit.sh',
+    size: 1024,
+    type: 'application/x-sh',
+  });
+  assert.equal(scriptCheck.valid, false);
+  assert.ok(scriptCheck.error?.includes('Unsupported file type'));
+
+  const htmlCheck = validateEvidenceFile({
+    name: 'phish.html',
+    size: 2048,
+    type: 'text/html',
+  });
+  assert.equal(htmlCheck.valid, false);
+  assert.ok(htmlCheck.error?.includes('Unsupported file type'));
+
+  // Test 5: Valid JPEG
+  const jpegCheck = validateEvidenceFile({
+    name: 'damage_photo.jpg',
+    size: 2.5 * 1024 * 1024,
+    type: 'image/jpeg',
+  });
+  assert.equal(jpegCheck.valid, true);
+  assert.equal(jpegCheck.error, undefined);
+
+  // Test 6: Valid PNG
+  const pngCheck = validateEvidenceFile({
+    name: 'box_tear.png',
+    size: 4 * 1024 * 1024,
+    type: 'image/png',
+  });
+  assert.equal(pngCheck.valid, true);
+
+  // Test 7: Valid WEBP
+  const webpCheck = validateEvidenceFile({
+    name: 'package_label.webp',
+    size: 512 * 1024,
+    type: 'image/webp',
+  });
+  assert.equal(webpCheck.valid, true);
+
+  // Test 8: Valid PDF dossier
+  const pdfCheck = validateEvidenceFile({
+    name: 'postal_affidavit.pdf',
+    size: 8 * 1024 * 1024,
+    type: 'application/pdf',
+  });
+  assert.equal(pdfCheck.valid, true);
 });

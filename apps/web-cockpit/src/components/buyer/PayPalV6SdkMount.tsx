@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { CreditCard, ShieldCheck, CheckCircle2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
-interface PayPalV6SdkMountProps {
+export interface PayPalV6SdkMountProps {
   orderAmountCents: number;
   orderIntent?: 'AUTHORIZE' | 'CAPTURE';
   currency?: string;
@@ -23,6 +23,7 @@ export function PayPalV6SdkMount({
 }: PayPalV6SdkMountProps) {
   const [secondsRemaining, setSecondsRemaining] = useState<number>(15 * 60); // 15 min session window
   const [sdkStatus, setSdkStatus] = useState<'IDLE' | 'LOADING_SDK' | 'MOUNTED' | 'AUTHORIZING' | 'SUCCESS' | 'ERROR'>('IDLE');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [authorizedOrderId, setAuthorizedOrderId] = useState<string | null>(null);
   const [eligibleMethods, setEligibleMethods] = useState<{
     paypal: boolean;
@@ -31,12 +32,38 @@ export function PayPalV6SdkMount({
   }>({ paypal: true, venmo: true, paylater: true });
   const [activeFundingSource, setActiveFundingSource] = useState<'paypal' | 'venmo' | 'paylater'>('paypal');
 
+  const sessionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const authTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+
   // 15-minute countdown timer per PayPal ephemeral client token lifecycle
   useEffect(() => {
-    const timer = setInterval(() => {
-      setSecondsRemaining((prev) => (prev > 0 ? prev - 1 : 0));
+    isMountedRef.current = true;
+
+    sessionTimerRef.current = setInterval(() => {
+      setSecondsRemaining((prev) => {
+        if (prev <= 1) {
+          if (sessionTimerRef.current) {
+            clearInterval(sessionTimerRef.current);
+            sessionTimerRef.current = null;
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
-    return () => clearInterval(timer);
+
+    return () => {
+      isMountedRef.current = false;
+      if (sessionTimerRef.current) {
+        clearInterval(sessionTimerRef.current);
+        sessionTimerRef.current = null;
+      }
+      if (authTimeoutRef.current) {
+        clearTimeout(authTimeoutRef.current);
+        authTimeoutRef.current = null;
+      }
+    };
   }, []);
 
   const formatTimer = (totalSeconds: number): string => {
@@ -45,43 +72,77 @@ export function PayPalV6SdkMount({
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // Check eligible methods using findEligibleMethods pattern from js-sdk-v6.md
-  useEffect(() => {
-    const checkEligibility = async () => {
-      if (typeof window !== 'undefined' && (window as any).paypal?.createInstance) {
-        try {
-          const sdkInstance = await (window as any).paypal.createInstance({
-            clientId: clientId || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'sb',
-            components: ['paypal-payments', 'venmo-payments'],
-            pageType: 'checkout',
-          });
+  // Check eligible methods with hardened window.paypal script loading failure detection
+  const checkEligibility = useCallback(async () => {
+    if (typeof window === 'undefined') return;
 
-          const methods = await sdkInstance.findEligibleMethods({
-            currencyCode: currency,
-            amount: (orderAmountCents / 100).toFixed(2),
-          });
+    setErrorMessage(null);
+    setSdkStatus('LOADING_SDK');
 
-          setEligibleMethods({
-            paypal: methods.isEligible('paypal'),
-            venmo: methods.isEligible('venmo'),
-            paylater: methods.isEligible('paylater'),
-          });
-          setSdkStatus('MOUNTED');
-        } catch {
-          // Graceful fallback to sandbox/simulation state
-          setSdkStatus('IDLE');
-        }
+    try {
+      const paypalGlobal = (window as any).paypal;
+
+      if (!paypalGlobal) {
+        // In browser environment without window.paypal injected, fallback to simulation mode gracefully
+        setSdkStatus('IDLE');
+        return;
       }
-    };
 
+      if (typeof paypalGlobal.createInstance !== 'function') {
+        throw new Error('PayPal JS SDK v6 window.paypal.createInstance method unavailable');
+      }
+
+      const sdkInstance = await paypalGlobal.createInstance({
+        clientId: clientId || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'sb',
+        clientToken: clientToken,
+        components: ['paypal-payments', 'venmo-payments'],
+        pageType: 'checkout',
+      });
+
+      if (!sdkInstance || typeof sdkInstance.findEligibleMethods !== 'function') {
+        throw new Error('Invalid SDK instance returned from createInstance');
+      }
+
+      const methods = await sdkInstance.findEligibleMethods({
+        currencyCode: currency,
+        amount: (orderAmountCents / 100).toFixed(2),
+      });
+
+      if (isMountedRef.current) {
+        setEligibleMethods({
+          paypal: typeof methods?.isEligible === 'function' ? methods.isEligible('paypal') : true,
+          venmo: typeof methods?.isEligible === 'function' ? methods.isEligible('venmo') : false,
+          paylater: typeof methods?.isEligible === 'function' ? methods.isEligible('paylater') : false,
+        });
+        setSdkStatus('MOUNTED');
+      }
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        console.error('PayPal JS SDK v6 initialization error:', err);
+        setErrorMessage(err?.message || 'Failed to initialize PayPal JS SDK v6 component');
+        setSdkStatus('ERROR');
+      }
+    }
+  }, [clientId, clientToken, currency, orderAmountCents]);
+
+  useEffect(() => {
     checkEligibility();
-  }, [orderAmountCents, currency, clientId]);
+  }, [checkEligibility]);
 
   const handleSimulatePayPalAuthorization = async (funding: 'paypal' | 'venmo' | 'paylater' = 'paypal') => {
     setActiveFundingSource(funding);
     setSdkStatus('AUTHORIZING');
+    setErrorMessage(null);
+
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await new Promise<void>((resolve) => {
+        authTimeoutRef.current = setTimeout(() => {
+          authTimeoutRef.current = null;
+          resolve();
+        }, 800);
+      });
+
+      if (!isMountedRef.current) return;
 
       const simulatedOrderId = `PP-ORD-V6-${Date.now()}`;
       setAuthorizedOrderId(simulatedOrderId);
@@ -90,8 +151,11 @@ export function PayPalV6SdkMount({
       if (onAuthorizeSuccess) {
         onAuthorizeSuccess(simulatedOrderId);
       }
-    } catch {
-      setSdkStatus('ERROR');
+    } catch (err: any) {
+      if (isMountedRef.current) {
+        setErrorMessage(err?.message || 'Authorization attempt failed');
+        setSdkStatus('ERROR');
+      }
     }
   };
 
@@ -198,6 +262,23 @@ export function PayPalV6SdkMount({
           </div>
 
           <div className="pt-5 space-y-2">
+            {sdkStatus === 'ERROR' && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                  <span>{errorMessage || 'PayPal SDK v6 Mount Encountered an Error'}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={checkEligibility}
+                  className="px-2.5 py-1 rounded bg-rose-200 dark:bg-rose-900 hover:bg-rose-300 text-rose-900 dark:text-rose-100 font-semibold text-[10px] flex items-center gap-1 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Retry</span>
+                </button>
+              </div>
+            )}
+
             {sdkStatus === 'SUCCESS' ? (
               <div className="p-3.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300 text-xs flex items-center justify-between">
                 <div className="flex items-center gap-2 font-mono">
@@ -208,6 +289,7 @@ export function PayPalV6SdkMount({
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => handleSimulatePayPalAuthorization(activeFundingSource)}
                 disabled={sdkStatus === 'AUTHORIZING' || secondsRemaining === 0}
                 className="w-full py-3 px-4 rounded-xl bg-[#0070ba] hover:bg-[#005ea6] text-white font-bold text-xs tracking-wider transition-all shadow-md shadow-blue-500/30 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
