@@ -30,26 +30,32 @@ export default function CockpitTelemetryPage() {
           </div>
 
           {/* Navigation Tabs */}
-          <div className="flex items-center gap-2 p-1.5 rounded-xl bg-[#060b14] border border-slate-800">
+          <div className="flex items-center gap-2 p-1.5 rounded-xl bg-[#060b14] border border-slate-800" role="tablist" aria-label="Cockpit telemetry views">
             <button
+              role="tab"
+              aria-selected={activeTab === 'CHAT'}
               onClick={() => setActiveTab('CHAT')}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'CHAT' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
               Buyer Chat & Intent
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'KNAPSACK'}
               onClick={() => setActiveTab('KNAPSACK')}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'KNAPSACK' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >
               Knapsack Cart
             </button>
             <button
+              role="tab"
+              aria-selected={activeTab === 'DISPUTES'}
               onClick={() => setActiveTab('DISPUTES')}
-              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === 'DISPUTES' ? 'bg-cyan-600 text-white shadow-md' : 'text-slate-400 hover:text-white'
               }`}
             >

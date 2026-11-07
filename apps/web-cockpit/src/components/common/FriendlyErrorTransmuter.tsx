@@ -66,10 +66,67 @@ export interface FriendlyErrorTransmuterProps {
  * into structured, empathetic, user-friendly recovery instructions with 1-click resolution buttons.
  * Grounded in PayPal Doctor & Explain-Error diagnostic specifications.
  */
+/**
+ * Safely extracts a meaningful error string from any arbitrary payload (strings, Error instances,
+ * Axios/Fetch error responses, nested API response objects, circular references, null/undefined).
+ */
+function extractErrorString(rawInput: unknown): string {
+  if (rawInput === null || rawInput === undefined) {
+    return '';
+  }
+
+  if (typeof rawInput === 'string') {
+    return rawInput.trim();
+  }
+
+  if (rawInput instanceof Error) {
+    return rawInput.message || rawInput.name || 'Error';
+  }
+
+  if (typeof rawInput === 'object') {
+    const obj = rawInput as Record<string, any>;
+
+    // Direct error string fields
+    if (typeof obj.message === 'string' && obj.message) return obj.message;
+    if (typeof obj.error_code === 'string' && obj.error_code) return obj.error_code;
+    if (typeof obj.code === 'string' && obj.code) return obj.code;
+    if (typeof obj.error === 'string' && obj.error) return obj.error;
+
+    // Nested API responses (e.g. axios/fetch res.data or res.error)
+    if (obj.data && typeof obj.data === 'object') {
+      const nested = extractErrorString(obj.data);
+      if (nested) return nested;
+    }
+    if (obj.error && typeof obj.error === 'object') {
+      const nested = extractErrorString(obj.error);
+      if (nested) return nested;
+    }
+
+    // Attempt safe stringify with circular reference protection
+    try {
+      const seen = new WeakSet();
+      return JSON.stringify(obj, (_key, val) => {
+        if (typeof val === 'object' && val !== null) {
+          if (seen.has(val)) return '[Circular]';
+          seen.add(val);
+        }
+        return val;
+      });
+    } catch {
+      return Object.prototype.toString.call(obj);
+    }
+  }
+
+  return String(rawInput);
+}
+
+/**
+ * Transmutes cryptic Redis Lua enforcer error codes and PayPal API errors
+ * into structured, empathetic, user-friendly recovery instructions with 1-click resolution buttons.
+ * Grounded in PayPal Doctor & Explain-Error diagnostic specifications.
+ */
 export function transmuteError(rawInput: string | Error | any): TransmutedError {
-  const errString = typeof rawInput === 'string'
-    ? rawInput
-    : rawInput?.message || rawInput?.error_code || rawInput?.error || JSON.stringify(rawInput || '');
+  const errString = extractErrorString(rawInput);
 
   // 1. Budget hard limit overage (ERR_EXCEEDS_TOTAL_MANDATE_BUDGET)
   if (errString.includes('ERR_EXCEEDS_TOTAL_MANDATE_BUDGET')) {
@@ -334,13 +391,13 @@ export function transmuteError(rawInput: string | Error | any): TransmutedError 
 
   // 11. Fallback / generic error transmutation
   return {
-    rawCode: errString.slice(0, 48) || 'SYSTEM_FAULT',
+    rawCode: (errString.trim() ? errString.slice(0, 48) : 'SYSTEM_FAULT') || 'SYSTEM_FAULT',
     category: 'UNKNOWN',
     title: 'Autonomous Flow Interruption',
     friendlyMessage:
       'The clearinghouse intercepted an unexpected response. Your funds remain secured in escrow holds with zero unapproved charges.',
     badge: { label: 'Clearinghouse Safe Gate', variant: 'slate' },
-    details: errString.slice(0, 160),
+    details: errString.trim() ? errString.slice(0, 160) : 'An unspecified condition occurred during transaction resolution.',
     actions: [
       {
         id: 'RETRY_OPERATION',

@@ -12,6 +12,7 @@ import {
   ChevronRight,
   CheckCircle2,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -35,10 +36,15 @@ export interface DisputeEvidenceData {
 export function DisputeMatrixViewer({
   evidence,
   onTriggerAction,
+  submitting = false,
 }: {
   evidence?: DisputeEvidenceData;
   onTriggerAction?: (actionRel: string) => void;
+  submitting?: boolean;
 }) {
+  const [internalSubmitting, setInternalSubmitting] = useState(false);
+  const isSubmitting = submitting || internalSubmitting;
+
   const data: DisputeEvidenceData = evidence || {
     disputeId: 'PP-D-849201',
     amountCents: 14900,
@@ -55,13 +61,50 @@ export function DisputeMatrixViewer({
     slaHoursRemaining: 18,
   };
 
+  const tierActionKey = data.tierAction || 'TIER4_CONTEST_PDF';
   const tierColors = {
     TIER1_REFUND: 'bg-emerald-950/60 text-emerald-400 border-emerald-500/40',
     TIER2_PARTIAL_OFFER: 'bg-indigo-950/60 text-indigo-400 border-indigo-500/40',
     TIER3_RETURN_OFFER: 'bg-blue-950/60 text-blue-400 border-blue-500/40',
     TIER4_CONTEST_PDF: 'bg-rose-950/60 text-rose-400 border-rose-500/40',
     TIER5_SLA_ESCALATE: 'bg-amber-950/60 text-amber-400 border-amber-500/40',
-  }[data.tierAction];
+  }[tierActionKey] || 'bg-slate-800 text-slate-300 border-slate-700';
+
+  // Safeguard coordinates [ymin, xmin, ymax, xmax] clamped within [0, 1]
+  const rawBox = data.defectBoundingBox;
+  const validBox = Array.isArray(rawBox) && rawBox.length === 4
+    ? [
+        Math.max(0, Math.min(1, Number(rawBox[0]) || 0)),
+        Math.max(0, Math.min(1, Number(rawBox[1]) || 0)),
+        Math.max(0, Math.min(1, Number(rawBox[2]) || 0)),
+        Math.max(0, Math.min(1, Number(rawBox[3]) || 0)),
+      ]
+    : null;
+
+  const ymin = validBox ? Math.min(validBox[0], validBox[2]) : 0;
+  const xmin = validBox ? Math.min(validBox[1], validBox[3]) : 0;
+  const ymax = validBox ? Math.max(validBox[0], validBox[2]) : 0;
+  const xmax = validBox ? Math.max(validBox[1], validBox[3]) : 0;
+  const boxHeight = (ymax - ymin) * 100;
+  const boxWidth = (xmax - xmin) * 100;
+  const defectPercent = Math.round((ymax - ymin) * (xmax - xmin) * 100);
+
+  // Safeguard scores clamped within [0, 1]
+  const liabilityScoreL = Math.max(0, Math.min(1, Number(data.liabilityScoreL) || 0));
+  const abuseRiskScoreR = Math.max(0, Math.min(1, Number(data.abuseRiskScoreR) || 0));
+  const slaRemaining = Math.max(0, Number(data.slaHoursRemaining) || 0);
+
+  const handleSubmit = async () => {
+    if (isSubmitting) return;
+    setInternalSubmitting(true);
+    try {
+      if (onTriggerAction) {
+        await onTriggerAction('provide-evidence');
+      }
+    } finally {
+      setInternalSubmitting(false);
+    }
+  };
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#0c1424] p-6 shadow-2xl space-y-6">
@@ -88,8 +131,8 @@ export function DisputeMatrixViewer({
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#060b14] border border-slate-800 text-xs font-mono">
           <Clock className="w-3.5 h-3.5 text-amber-400" />
           <span className="text-slate-400">SLA Due Date:</span>
-          <span className={`font-bold ${data.slaHoursRemaining <= 20 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
-            {data.slaHoursRemaining}h remaining
+          <span className={`font-bold ${slaRemaining <= 20 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+            {slaRemaining}h remaining
           </span>
         </div>
       </div>
@@ -116,18 +159,18 @@ export function DisputeMatrixViewer({
               [Buyer Uploaded Evidence]
             </div>
 
-            {data.defectBoundingBox && (
+            {validBox && boxHeight > 0 && boxWidth > 0 && (
               <div
                 className="absolute border-2 border-rose-500 bg-rose-500/20 rounded shadow-lg shadow-rose-500/30 flex items-start justify-end p-1"
                 style={{
-                  top: `${data.defectBoundingBox[0] * 100}%`,
-                  left: `${data.defectBoundingBox[1] * 100}%`,
-                  height: `${(data.defectBoundingBox[2] - data.defectBoundingBox[0]) * 100}%`,
-                  width: `${(data.defectBoundingBox[3] - data.defectBoundingBox[1]) * 100}%`,
+                  top: `${ymin * 100}%`,
+                  left: `${xmin * 100}%`,
+                  height: `${boxHeight}%`,
+                  width: `${boxWidth}%`,
                 }}
               >
                 <span className="text-[9px] font-mono bg-rose-600 text-white px-1 rounded font-bold">
-                  DEFECT {Math.round((data.defectBoundingBox[2] - data.defectBoundingBox[0]) * (data.defectBoundingBox[3] - data.defectBoundingBox[1]) * 100)}%
+                  DEFECT {defectPercent}%
                 </span>
               </div>
             )}
@@ -163,27 +206,27 @@ export function DisputeMatrixViewer({
               <div>
                 <div className="flex justify-between text-[11px] mb-1">
                   <span className="text-slate-400">Merchant Liability Score (L):</span>
-                  <span className="text-white font-bold">{data.liabilityScoreL.toFixed(3)}</span>
+                  <span className="text-white font-bold">{liabilityScoreL.toFixed(3)}</span>
                 </div>
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${data.liabilityScoreL * 100}%` }} />
+                  <div className="bg-indigo-500 h-full rounded-full" style={{ width: `${liabilityScoreL * 100}%` }} />
                 </div>
               </div>
 
               <div>
                 <div className="flex justify-between text-[11px] mb-1">
                   <span className="text-slate-400">Buyer Abuse / Tamper Risk (R):</span>
-                  <span className="text-rose-400 font-bold">{data.abuseRiskScoreR.toFixed(3)}</span>
+                  <span className="text-rose-400 font-bold">{abuseRiskScoreR.toFixed(3)}</span>
                 </div>
                 <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-rose-500 h-full rounded-full" style={{ width: `${data.abuseRiskScoreR * 100}%` }} />
+                  <div className="bg-rose-500 h-full rounded-full" style={{ width: `${abuseRiskScoreR * 100}%` }} />
                 </div>
               </div>
             </div>
 
             <p className="text-[11px] text-slate-400 font-sans leading-relaxed pt-2">
-              Decision Rule: Because R = {data.abuseRiskScoreR} &gt;= 0.60, the autonomous arbiter selected{' '}
-              <strong className="text-rose-400">{data.tierAction}</strong> to submit compiled forensic evidence.
+              Decision Rule: Because R = {abuseRiskScoreR.toFixed(2)} {abuseRiskScoreR >= 0.60 ? '>= 0.60' : '< 0.60'}, the autonomous arbiter selected{' '}
+              <strong className="text-rose-400">{tierActionKey}</strong> to submit compiled forensic evidence.
             </p>
           </div>
 
@@ -191,11 +234,16 @@ export function DisputeMatrixViewer({
           <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
             <span className="text-slate-500 text-[10px]">HATEOAS ACTION:</span>
             <button
-              onClick={() => onTriggerAction && onTriggerAction('provide-evidence')}
-              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-sans font-semibold text-xs transition-all active:scale-95 flex items-center gap-1.5"
+              onClick={handleSubmit}
+              disabled={isSubmitting}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-sans font-semibold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
             >
-              <FileCheck className="w-3.5 h-3.5" />
-              <span>Submit Defense Dossier</span>
+              {isSubmitting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <FileCheck className="w-3.5 h-3.5" />
+              )}
+              <span>{isSubmitting ? 'Submitting Dossier...' : 'Submit Defense Dossier'}</span>
             </button>
           </div>
         </div>

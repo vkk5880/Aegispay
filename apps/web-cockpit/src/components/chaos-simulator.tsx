@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import {
   ShieldAlert,
   Play,
+  Loader2,
   RotateCcw,
   Terminal,
   Zap,
@@ -14,6 +15,7 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react';
+import { FriendlyErrorTransmuter } from './common/FriendlyErrorTransmuter';
 
 export interface ChaosAction {
   id: string;
@@ -56,14 +58,16 @@ const CHAOS_ACTIONS: ChaosAction[] = [
 
 export function ChaosSimulator() {
   const [activeAction, setActiveAction] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [executionMs, setExecutionMs] = useState<number | null>(null);
 
   const handleRunChaos = async (actionId: string) => {
     setActiveAction(actionId);
-    setLoading(true);
+    setLoadingAction(actionId);
     setError(null);
+    const startTime = performance.now();
     try {
       const res = await fetch('/api/chaos', {
         method: 'POST',
@@ -71,11 +75,16 @@ export function ChaosSimulator() {
         body: JSON.stringify({ action: actionId }),
       });
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}: Chaos simulation failed`);
+      }
       setResult(data);
+      setExecutionMs(Math.round(performance.now() - startTime));
     } catch (err: any) {
       setError(err.message || 'Failed to trigger chaos fault injection');
+      setExecutionMs(Math.round(performance.now() - startTime));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
@@ -98,11 +107,19 @@ export function ChaosSimulator() {
               </span>
               <button
                 onClick={() => handleRunChaos(action.id)}
-                disabled={loading}
-                className="px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs tracking-wide flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50"
+                disabled={loadingAction !== null}
+                className={`px-3 py-1.5 rounded-xl font-semibold text-xs tracking-wide flex items-center gap-1.5 transition-all active:scale-95 disabled:opacity-50 ${
+                  loadingAction === action.id
+                    ? 'bg-amber-600 text-white shadow-amber-500/20'
+                    : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                }`}
               >
-                <Play className="w-3.5 h-3.5" />
-                <span>Inject Fault</span>
+                {loadingAction === action.id ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Play className="w-3.5 h-3.5" />
+                )}
+                <span>{loadingAction === action.id ? 'Simulating...' : 'Inject Fault'}</span>
               </button>
             </div>
 
@@ -124,18 +141,22 @@ export function ChaosSimulator() {
             <Terminal className="w-4 h-4 text-cyan-400" />
             <span className="font-semibold text-white">Chaos Telemetry & Readback Stream</span>
           </div>
-          {loading && (
+          {loadingAction ? (
             <div className="flex items-center gap-2 text-cyan-400 animate-pulse">
-              <Clock className="w-3.5 h-3.5" />
-              <span>Simulating clearinghouse reaction...</span>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Simulating clearinghouse reaction for {loadingAction}...</span>
             </div>
-          )}
+          ) : executionMs !== null ? (
+            <div className="flex items-center gap-2 text-slate-400 text-[11px]">
+              <Clock className="w-3 h-3 text-cyan-400" />
+              <span>Round-trip latency: {executionMs}ms</span>
+            </div>
+          ) : null}
         </div>
 
         {error && (
-          <div className="mt-4 p-3 rounded-xl bg-rose-950/50 border border-rose-500/40 text-rose-300 text-xs flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            <span>{error}</span>
+          <div className="mt-4">
+            <FriendlyErrorTransmuter error={error} />
           </div>
         )}
 

@@ -10,6 +10,8 @@ import {
   ShieldCheck,
   CheckCircle2,
   Trash2,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 
@@ -60,18 +62,47 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
     },
   ];
 
-  // Group items by merchant
+  // Group items safely by merchant domain (handling undefined/empty gracefully)
   const groupedByMerchant = cartItems.reduce((acc, item) => {
-    if (!acc[item.merchantDomain]) {
-      acc[item.merchantDomain] = [];
+    const domain = (item.merchantDomain || 'unassigned-merchant.com').trim().toLowerCase();
+    if (!acc[domain]) {
+      acc[domain] = [];
     }
-    acc[item.merchantDomain].push(item);
+    acc[domain].push(item);
     return acc;
   }, {} as Record<string, MultiMerchantCartItem[]>);
 
-  const subtotalCents = cartItems.reduce((sum, item) => sum + item.priceCents * item.quantity, 0);
-  const totalRebateCents = cartItems.reduce((sum, item) => sum + item.rebateCents * item.quantity, 0);
-  const netTotalCents = subtotalCents - totalRebateCents;
+  // Validate price and quantity integrity (guard against negative values or NaN)
+  const subtotalCents = cartItems.reduce((sum, item) => {
+    const price = Math.max(0, Number(item.priceCents) || 0);
+    const qty = Math.max(0, Math.floor(Number(item.quantity) || 0));
+    return sum + price * qty;
+  }, 0);
+
+  const totalRebateCents = cartItems.reduce((sum, item) => {
+    const rebate = Math.max(0, Number(item.rebateCents) || 0);
+    const qty = Math.max(0, Math.floor(Number(item.quantity) || 0));
+    return sum + rebate * qty;
+  }, 0);
+
+  // Net cannot be negative
+  const netTotalCents = Math.max(0, subtotalCents - totalRebateCents);
+
+  if (cartItems.length === 0) {
+    return (
+      <div className="rounded-2xl border border-slate-800 bg-[#0c1424] p-8 shadow-2xl text-center space-y-4">
+        <div className="p-3 bg-cyan-950/60 border border-cyan-500/30 rounded-2xl text-cyan-400 w-fit mx-auto">
+          <ShoppingBag className="w-8 h-8" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-base font-bold text-white">Knapsack Cart is Empty</h3>
+          <p className="text-xs text-slate-400 max-w-sm mx-auto">
+            Your autonomous multi-vendor knapsack optimization cart has no items. Run a buyer query in the chat flow to discover and bundle products.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-slate-800 bg-[#0c1424] p-6 shadow-2xl space-y-6">
@@ -162,9 +193,13 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
         <button
           onClick={onCheckout}
           disabled={loading}
-          className="w-full py-3 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs tracking-wider transition-all shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50"
+          className="w-full py-3 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs tracking-wider transition-all shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
         >
-          <ShieldCheck className="w-4 h-4" />
+          {loading ? (
+            <Loader2 className="w-4 h-4 animate-spin text-cyan-200" />
+          ) : (
+            <ShieldCheck className="w-4 h-4" />
+          )}
           <span>{loading ? 'Executing Multi-Unit Vault Hold...' : 'Execute Knapsack Checkout with PayPal Vault'}</span>
         </button>
       </div>
