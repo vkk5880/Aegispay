@@ -26,19 +26,22 @@ export function WarpBackground({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    if (typeof window !== 'undefined') {
+      setMounted(true);
+    }
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || typeof window === 'undefined') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationFrameId: number;
-    let isVisible = true;
+    let animationFrameId: number | null = null;
+    let isVisible = typeof document !== 'undefined' ? !document.hidden : true;
+    let prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     // Initialize star vectors in spherical / cubic volume
     const stars: Star[] = [];
@@ -55,6 +58,35 @@ export function WarpBackground({
 
     let currentSpeed = isWarping ? 32 : 1.8;
 
+    const drawStaticStars = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const cx = w / 2;
+      const cy = h / 2;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.lineWidth = 1.0;
+
+      for (let i = 0; i < starCount; i++) {
+        const star = stars[i];
+        const fov = 320;
+        const k = fov / star.z;
+        const px = star.x * k + cx;
+        const py = star.y * k + cy;
+
+        if (px < -50 || px > w + 50 || py < -50 || py > h + 50) continue;
+
+        const depthRatio = Math.max(0, 1 - star.z / maxDepth);
+        const alpha = Math.min(1, depthRatio * 0.75);
+
+        ctx.fillStyle = `rgba(167, 139, 250, ${alpha})`;
+        const size = Math.max(0.8, depthRatio * 2.2);
+        ctx.beginPath();
+        ctx.arc(px, py, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    };
+
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
       const width = window.innerWidth;
@@ -64,24 +96,57 @@ export function WarpBackground({
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.scale(dpr, dpr);
+      if (prefersReducedMotion) {
+        drawStaticStars();
+      }
     };
 
     resize();
     window.addEventListener('resize', resize);
 
-    const onVisibilityChange = () => {
-      isVisible = !document.hidden;
-      if (isVisible) {
+    const startAnimation = () => {
+      if (animationFrameId === null && isVisible && !prefersReducedMotion) {
         lastTime = performance.now();
         animationFrameId = requestAnimationFrame(render);
       }
     };
+
+    const stopAnimation = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    const onVisibilityChange = () => {
+      isVisible = typeof document !== 'undefined' ? !document.hidden : true;
+      if (isVisible) {
+        startAnimation();
+      } else {
+        stopAnimation();
+      }
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onMotionChange = (e: MediaQueryListEvent) => {
+      prefersReducedMotion = e.matches;
+      if (prefersReducedMotion) {
+        stopAnimation();
+        drawStaticStars();
+      } else {
+        startAnimation();
+      }
+    };
+    motionQuery.addEventListener?.('change', onMotionChange);
 
     let lastTime = performance.now();
 
     const render = (now: number) => {
-      if (!isVisible) return;
+      if (!isVisible || prefersReducedMotion) {
+        animationFrameId = null;
+        return;
+      }
 
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
@@ -155,12 +220,19 @@ export function WarpBackground({
       animationFrameId = requestAnimationFrame(render);
     };
 
-    animationFrameId = requestAnimationFrame(render);
+    if (prefersReducedMotion) {
+      drawStaticStars();
+    } else {
+      animationFrameId = requestAnimationFrame(render);
+    }
 
     return () => {
       window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      cancelAnimationFrame(animationFrameId);
+      motionQuery.removeEventListener?.('change', onMotionChange);
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
     };
   }, [mounted, isWarping, starCount, baseColor]);
 

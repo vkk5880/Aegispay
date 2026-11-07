@@ -146,3 +146,29 @@ body {
   background-size: 200% 100%;
   animation: gradientShift 2.5s ease-in-out infinite;
 }
+
+/* Accessibility: prefers-reduced-motion override */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-fade-in-up,
+  .animate-pulse-dot,
+  .animate-marquee-left,
+  .animate-marquee-right,
+  .animate-spin-slow,
+  .gradient-bg,
+  .shimmer-effect {
+    animation: none !important;
+  }
+
+  .card-hover:hover {
+    transform: none !important;
+  }
+}

@@ -15,9 +15,14 @@ export function CustomCursor() {
     if (window.matchMedia('(pointer: coarse)').matches) {
       return;
     }
+
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (motionQuery.matches) {
+      return;
+    }
     setIsTouch(false);
 
-    let rafId: number;
+    let rafId: number | null = null;
     let targetX = -100;
     let targetY = -100;
     let ringX = -100;
@@ -42,16 +47,35 @@ export function CustomCursor() {
       rafId = requestAnimationFrame(updateRing);
     };
 
+    const handleMotionChange = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        if (rafId !== null) {
+          cancelAnimationFrame(rafId);
+          rafId = null;
+        }
+        setIsTouch(true);
+      } else {
+        setIsTouch(false);
+        if (rafId === null) {
+          rafId = requestAnimationFrame(updateRing);
+        }
+      }
+    };
+
     window.addEventListener('mousemove', onMouseMove, { passive: true });
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
+    motionQuery.addEventListener?.('change', handleMotionChange);
     rafId = requestAnimationFrame(updateRing);
 
     return () => {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
-      cancelAnimationFrame(rafId);
+      motionQuery.removeEventListener?.('change', handleMotionChange);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
     };
   }, []);
 

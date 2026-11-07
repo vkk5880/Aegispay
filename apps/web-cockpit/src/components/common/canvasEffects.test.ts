@@ -18,6 +18,7 @@ describe('Web Cockpit Canvas Effects & Cyber Styling Test Suite', () => {
 
     assert.ok(content.includes('typeof window === \'undefined\''), 'Includes SSR guard');
     assert.ok(content.includes('(pointer: coarse)'), 'Checks coarse pointer for touch devices');
+    assert.ok(content.includes('(prefers-reduced-motion: reduce)'), 'Checks prefers-reduced-motion for accessibility');
     assert.ok(content.includes('window.addEventListener(\'mousemove\', onMouseMove'), 'Attaches mousemove listener');
     assert.ok(content.includes('window.removeEventListener(\'mousemove\', onMouseMove)'), 'Cleans up mousemove listener');
     assert.ok(content.includes('cancelAnimationFrame(rafId)'), 'Cleans up animation frame on unmount');
@@ -28,6 +29,8 @@ describe('Web Cockpit Canvas Effects & Cyber Styling Test Suite', () => {
     const file = getFilePath('apps/web-cockpit/src/components/common/CustomCursor.tsx');
     const content = readFileSync(file, 'utf-8');
 
+    assert.ok(content.includes('typeof window === \'undefined\''), 'Includes SSR guard');
+    assert.ok(content.includes('(prefers-reduced-motion: reduce)'), 'Checks prefers-reduced-motion for accessibility');
     assert.ok(content.includes('window.removeEventListener(\'mousemove\', onMouseMove)'), 'Cleans up mousemove listener');
     assert.ok(content.includes('window.removeEventListener(\'mousedown\', onMouseDown)'), 'Cleans up mousedown listener');
     assert.ok(content.includes('window.removeEventListener(\'mouseup\', onMouseUp)'), 'Cleans up mouseup listener');
@@ -51,6 +54,8 @@ describe('Web Cockpit Canvas Effects & Cyber Styling Test Suite', () => {
     const file = getFilePath('apps/web-cockpit/src/components/common/TerrainBackground.tsx');
     const content = readFileSync(file, 'utf-8');
 
+    assert.ok(content.includes('typeof window === \'undefined\''), 'Includes SSR guard');
+    assert.ok(content.includes('(prefers-reduced-motion: reduce)'), 'Checks prefers-reduced-motion for accessibility');
     assert.ok(content.includes('window.addEventListener(\'resize\', resize)'), 'Registers resize listener');
     assert.ok(content.includes('window.removeEventListener(\'resize\', resize)'), 'Cleans up resize listener');
     assert.ok(content.includes('document.addEventListener(\'visibilitychange\', onVisibilityChange)'), 'Registers visibilitychange listener');
@@ -63,6 +68,8 @@ describe('Web Cockpit Canvas Effects & Cyber Styling Test Suite', () => {
     const file = getFilePath('apps/web-cockpit/src/components/common/WarpBackground.tsx');
     const content = readFileSync(file, 'utf-8');
 
+    assert.ok(content.includes('typeof window === \'undefined\''), 'Includes SSR guard');
+    assert.ok(content.includes('(prefers-reduced-motion: reduce)'), 'Checks prefers-reduced-motion for accessibility');
     assert.ok(content.includes('window.addEventListener(\'resize\', resize)'), 'Registers resize listener');
     assert.ok(content.includes('window.removeEventListener(\'resize\', resize)'), 'Cleans up resize listener');
     assert.ok(content.includes('document.addEventListener(\'visibilitychange\', onVisibilityChange)'), 'Registers visibility listener');
@@ -87,5 +94,6 @@ describe('Web Cockpit Canvas Effects & Cyber Styling Test Suite', () => {
     assert.ok(content.includes('@keyframes marqueeRight'), 'Contains marqueeRight keyframes');
     assert.ok(content.includes('.card-hover'), 'Contains interactive card hover styling');
     assert.ok(content.includes('.shimmer-effect'), 'Contains cyber shimmer effect styling');
+    assert.ok(content.includes('prefers-reduced-motion: reduce'), 'Contains reduced-motion override');
   });
 });

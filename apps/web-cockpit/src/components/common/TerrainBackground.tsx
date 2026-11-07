@@ -19,20 +19,23 @@ export function TerrainBackground({
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    if (typeof window !== 'undefined') {
+      setMounted(true);
+    }
   }, []);
 
   useEffect(() => {
-    if (!mounted) return;
+    if (!mounted || typeof window === 'undefined') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId: number | null = null;
     let time = 0;
-    let isVisible = true;
+    let isVisible = typeof document !== 'undefined' ? !document.hidden : true;
+    let prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     // Grid dimension parameters
     const cols = 28;
@@ -48,29 +51,53 @@ export function TerrainBackground({
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.scale(dpr, dpr);
+      if (prefersReducedMotion) {
+        drawFrame(time);
+      }
     };
 
     resize();
     window.addEventListener('resize', resize);
 
-    const onVisibilityChange = () => {
-      isVisible = !document.hidden;
-      if (isVisible) {
+    const startAnimation = () => {
+      if (animationFrameId === null && isVisible && !prefersReducedMotion) {
         lastTime = performance.now();
         animationFrameId = requestAnimationFrame(render);
       }
     };
+
+    const stopAnimation = () => {
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    };
+
+    const onVisibilityChange = () => {
+      isVisible = typeof document !== 'undefined' ? !document.hidden : true;
+      if (isVisible) {
+        startAnimation();
+      } else {
+        stopAnimation();
+      }
+    };
     document.addEventListener('visibilitychange', onVisibilityChange);
+
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onMotionChange = (e: MediaQueryListEvent) => {
+      prefersReducedMotion = e.matches;
+      if (prefersReducedMotion) {
+        stopAnimation();
+        drawFrame(time);
+      } else {
+        startAnimation();
+      }
+    };
+    motionQuery.addEventListener?.('change', onMotionChange);
 
     let lastTime = performance.now();
 
-    const render = (now: number) => {
-      if (!isVisible) return;
-
-      const delta = Math.min((now - lastTime) / 1000, 0.1);
-      lastTime = now;
-      time += delta * speed * 0.8;
-
+    const drawFrame = (currentTime: number) => {
       const w = window.innerWidth;
       const h = window.innerHeight;
       const horizonY = h * 0.48;
@@ -112,9 +139,9 @@ export function TerrainBackground({
           const x = normalizedX;
 
           // Undulating harmonic waves
-          const wave1 = Math.sin(x * 0.35 + time * 1.2) * 1.2;
-          const wave2 = Math.cos(z * 0.45 - time * 1.5) * 1.5;
-          const wave3 = Math.sin((x + z) * 0.2 + time * 0.8) * 0.8;
+          const wave1 = Math.sin(x * 0.35 + currentTime * 1.2) * 1.2;
+          const wave2 = Math.cos(z * 0.45 - currentTime * 1.5) * 1.5;
+          const wave3 = Math.sin((x + z) * 0.2 + currentTime * 0.8) * 0.8;
           const y = wave1 + wave2 + wave3 - 3.2;
 
           // Perspective projection
@@ -182,16 +209,36 @@ export function TerrainBackground({
         }
         ctx.stroke();
       }
+    };
+
+    const render = (now: number) => {
+      if (!isVisible || prefersReducedMotion) {
+        animationFrameId = null;
+        return;
+      }
+
+      const delta = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+      time += delta * speed * 0.8;
+
+      drawFrame(time);
 
       animationFrameId = requestAnimationFrame(render);
     };
 
-    animationFrameId = requestAnimationFrame(render);
+    if (prefersReducedMotion) {
+      drawFrame(time);
+    } else {
+      animationFrameId = requestAnimationFrame(render);
+    }
 
     return () => {
       window.removeEventListener('resize', resize);
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      cancelAnimationFrame(animationFrameId);
+      motionQuery.removeEventListener?.('change', onMotionChange);
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
     };
   }, [mounted, wireframeColor, horizonColor, speed]);
 
