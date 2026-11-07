@@ -256,15 +256,23 @@ export function formatBasisPoints(score: number): string {
 }
 
 export const SpendMandateSchema = z.object({
-  mandate_id: z.string().max(32),
-  buyer_id: z.string().max(64),
-  max_total_spend_cents: z.number().int().positive(),
-  max_single_merchant_cents: z.number().int().positive(),
-  cumulative_spent_cents: z.number().int().nonnegative().default(0),
-  currency_code: z.string().length(3).default('USD'),
-  allowed_category_ids: z.array(z.string()),
-  public_key_hex: z.string().max(128),
-  ed25519_signature_hex: z.string(),
+  mandate_id: z.string().trim().min(1, 'mandate_id is required').max(64).regex(/^[a-zA-Z0-9_-]+$/, 'mandate_id must be alphanumeric with dashes or underscores'),
+  buyer_id: z.string().trim().min(1, 'buyer_id is required').max(64),
+  max_total_spend_cents: z.number({
+    required_error: 'max_total_spend_cents is required',
+    invalid_type_error: 'max_total_spend_cents must be an integer number',
+  }).int('max_total_spend_cents must be an integer; floats are strictly rejected').positive('max_total_spend_cents must be strictly positive'),
+  max_single_merchant_cents: z.number({
+    required_error: 'max_single_merchant_cents is required',
+    invalid_type_error: 'max_single_merchant_cents must be an integer number',
+  }).int('max_single_merchant_cents must be an integer; floats are strictly rejected').positive('max_single_merchant_cents must be strictly positive'),
+  cumulative_spent_cents: z.number({
+    invalid_type_error: 'cumulative_spent_cents must be an integer number',
+  }).int('cumulative_spent_cents must be an integer; floats are strictly rejected').nonnegative('cumulative_spent_cents must be non-negative').default(0),
+  currency_code: z.string().trim().length(3, 'currency_code must be 3 characters').toUpperCase().default('USD'),
+  allowed_category_ids: z.array(z.string().trim().min(1).max(64)),
+  public_key_hex: z.string().trim().min(32, 'public_key_hex too short').max(128).regex(/^[0-9a-fA-F]+$/, 'public_key_hex must be valid hex'),
+  ed25519_signature_hex: z.string().trim().min(64, 'ed25519_signature_hex too short').regex(/^[0-9a-fA-F]+$/, 'ed25519_signature_hex must be valid hex'),
   expires_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
   status: z.enum(['ACTIVE', 'EXHAUSTED', 'REVOKED', 'EXPIRED']).default('ACTIVE'),
   created_at: z.union([z.date(), z.string().datetime()]).optional().transform(v => typeof v === 'string' ? new Date(v) : (v || new Date())),
@@ -331,26 +339,44 @@ export const PurchaseUnitHoldSchema = z.object({
 });
 
 export const DisputeArbitrationSchema = z.object({
-  paypal_dispute_id: z.string().max(64),
+  paypal_dispute_id: z.string().trim().min(1, 'paypal_dispute_id is required').max(64),
   purchase_unit_id: z.string().uuid().nullable().optional(),
-  dispute_reason: z.string().max(64),
-  dispute_state: z.string().max(64),
-  dispute_amount_cents: z.number().int().nonnegative(),
-  liability_score_l: z.number().min(0).max(1),
-  abuse_risk_score_r: z.number().min(0).max(1),
+  dispute_reason: z.string().trim().max(64),
+  dispute_state: z.string().trim().max(64),
+  dispute_amount_cents: z.number({
+    required_error: 'dispute_amount_cents is required',
+    invalid_type_error: 'dispute_amount_cents must be an integer number',
+  }).int('dispute_amount_cents must be an integer; floats are strictly rejected').nonnegative('dispute_amount_cents must be non-negative'),
+  liability_score_l: z.number().min(0).max(1).finite(),
+  abuse_risk_score_r: z.number().min(0).max(1).finite(),
   exif_tamper_flag: z.boolean().default(false),
-  defect_bounding_box: z.array(z.number()).length(4).nullable().optional(),
-  hateoas_allowed_actions: z.array(z.string()),
+  defect_bounding_box: z.array(z.number().finite()).length(4).nullable().optional(),
+  hateoas_allowed_actions: z.array(z.string().trim()),
   selected_tier_action: z.enum(['TIER1_REFUND', 'TIER2_PARTIAL_OFFER', 'TIER3_RETURN_OFFER', 'TIER4_CONTEST_PDF', 'TIER5_SLA_ESCALATE']),
   seller_response_due_date: z.date(),
-  assigned_analyst_id: z.string().max(64).nullable().optional(),
+  assigned_analyst_id: z.string().trim().max(64).nullable().optional(),
   scheduled_review_start: z.date().nullable().optional(),
   scheduled_review_end: z.date().nullable().optional(),
   compiled_evidence_pdf_base64: z.string().nullable().optional(),
-  return_tracking_id: z.string().max(64).nullable().optional(),
-  return_label_url: z.string().nullable().optional(),
+  return_tracking_id: z.string().trim().max(64).nullable().optional(),
+  return_label_url: z.string().trim().nullable().optional(),
   updated_at: z.date().default(() => new Date()),
 });
+
+export const DisputeEvidenceSchema = z.object({
+  paypal_dispute_id: z.string().trim().min(1, 'paypal_dispute_id is required').max(64),
+  carrier_tracking_number: z.string().trim().max(128).optional(),
+  policy_proof_text: z.string().trim().max(5000).optional(),
+  vision_defect_mask: z.array(z.number().finite()).length(4).optional(), // [ymin, xmin, ymax, xmax]
+  evidence_type: z.enum(['PROOF_OF_DELIVERY', 'PROOF_OF_REFUND', 'CUSTOM_POLICY', 'DAMAGE_INSPECTION', 'OTHER']).optional(),
+  document_url: z.string().url().optional(),
+  notes: z.string().trim().max(2000).optional(),
+  submitted_at: z.union([z.date(), z.string().datetime()]).optional().transform(v => typeof v === 'string' ? new Date(v) : (v || new Date())),
+});
+
+export type DisputeEvidence = z.infer<typeof DisputeEvidenceSchema>;
+export const SubmitDisputeEvidenceSchema = DisputeEvidenceSchema;
+export type SubmitDisputeEvidence = DisputeEvidence;
 
 export const ReturnLabelInfoSchema = z.object({
   label_url: z.string(),
@@ -1043,16 +1069,25 @@ export const X402PaymentContractSchema = z.object({
 export type X402PaymentContract = z.infer<typeof X402PaymentContractSchema>;
 
 export const X402PaymentReceiptSchema = z.object({
-  contractId: z.string(),
-  amountCents: z.number().int().nonnegative(),
-  currency: z.string().default('USD'),
-  timestamp: z.number().int().positive(),
-  hmac: z.string().min(32),
-  receipt_token: z.string().optional(),
+  contractId: z.string().trim().min(1, 'contractId is required').max(128),
+  amountCents: z.number({
+    required_error: 'amountCents is required',
+    invalid_type_error: 'amountCents must be an integer number',
+  }).int('amountCents must be an integer; floats are strictly rejected').nonnegative('amountCents must be non-negative'),
+  currency: z.string().trim().length(3, 'currency must be 3 characters').toUpperCase().default('USD'),
+  timestamp: z.number({
+    required_error: 'timestamp is required',
+    invalid_type_error: 'timestamp must be a number',
+  }).int('timestamp must be an integer').positive('timestamp must be positive'),
+  hmac: z.string().trim().min(32, 'HMAC must be at least 32 characters').max(256),
+  receipt_token: z.string().trim().optional(),
   x402Version: z.number().int().default(2).optional(),
 });
 
 export type X402PaymentReceipt = z.infer<typeof X402PaymentReceiptSchema>;
+
+export const PaymentReceiptSchema = X402PaymentReceiptSchema;
+export type PaymentReceipt = X402PaymentReceipt;
 
 
 // ============================================================================
@@ -1845,13 +1880,29 @@ export const AcpMcpToolArgumentsSchema = z.object({
 export type AcpMcpToolArguments = z.infer<typeof AcpMcpToolArgumentsSchema>;
 
 export const McpToolCallSchema = z.object({
-  id: z.string(),
-  toolName: z.string(),
-  agentSummary: z.string().optional(),
+  id: z.string().trim().min(1, 'id is required').max(128),
+  toolName: z.string().trim().min(1, 'toolName is required').max(128),
+  agentSummary: z.string().trim().max(2000).optional(),
   args: z.record(z.string(), z.any()).optional().default({}),
 }).passthrough();
 
 export type McpToolCall = z.infer<typeof McpToolCallSchema>;
+
+export const LocalReasonerProposalSchema = z.object({
+  toolCall: McpToolCallSchema,
+  rationale: z.string().trim().min(1, 'rationale is required').max(4000),
+  modelUsed: z.string().trim().min(1, 'modelUsed is required').max(128),
+  confidence: z.number({
+    required_error: 'confidence is required',
+    invalid_type_error: 'confidence must be a number',
+  }).min(0, 'confidence must be >= 0').max(1, 'confidence must be <= 1').finite('confidence must be finite'),
+  thinking: z.string().trim().max(10000).optional(),
+  category: z.string().trim().max(128).optional(),
+  merchant: z.string().trim().max(256).optional(),
+  urgency: z.enum(['immediate', 'high', 'normal', 'low']).optional(),
+});
+
+export type LocalReasonerProposal = z.infer<typeof LocalReasonerProposalSchema>;
 
 export const AcpRpcErrorDataSchema = z.object({
   type: z.enum(['invalid_request', 'request_not_idempotent', 'processing_error', 'service_unavailable']),

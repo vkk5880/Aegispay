@@ -39,6 +39,11 @@ import {
   AcpDiscountExtensionSchema,
   X402PaymentContractSchema,
   X402PaymentReceiptSchema,
+  PaymentReceiptSchema,
+  McpToolCallSchema,
+  LocalReasonerProposalSchema,
+  DisputeEvidenceSchema,
+  SubmitDisputeEvidenceSchema,
   numberToDecimalString,
   parseMoneyString,
   parseMoney,
@@ -2425,4 +2430,195 @@ test("Batch 4: EVM EIP-3009 & Permit2 Exact/Upto Invariants (mechanisms/evm/src/
   };
   assert.equal(UptoPermit2PayloadSchema.safeParse(badFacilitatorUpto).success, false);
   assert.ok(validateUptoPermit2Payload(badFacilitatorUpto) !== undefined);
+});
+
+test('Section 01 Audit: SpendMandateSchema string trimming, regex, and integer cents hardening', () => {
+  const baseMandate = {
+    mandate_id: '  vch_mandate_001  ',
+    buyer_id: '  buyer_alpha_123  ',
+    max_total_spend_cents: 100000,
+    max_single_merchant_cents: 50000,
+    cumulative_spent_cents: 0,
+    currency_code: '  usd  ',
+    allowed_category_ids: ['  electronics  ', 'books'],
+    public_key_hex: '  ' + 'a'.repeat(64) + '  ',
+    ed25519_signature_hex: '  ' + 'b'.repeat(128) + '  ',
+    expires_at: new Date(Date.now() + 86400000),
+    status: 'ACTIVE' as const,
+  };
+
+  // Trimming check
+  const parsed = SpendMandateSchema.safeParse(baseMandate);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.mandate_id, 'vch_mandate_001');
+    assert.equal(parsed.data.buyer_id, 'buyer_alpha_123');
+    assert.equal(parsed.data.currency_code, 'USD');
+    assert.equal(parsed.data.allowed_category_ids[0], 'electronics');
+    assert.equal(parsed.data.public_key_hex, 'a'.repeat(64));
+    assert.equal(parsed.data.ed25519_signature_hex, 'b'.repeat(128));
+  }
+
+  // Regex and length boundaries for mandate_id
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, mandate_id: '' }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, mandate_id: 'invalid mandate id with spaces' }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, mandate_id: 'vch_@bad#chars!' }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, mandate_id: 'a'.repeat(65) }).success, false);
+
+  // Hex format checking for keys and signatures
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, public_key_hex: 'not_hex_chars_at_all!' }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, public_key_hex: '1234' }).success, false); // too short
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, ed25519_signature_hex: 'zz'.repeat(64) }).success, false);
+
+  // Numeric injection: NaN, Infinity, floats, negative values in cents
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_total_spend_cents: NaN }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_total_spend_cents: Infinity }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_total_spend_cents: -Infinity }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_total_spend_cents: 99.99 }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_total_spend_cents: 0 }).success, false); // strictly positive
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_single_merchant_cents: NaN }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, max_single_merchant_cents: 12.34 }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, cumulative_spent_cents: NaN }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, cumulative_spent_cents: -1 }).success, false);
+  assert.equal(SpendMandateSchema.safeParse({ ...baseMandate, cumulative_spent_cents: 5.5 }).success, false);
+});
+
+test('Section 01 Audit: McpToolCallSchema trimming, length bounds, and passthrough', () => {
+  const validCall = {
+    id: '  call_mcp_12345  ',
+    toolName: '  execute_order  ',
+    agentSummary: '  Executing single order via vault  ',
+    args: { amount: 5000 },
+    custom_extension_data: 'allowed',
+  };
+
+  const parsed = McpToolCallSchema.safeParse(validCall);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.id, 'call_mcp_12345');
+    assert.equal(parsed.data.toolName, 'execute_order');
+    assert.equal(parsed.data.agentSummary, 'Executing single order via vault');
+    assert.equal((parsed.data as any).custom_extension_data, 'allowed');
+  }
+
+  // Bounds and required strings
+  assert.equal(McpToolCallSchema.safeParse({ ...validCall, id: '' }).success, false);
+  assert.equal(McpToolCallSchema.safeParse({ ...validCall, id: '   ' }).success, false);
+  assert.equal(McpToolCallSchema.safeParse({ ...validCall, id: 'x'.repeat(129) }).success, false);
+  assert.equal(McpToolCallSchema.safeParse({ ...validCall, toolName: '' }).success, false);
+  assert.equal(McpToolCallSchema.safeParse({ ...validCall, toolName: '   ' }).success, false);
+  assert.equal(McpToolCallSchema.safeParse({ ...validCall, toolName: 't'.repeat(129) }).success, false);
+});
+
+test('Section 01 Audit: LocalReasonerProposalSchema validation, finite confidence, and trimming', () => {
+  const validProposal = {
+    toolCall: {
+      id: 'call_fallback_99',
+      toolName: 'broadcast_intent',
+      args: { offer: 1000 },
+    },
+    rationale: '  Target merchant matched natural language request  ',
+    modelUsed: '  hermes-3-local-deterministic  ',
+    confidence: 0.95,
+    thinking: 'Analyzed query tokens and mapped to known catalog entity.',
+    category: 'electronics',
+    merchant: 'bestbuy.com',
+    urgency: 'high' as const,
+  };
+
+  const parsed = LocalReasonerProposalSchema.safeParse(validProposal);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.rationale, 'Target merchant matched natural language request');
+    assert.equal(parsed.data.modelUsed, 'hermes-3-local-deterministic');
+    assert.equal(parsed.data.confidence, 0.95);
+    assert.equal(parsed.data.urgency, 'high');
+  }
+
+  // Confidence boundaries: [0, 1] and finite
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, confidence: NaN }).success, false);
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, confidence: Infinity }).success, false);
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, confidence: -0.01 }).success, false);
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, confidence: 1.01 }).success, false);
+
+  // Missing or empty required fields
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, rationale: '   ' }).success, false);
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, modelUsed: '' }).success, false);
+  assert.equal(LocalReasonerProposalSchema.safeParse({ ...validProposal, urgency: 'invalid_urgency' as any }).success, false);
+});
+
+test('Section 01 Audit: DisputeEvidenceSchema and SubmitDisputeEvidenceSchema parity and validation', () => {
+  const validEvidence = {
+    paypal_dispute_id: '  PP-D-99887766  ',
+    carrier_tracking_number: '  1Z9999999999999999  ',
+    policy_proof_text: '  Merchant return policy strictly stipulates 30-day unopened window.  ',
+    vision_defect_mask: [0.1, 0.2, 0.8, 0.9],
+    evidence_type: 'PROOF_OF_DELIVERY' as const,
+    document_url: 'https://aegispay.dev/dossiers/doc_123.pdf',
+    notes: 'Signed delivery receipt verified.',
+    submitted_at: new Date(),
+  };
+
+  const parsed = DisputeEvidenceSchema.safeParse(validEvidence);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.paypal_dispute_id, 'PP-D-99887766');
+    assert.equal(parsed.data.carrier_tracking_number, '1Z9999999999999999');
+    assert.equal(parsed.data.policy_proof_text, 'Merchant return policy strictly stipulates 30-day unopened window.');
+  }
+
+  // Parity alias
+  const parsedSubmit = SubmitDisputeEvidenceSchema.safeParse(validEvidence);
+  assert.equal(parsedSubmit.success, true);
+
+  // Rejection on invalid dispute id
+  assert.equal(DisputeEvidenceSchema.safeParse({ ...validEvidence, paypal_dispute_id: '' }).success, false);
+  assert.equal(DisputeEvidenceSchema.safeParse({ ...validEvidence, paypal_dispute_id: '   ' }).success, false);
+
+  // Bounding box / mask finite checks and length
+  assert.equal(DisputeEvidenceSchema.safeParse({ ...validEvidence, vision_defect_mask: [0, 1, 2] }).success, false); // length 3 instead of 4
+  assert.equal(DisputeEvidenceSchema.safeParse({ ...validEvidence, vision_defect_mask: [0, NaN, 1, 1] }).success, false);
+  assert.equal(DisputeEvidenceSchema.safeParse({ ...validEvidence, vision_defect_mask: [0, Infinity, 1, 1] }).success, false);
+
+  // Invalid document URL
+  assert.equal(DisputeEvidenceSchema.safeParse({ ...validEvidence, document_url: 'not-a-valid-url' }).success, false);
+});
+
+test('Section 01 Audit: PaymentReceiptSchema and X402PaymentReceiptSchema parity, decimal injection, and string trimming', () => {
+  const validReceipt = {
+    contractId: '  ct_402_receipt_audit_01  ',
+    amountCents: 5000,
+    currency: '  usd  ',
+    timestamp: Date.now(),
+    hmac: '  ' + 'f'.repeat(64) + '  ',
+    receipt_token: '  rcpt_token_valid_123  ',
+    x402Version: 2,
+  };
+
+  const parsed = PaymentReceiptSchema.safeParse(validReceipt);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.contractId, 'ct_402_receipt_audit_01');
+    assert.equal(parsed.data.currency, 'USD');
+    assert.equal(parsed.data.hmac, 'f'.repeat(64));
+    assert.equal(parsed.data.receipt_token, 'rcpt_token_valid_123');
+  }
+
+  // Parity alias with X402PaymentReceiptSchema
+  assert.equal(X402PaymentReceiptSchema.safeParse(validReceipt).success, true);
+
+  // Strict integer cents check: reject NaN, Infinity, -Infinity, decimal floats, negative values
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, amountCents: NaN }).success, false);
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, amountCents: Infinity }).success, false);
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, amountCents: -Infinity }).success, false);
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, amountCents: 49.99 }).success, false);
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, amountCents: -500 }).success, false);
+
+  // HMAC length bounds: min 32 chars
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, hmac: 'short_hmac' }).success, false);
+
+  // Timestamp non-negative integer
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, timestamp: -100 }).success, false);
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, timestamp: 12345.67 }).success, false);
+  assert.equal(PaymentReceiptSchema.safeParse({ ...validReceipt, timestamp: NaN }).success, false);
 });
