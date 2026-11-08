@@ -19,6 +19,7 @@ import {
   Check,
   Inbox,
   Search,
+  Truck,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
@@ -37,6 +38,9 @@ export interface PurchaseHistoryItem {
   timestamp: string;
   receipt_number?: number;
   hash?: string;
+  carrier?: string;
+  tracking_number?: string;
+  fulfillment_status?: 'processing' | 'shipped' | 'delivered';
 }
 
 export interface NFTReceiptItem {
@@ -68,6 +72,9 @@ const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
     timestamp: STATIC_BASE_TIMESTAMP_1,
     receipt_number: 1042,
     hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    carrier: 'FedEx Priority',
+    tracking_number: '789012345678',
+    fulfillment_status: 'delivered',
   },
   {
     order_id: 'ord_pp_104928502',
@@ -83,6 +90,9 @@ const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
     timestamp: STATIC_BASE_TIMESTAMP_2,
     receipt_number: 1043,
     hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
+    carrier: 'UPS Ground',
+    tracking_number: '1Z999AA10123456784',
+    fulfillment_status: 'shipped',
   },
   {
     order_id: 'ord_pp_395829104',
@@ -98,6 +108,9 @@ const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
     timestamp: STATIC_BASE_TIMESTAMP_3,
     receipt_number: 1044,
     hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4',
+    carrier: 'USPS Express',
+    tracking_number: '9400111899562537628841',
+    fulfillment_status: 'delivered',
   },
 ];
 
@@ -389,6 +402,57 @@ export function HistoryContent({
                         )}
                       </button>
                     )}
+                  </div>
+
+                  {/* Live Carrier Tracking Progress Stepper */}
+                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800/90 flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5 text-slate-300 font-semibold">
+                        <Truck className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Carrier: <strong className="text-white">{item.carrier || 'FedEx Priority'}</strong></span>
+                        <span className="text-slate-500 font-mono text-[11px] ml-1">
+                          #{item.tracking_number || `TRK-${item.order_id.slice(-8)}`}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/40">
+                        {item.fulfillment_status === 'delivered'
+                          ? 'Delivered'
+                          : item.fulfillment_status === 'shipped'
+                          ? 'In Transit'
+                          : 'Processing'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1 pt-1">
+                      {['Confirmed', 'Processing', 'In Transit', 'Delivered'].map((step, idx) => {
+                        const isComplete =
+                          item.fulfillment_status === 'delivered'
+                            ? idx <= 3
+                            : item.fulfillment_status === 'shipped'
+                            ? idx <= 2
+                            : idx <= 1;
+                        const isCurrent =
+                          (item.fulfillment_status === 'delivered' && idx === 3) ||
+                          (item.fulfillment_status === 'shipped' && idx === 2) ||
+                          (!item.fulfillment_status && idx === 1);
+                        return (
+                          <div key={step} className="flex flex-col gap-1 items-center">
+                            <div
+                              className={`h-1.5 w-full rounded-full ${
+                                isComplete ? 'bg-cyan-500' : 'bg-slate-800'
+                              } ${isCurrent ? 'ring-1 ring-cyan-400 animate-pulse' : ''}`}
+                            />
+                            <span
+                              className={`text-[9px] font-mono ${
+                                isComplete ? 'text-cyan-300 font-bold' : 'text-slate-500'
+                              }`}
+                            >
+                              {step}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   {/* Bottom Row: Actions */}

@@ -8,6 +8,7 @@ import {
   Check,
   Truck,
   ImageOff,
+  AlertTriangle,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
@@ -140,6 +141,16 @@ export function ProductCard({
             </span>
           ))}
         </div>
+
+        {/* ACP MessageWarning Alert (e.g. Low Stock or Shipping Delay) */}
+        {Boolean((product as any).message_warning || (product as any).warning) && (
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-950/50 border border-amber-500/40 text-amber-300 text-[11px] font-medium mb-2 shadow-sm">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="line-clamp-1">
+              {String((product as any).message_warning || (product as any).warning)}
+            </span>
+          </div>
+        )}
 
         {/* Title */}
         <h3 className="text-base font-bold text-white mb-1.5 leading-snug line-clamp-2">

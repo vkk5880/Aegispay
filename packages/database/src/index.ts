@@ -2,13 +2,22 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.js';
 
-// PostgreSQL client creation (backward compatible)
-export function createDb(connectionString: string) {
+// PostgreSQL client creation (backward compatible with Render basic-1gb connection bounding)
+export function createDb(
+  connectionString: string,
+  options?: {
+    max?: number;
+    idleTimeoutMillis?: number;
+    connectionTimeoutMillis?: number;
+    statementTimeoutMillis?: number;
+  }
+) {
   const pool = new Pool({
     connectionString,
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
+    max: options?.max ?? 20,
+    idleTimeoutMillis: options?.idleTimeoutMillis ?? 30000,
+    connectionTimeoutMillis: options?.connectionTimeoutMillis ?? 5000,
+    statement_timeout: options?.statementTimeoutMillis ?? 10000,
   });
   return drizzle(pool, { schema });
 }

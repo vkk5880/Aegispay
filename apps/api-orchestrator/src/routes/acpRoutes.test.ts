@@ -1023,3 +1023,69 @@ test("Batch 3 A2A Protocol: GET /.well-known/agent-card.json returns valid Agent
   assert.equal(card.capabilities.extensions[0].required, true);
   assert.equal(card.capabilities.extensions[0].uri, "https://github.com/google-agentic-commerce/a2a-x402/blob/main/spec/v0.2");
 });
+
+test("Post-Purchase Lifecycle: POST /orders/:id/fulfillments records tracking, advances status and dispatches event", async () => {
+  const app = await buildTestApp();
+
+  // 1. Create and complete session to generate order
+  const sessionRes = await app.inject({
+    method: "POST",
+    url: "/checkout_sessions",
+    payload: {
+      items: [
+        {
+          id: "item_lens_99",
+          unit_price_cents: 8500,
+          quantity: 1,
+          name: "Macro Camera Lens",
+        },
+      ],
+    },
+  });
+  const session = sessionRes.json();
+
+  const completeRes = await app.inject({
+    method: "POST",
+    url: `/checkout_sessions/${session.id}/complete`,
+    payload: {},
+  });
+  assert.equal(completeRes.statusCode, 200);
+  const orderId = completeRes.json().order.id;
+
+  // 2. Submit carrier fulfillment
+  const fulfillmentRes = await app.inject({
+    method: "POST",
+    url: `/orders/${orderId}/fulfillments`,
+    payload: {
+      carrier: "FedEx",
+      tracking_number: "789012345678",
+      tracking_url: "https://www.fedex.com/fedextrack/?trknbr=789012345678",
+      status: "shipped",
+    },
+  });
+  assert.equal(fulfillmentRes.statusCode, 201);
+  const { fulfillment, order } = fulfillmentRes.json();
+  assert.equal(fulfillment.carrier, "FedEx");
+  assert.equal(fulfillment.tracking_number, "789012345678");
+  assert.equal(fulfillment.status, "shipped");
+  assert.equal(order.status, "shipped");
+  assert.equal(order.fulfillments.length, 2); // Initial pending + newly added FedEx
+  assert.equal(order.line_items[0].status, "fulfilled");
+
+  // 3. Verify order read-back
+  const getOrderRes = await app.inject({
+    method: "GET",
+    url: `/orders/${orderId}`,
+  });
+  assert.equal(getOrderRes.statusCode, 200);
+  assert.equal(getOrderRes.json().status, "shipped");
+
+  // 4. Test 404 on non-existent order
+  const notFoundRes = await app.inject({
+    method: "POST",
+    url: "/orders/ord_non_existent/fulfillments",
+    payload: { carrier: "UPS" },
+  });
+  assert.equal(notFoundRes.statusCode, 404);
+  assert.equal(notFoundRes.json().code, "order_not_found");
+});

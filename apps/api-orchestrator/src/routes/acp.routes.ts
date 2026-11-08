@@ -1644,6 +1644,85 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.status(200).send(order);
   });
 
+  /**
+   * POST /orders/:id/fulfillments
+   * Adds a fulfillment event (e.g. carrier tracking), updates order status,
+   * and dispatches an order_update webhook event.
+   */
+  fastify.post('/orders/:id/fulfillments', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const order = ordersStore.get(id);
+
+    if (!order) {
+      return reply.status(404).send({
+        type: 'invalid_request',
+        code: 'order_not_found',
+        message: `Order '${id}' was not found`,
+        param: 'id',
+      });
+    }
+
+    const body: any = request.body || {};
+    const fulfillmentId = `ful_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    const fulfillmentStatus = body.status || 'shipped';
+    const carrier = body.carrier || 'FedEx';
+    const trackingNumber = body.tracking_number || `TRK${Date.now()}`;
+    const trackingUrl =
+      body.tracking_url ||
+      `https://www.google.com/search?q=${encodeURIComponent(carrier + ' ' + trackingNumber)}`;
+
+    const newFulfillment = {
+      id: fulfillmentId,
+      type: body.type || 'shipping',
+      status: fulfillmentStatus,
+      carrier,
+      tracking_number: trackingNumber,
+      tracking_url: trackingUrl,
+    };
+
+    order.fulfillments.push(newFulfillment);
+
+    // Advance order status based on fulfillment progress
+    if (fulfillmentStatus === 'delivered') {
+      order.status = 'completed';
+    } else if (fulfillmentStatus === 'shipped' || fulfillmentStatus === 'in_transit') {
+      order.status = 'shipped';
+    }
+
+    // Advance line item status if designated
+    const itemIdsToFulfill =
+      Array.isArray(body.line_item_ids) && body.line_item_ids.length > 0
+        ? body.line_item_ids
+        : order.line_items.map((li) => li.id);
+
+    for (const item of order.line_items) {
+      if (itemIdsToFulfill.includes(item.id)) {
+        item.status = 'fulfilled';
+        item.quantity.fulfilled = item.quantity.ordered;
+      }
+    }
+
+    // Automatically record and dispatch order_update webhook event
+    const webhookEvent = {
+      event: 'order_update',
+      event_id: `evt_ord_upd_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
+      order_id: order.id,
+      status: order.status,
+      fulfillment: newFulfillment,
+      timestamp: new Date().toISOString(),
+    };
+    webhookEventsStore.push({
+      received_at: new Date().toISOString(),
+      payload: webhookEvent,
+    });
+
+    reply.header('API-Version', '2026-02-05');
+    return reply.status(201).send({
+      fulfillment: newFulfillment,
+      order,
+    });
+  });
+
   // =========================================================================
   // RFC: Product Feeds API (rfc.product_feeds.md)
   // =========================================================================
