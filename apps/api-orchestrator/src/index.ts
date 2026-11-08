@@ -127,3 +127,4 @@ export * from './routes/chat.routes.js';
 export * from './routes/dispute.routes.js';
 export * from './routes/intent-voucher.routes.js';
 export * from './middleware/http402-interceptor.js';
+export * from './middleware/auth.js';

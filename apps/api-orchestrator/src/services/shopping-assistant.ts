@@ -417,6 +417,7 @@ export const WorkflowOutputSchema = z.object({
   follow_up_suggestions: z.array(z.string()).optional(),
   thought_trace: z.array(z.string()).optional(),
   active_model: z.string().optional(),
+  requires_human_confirmation: z.boolean().optional(),
 });
 
 export type WorkflowInput = z.infer<typeof WorkflowInputSchema>;
@@ -1084,12 +1085,14 @@ export class ShoppingAssistantService {
         budget_cap_cents: fallbackAmountCents,
         trace: [
           `[Circuit Breaker Fallback] Upstream LLM unavailable (${err?.message || 'timeout/429'}). Seamlessly switched to deterministic LocalReasoner proposal: ${proposal.toolCall.toolName}`,
+          `[HITL Safety Gate] Fallback proposal requires explicit human step-up confirmation prior to escrow holds.`,
         ],
       });
 
       return {
         ...discoverResult,
         active_model: 'local-financial-reasoner-v1',
+        requires_human_confirmation: true,
       };
     }
   }

@@ -29,14 +29,19 @@ export function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const navLinks = [
+  const isDevTools = process.env.NEXT_PUBLIC_DEV_TOOLS === 'true';
+
+  const baseNavLinks = [
     { href: '/', label: 'Cockpit', icon: ShoppingBag },
     { href: '/search', label: 'AI Search', icon: Search },
     { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
     { href: '/history', label: 'Audit History', icon: Receipt },
     { href: '/merchant', label: 'Merchant Console', icon: Store },
-    { href: '/judge', label: 'Judge Chaos Lab', icon: Zap },
   ];
+
+  const navLinks = isDevTools
+    ? [...baseNavLinks, { href: '/judge', label: 'Judge Chaos Lab', icon: Zap }]
+    : baseNavLinks;
 
   return (
     <header

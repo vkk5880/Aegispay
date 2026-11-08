@@ -12,15 +12,17 @@ export interface LayoutShellProps {
 
 /**
  * LayoutShell — isolates route transitions and conditionally mounts ambient cursor layers.
- * On /share routes, heavy cursor layers are bypassed to prevent state resets.
+ * On /share routes or in production (when NEXT_PUBLIC_DEMO_MODE is not true),
+ * heavy cursor layers are bypassed to preserve the native OS cursor and avoid input lag.
  */
 export function LayoutShell({ children }: LayoutShellProps) {
   const pathname = usePathname();
   const isShare = pathname?.startsWith('/share');
+  const isDemo = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
 
   return (
     <>
-      {!isShare && (
+      {!isShare && isDemo && (
         <>
           <CustomCursor />
           <CursorEnergy />

@@ -2,12 +2,24 @@
 
 import React from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { AutonomyDialWidget } from '@/components/ag-studio/AutonomyDialWidget';
 import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceComparatorWidget';
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
-import { DisputeSlaScheduler } from '@/components/bryntum/DisputeSlaScheduler';
 import { DashboardReports } from '@/components/merchant/DashboardReports';
 import { Store, Database, ArrowLeft, Bot, Sparkles } from 'lucide-react';
+
+const DisputeSlaScheduler = dynamic(
+  () => import('@/components/bryntum/DisputeSlaScheduler').then((mod) => mod.DisputeSlaScheduler),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center p-6 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-[#080d19]/50 min-h-[300px] text-slate-400 text-xs">
+        <span className="font-mono">Loading Bryntum SLA Scheduler...</span>
+      </div>
+    ),
+  }
+);
 
 export default function MerchantCockpitPage() {
   return (

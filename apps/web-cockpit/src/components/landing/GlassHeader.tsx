@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { Shield, ArrowRight, Activity } from 'lucide-react';
 
 export function GlassHeader() {
+  const isDevTools = process.env.NEXT_PUBLIC_DEV_TOOLS === 'true';
+
   const scrollToTop = () => {
     if (typeof window !== 'undefined') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -48,7 +50,7 @@ export function GlassHeader() {
             href="/search"
             className="text-slate-400 hover:text-cyan-300 transition-colors"
           >
-            Battle Arena
+            Search
           </Link>
           <Link
             href="/history"
@@ -56,12 +58,14 @@ export function GlassHeader() {
           >
             Audit Ledger
           </Link>
-          <Link
-            href="/judge"
-            className="text-slate-400 hover:text-cyan-300 transition-colors"
-          >
-            Chaos Lab
-          </Link>
+          {isDevTools && (
+            <Link
+              href="/judge"
+              className="text-slate-400 hover:text-cyan-300 transition-colors"
+            >
+              Chaos Lab
+            </Link>
+          )}
         </nav>
 
         {/* CTA Launch Button */}

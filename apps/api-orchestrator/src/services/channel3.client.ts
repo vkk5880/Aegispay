@@ -24,6 +24,36 @@ export interface Channel3Offer {
   shipping_waiver_threshold_cents?: number;
   merchant_anomaly_score?: number; // 0 to 1
   stock_status?: 'IN_STOCK' | 'OUT_OF_STOCK';
+  observed_at?: string | number | Date;
+  timestamp?: string | number | Date;
+}
+
+export const MAX_OFFER_AGE_MS = 86_400_000; // 24 hours TTL
+
+/**
+ * Validates price provenance and feed timestamp freshness on Channel3 offers.
+ *
+ * Guardrail 2 (Mock-Safe): In unit/integration test environments (NODE_ENV === 'test')
+ * or on static mock fixtures without timestamp headers, freshness check is bypassed.
+ */
+export function isOfferFresh(offer: Channel3Offer): boolean {
+  if (process.env.NODE_ENV === 'test') {
+    return true;
+  }
+
+  const rawTime = offer.observed_at || offer.timestamp;
+  if (!rawTime) {
+    return true; // Allow static fixture if not configured
+  }
+
+  const observedMs = typeof rawTime === 'number' ? rawTime : new Date(rawTime).getTime();
+  if (Number.isNaN(observedMs)) {
+    return false;
+  }
+
+  const now = Date.now();
+  // Reject offers older than 24h or in the distant future (>5m clock skew)
+  return now - observedMs <= MAX_OFFER_AGE_MS && observedMs <= now + 300_000;
 }
 
 export interface Channel3ProductDetail {
@@ -499,10 +529,11 @@ export class Channel3Client {
         continue;
       }
 
-      // Check specific merchant offer if domain provided, otherwise check all offers
+      // Check specific merchant offer if domain provided, filtering stale offers
+      const freshOffers = prod.offers.filter(o => isOfferFresh(o));
       const applicableOffers = item.merchant_domain
-        ? prod.offers.filter(o => o.domain === item.merchant_domain)
-        : prod.offers;
+        ? freshOffers.filter(o => o.domain === item.merchant_domain)
+        : freshOffers;
 
       const hasInStockOffer = applicableOffers.some(o => o.stock_status !== 'OUT_OF_STOCK');
 

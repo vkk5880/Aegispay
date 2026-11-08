@@ -534,6 +534,7 @@ export const ChatResponsePayloadSchema = z.object({
   follow_up_suggestions: z.array(z.string()).optional(),
   thought_trace: z.array(z.string()).optional(),
   active_model: z.string().optional(),
+  requires_human_confirmation: z.boolean().optional(),
 });
 
 export type SpendMandate = z.infer<typeof SpendMandateSchema>;

@@ -21,6 +21,7 @@ import {
   resolveCommerceModel,
   AVAILABLE_COMMERCE_MODELS,
 } from '../services/shopping-assistant.js';
+import { authenticateUser } from '../middleware/auth.js';
 
 const ChatMessageSchema = z.object({
   message: z.string().min(1),
@@ -171,7 +172,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/watchlist
    * Adds or replaces an item in the user's price-drop watchlist.
    */
-  fastify.post('/api/buyer/watchlist', async (request, reply) => {
+  fastify.post('/api/buyer/watchlist', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as {
       user_id?: string;
       title: string;
@@ -184,7 +185,8 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     if (!body?.title || !body?.target_price_cents) {
       return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'title and target_price_cents are required.' });
     }
-    const item = addToWatchlist(body.user_id || 'demo', body);
+    const userId = request.user?.id || body.user_id || 'demo';
+    const item = addToWatchlist(userId, body);
     return reply.send({ status: 'SUCCESS', watchlist_item: item });
   });
 
@@ -192,9 +194,9 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /api/buyer/watchlist
    * Fetches the user's price-drop watchlist.
    */
-  fastify.get('/api/buyer/watchlist', async (request, reply) => {
-    const query = request.query as { user_id?: string };
-    const items = getWatchlist(query?.user_id || 'demo');
+  fastify.get('/api/buyer/watchlist', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const userId = request.user?.id || 'demo';
+    const items = getWatchlist(userId);
     return reply.send({ status: 'SUCCESS', watchlist: items });
   });
 
@@ -202,10 +204,11 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * DELETE /api/buyer/watchlist
    * Removes an item from the user's price-drop watchlist.
    */
-  fastify.delete('/api/buyer/watchlist', async (request, reply) => {
+  fastify.delete('/api/buyer/watchlist', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; title?: string; item_id?: string };
     const id = body?.item_id || body?.title || '';
-    const removed = removeFromWatchlist(body?.user_id || 'demo', id);
+    const userId = request.user?.id || body?.user_id || 'demo';
+    const removed = removeFromWatchlist(userId, id);
     return reply.send({ status: 'SUCCESS', removed });
   });
 
@@ -213,9 +216,9 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /api/buyer/prefs
    * Fetches user preferences.
    */
-  fastify.get('/api/buyer/prefs', async (request, reply) => {
-    const query = request.query as { user_id?: string };
-    const prefs = loadUserPreferences(query?.user_id || 'demo');
+  fastify.get('/api/buyer/prefs', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const userId = request.user?.id || 'demo';
+    const prefs = loadUserPreferences(userId);
     return reply.send({ status: 'SUCCESS', preferences: prefs });
   });
 
@@ -223,12 +226,13 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/prefs
    * Updates a user preference key.
    */
-  fastify.post('/api/buyer/prefs', async (request, reply) => {
+  fastify.post('/api/buyer/prefs', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; key: any; value: any };
     if (!body?.key) {
       return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'key is required' });
     }
-    const updated = saveUserPreference(body?.user_id || 'demo', body.key, body.value);
+    const userId = request.user?.id || body?.user_id || 'demo';
+    const updated = saveUserPreference(userId, body.key, body.value);
     return reply.send({ status: 'SUCCESS', preferences: updated });
   });
 
@@ -236,10 +240,11 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /api/buyer/history
    * Returns purchase transaction history.
    */
-  fastify.get('/api/buyer/history', async (request, reply) => {
+  fastify.get('/api/buyer/history', { preHandler: [authenticateUser] }, async (request, reply) => {
     const query = request.query as { user_id?: string; limit?: string };
     const limit = query?.limit ? parseInt(query.limit, 10) : 50;
-    const history = getPurchaseHistory(query?.user_id || 'demo', limit);
+    const userId = request.user?.id || 'demo';
+    const history = getPurchaseHistory(userId, limit);
     return reply.send({ status: 'SUCCESS', history });
   });
 
@@ -256,9 +261,9 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /api/buyer/watchlist/alerts
    * Returns price-drop alerts triggered by the watchlist job.
    */
-  fastify.get('/api/buyer/watchlist/alerts', async (request, reply) => {
-    const query = request.query as { user_id?: string };
-    const alerts = getWatchlistAlerts(query?.user_id);
+  fastify.get('/api/buyer/watchlist/alerts', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const userId = request.user?.id;
+    const alerts = getWatchlistAlerts(userId);
     return reply.send({ status: 'SUCCESS', alerts });
   });
 
@@ -266,9 +271,9 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * GET /api/buyer/receipts
    * Returns user receipts and cryptographic certificates.
    */
-  fastify.get('/api/buyer/receipts', async (request, reply) => {
-    const query = request.query as { user_id?: string };
-    const receipts = getReceipts(query?.user_id || 'demo');
+  fastify.get('/api/buyer/receipts', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const userId = request.user?.id || 'demo';
+    const receipts = getReceipts(userId);
     return reply.send({ status: 'SUCCESS', receipts });
   });
 
@@ -276,10 +281,11 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/escrow/confirm
    * Confirms order delivery, updating escrow hold status to CAPTURED.
    */
-  fastify.post('/api/buyer/escrow/confirm', async (request, reply) => {
+  fastify.post('/api/buyer/escrow/confirm', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; order_id?: string };
     const orderId = body?.order_id || 'demo_order';
-    const updated = updatePurchaseStatus(body?.user_id || 'demo', orderId, 'CAPTURED');
+    const userId = request.user?.id || body?.user_id || 'demo';
+    const updated = updatePurchaseStatus(userId, orderId, 'CAPTURED');
     return reply.send({ status: 'SUCCESS', order_id: orderId, escrow_status: 'CAPTURED', updated });
   });
 
@@ -287,10 +293,11 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/escrow/refund
    * Refunds order hold, updating escrow status to REFUNDED.
    */
-  fastify.post('/api/buyer/escrow/refund', async (request, reply) => {
+  fastify.post('/api/buyer/escrow/refund', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; order_id?: string };
     const orderId = body?.order_id || 'demo_order';
-    const updated = updatePurchaseStatus(body?.user_id || 'demo', orderId, 'REFUNDED');
+    const userId = request.user?.id || body?.user_id || 'demo';
+    const updated = updatePurchaseStatus(userId, orderId, 'REFUNDED');
     return reply.send({ status: 'SUCCESS', order_id: orderId, escrow_status: 'REFUNDED', updated });
   });
 };

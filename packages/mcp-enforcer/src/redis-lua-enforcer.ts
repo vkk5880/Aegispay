@@ -98,6 +98,18 @@ return {1, tostring(new_spent)}
 
 export const eval_rollback = ROLLBACK_LUA_SCRIPT;
 
+export interface SpendMandateDbRecord {
+  id: string;
+  max_total_cents: number;
+  max_single_merchant_cents: number;
+  spent_cents: number;
+  expires_at: Date | string | number;
+  status: 'ACTIVE' | 'EXPIRED' | 'REVOKED';
+  allowed_categories?: string[];
+}
+
+export type DbMandateLookup = (mandateId: string) => Promise<SpendMandateDbRecord | null>;
+
 export interface ReservationParams {
   mandate_id: string;
   merchant_domain: string;
@@ -117,11 +129,19 @@ export class AtomicSpendEnforcer {
   private scriptSha: string | null = null;
   private rollbackSha: string | null = null;
   private defaultRedis: Redis | null = null;
+  private dbFallback: DbMandateLookup | null = null;
 
-  constructor(defaultRedis?: Redis) {
+  constructor(defaultRedis?: Redis, dbFallback?: DbMandateLookup) {
     if (defaultRedis) {
       this.defaultRedis = defaultRedis;
     }
+    if (dbFallback) {
+      this.dbFallback = dbFallback;
+    }
+  }
+
+  setDbFallback(dbFallback: DbMandateLookup): void {
+    this.dbFallback = dbFallback;
   }
 
   async reserveBudget(redisClient: Redis, params: ReservationParams): Promise<ReservationResult> {
@@ -150,12 +170,26 @@ export class AtomicSpendEnforcer {
     }
 
     try {
-      const result = await redisClient.evalsha(
-        this.scriptSha,
-        keys.length,
-        ...keys,
-        ...argv
-      ) as [number, string];
+      let result: [number, string];
+      try {
+        result = await redisClient.evalsha(
+          this.scriptSha,
+          keys.length,
+          ...keys,
+          ...argv
+        ) as [number, string];
+      } catch (shaErr: any) {
+        if (shaErr.message && shaErr.message.includes('NOSCRIPT')) {
+          result = await redisClient.eval(
+            LUA_SCRIPT,
+            keys.length,
+            ...keys,
+            ...argv
+          ) as [number, string];
+        } else {
+          throw shaErr;
+        }
+      }
 
       const [status, data] = result;
 
@@ -164,35 +198,113 @@ export class AtomicSpendEnforcer {
           success: true,
           new_spent: parseInt(data, 10)
         };
-      } else {
-        return {
-          success: false,
-          error_code: data
-        };
       }
-    } catch (e: any) {
-      if (e.message && e.message.includes('NOSCRIPT')) {
-        // Fallback to eval if script is flushed
-        const result = await redisClient.eval(
-          LUA_SCRIPT,
-          keys.length,
-          ...keys,
-          ...argv
-        ) as [number, string];
 
-        const [status, data] = result;
+      // If Redis has no mandate (cold restart or eviction), fallback to PostgreSQL state recovery
+      if (data === 'ERR_MANDATE_NOT_FOUND' && this.dbFallback) {
+        try {
+          const dbRecord = await this.dbFallback(params.mandate_id);
+          if (!dbRecord) {
+            return {
+              success: false,
+              error_code: 'ERR_MANDATE_NOT_FOUND'
+            };
+          }
 
-        if (status === 1) {
+          if (dbRecord.status !== 'ACTIVE') {
+            return {
+              success: false,
+              error_code: `ERR_MANDATE_STATUS_${dbRecord.status}`
+            };
+          }
+
+          const expiresMs = new Date(dbRecord.expires_at).getTime();
+          if (params.current_unix_ms > expiresMs) {
+            return {
+              success: false,
+              error_code: 'ERR_MANDATE_EXPIRED'
+            };
+          }
+
+          if (params.merchant_anomaly_score > 300) {
+            return {
+              success: false,
+              error_code: 'ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED'
+            };
+          }
+
+          if (
+            dbRecord.allowed_categories &&
+            dbRecord.allowed_categories.length > 0 &&
+            !dbRecord.allowed_categories.includes('*') &&
+            !dbRecord.allowed_categories.includes(params.category_id)
+          ) {
+            return {
+              success: false,
+              error_code: `ERR_CATEGORY_NOT_AUTHORIZED:${params.category_id}`
+            };
+          }
+
+          if (params.requested_cents > dbRecord.max_single_merchant_cents) {
+            return {
+              success: false,
+              error_code: 'ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP'
+            };
+          }
+
+          if (dbRecord.spent_cents + params.requested_cents > dbRecord.max_total_cents) {
+            return {
+              success: false,
+              error_code: 'ERR_EXCEEDS_TOTAL_MANDATE_BUDGET'
+            };
+          }
+
+          // Hydrate Redis with PostgreSQL authoritative state
+          const allowedCatsStr = dbRecord.allowed_categories ? dbRecord.allowed_categories.join(',') : '*';
+          await redisClient.hmset(keys[0], {
+            max_total: dbRecord.max_total_cents.toString(),
+            max_single_merchant: dbRecord.max_single_merchant_cents.toString(),
+            spent: (dbRecord.spent_cents + params.requested_cents).toString(),
+            expires_ms: expiresMs.toString(),
+            status: 'ACTIVE',
+            allowed_cats: allowedCatsStr
+          });
+          await redisClient.incrby(keys[1], params.requested_cents);
+
+          const ttlSeconds = Math.max(1, Math.floor((expiresMs - params.current_unix_ms) / 1000));
+          await redisClient.expire(keys[0], ttlSeconds);
+          await redisClient.expire(keys[1], ttlSeconds);
+
           return {
             success: true,
-            new_spent: parseInt(data, 10)
+            new_spent: dbRecord.spent_cents + params.requested_cents
           };
-        } else {
+        } catch {
+          // Guardrail 3: Fail closed if both Redis and PostgreSQL fail
+          if (process.env.NODE_ENV === 'production') {
+            return {
+              success: false,
+              error_code: 'ERR_FAIL_CLOSED_CUSTODIAN_UNREACHABLE'
+            };
+          }
           return {
             success: false,
-            error_code: data
+            error_code: 'ERR_MANDATE_NOT_FOUND'
           };
         }
+      }
+
+      return {
+        success: false,
+        error_code: data
+      };
+    } catch (e: any) {
+      // Guardrail 3: Fail closed if Redis is unreachable in production
+      if (process.env.NODE_ENV === 'production') {
+        return {
+          success: false,
+          error_code: 'ERR_FAIL_CLOSED_CUSTODIAN_UNREACHABLE'
+        };
       }
       throw e;
     }
