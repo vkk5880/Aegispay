@@ -122,11 +122,12 @@ export function SearchBar({
 
         <input
           ref={inputRef}
-          type="text"
+          type="search"
           value={value}
           onChange={handleInputChange}
           disabled={loading}
           placeholder={placeholder}
+          aria-label="Search products, compare models, or describe your budget"
           className="flex-1 bg-transparent px-2 py-2.5 text-xs sm:text-sm text-white outline-none placeholder:text-slate-500 min-w-0"
         />
 
@@ -134,7 +135,7 @@ export function SearchBar({
           <button
             type="button"
             onClick={handleClear}
-            className="p-1 rounded-lg text-slate-400 hover:text-white mr-1 transition-colors cursor-pointer"
+            className="p-1 rounded-lg text-slate-400 hover:text-white mr-1 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
             aria-label="Clear search query"
           >
             <X className="w-3.5 h-3.5" />
@@ -144,7 +145,8 @@ export function SearchBar({
         <button
           type="submit"
           disabled={loading || !value.trim()}
-          className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-all disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+          aria-label="Submit search query"
+          className="px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-all disabled:opacity-50 flex items-center gap-1 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
         >
           {loading ? (
             <Loader2 className="w-3.5 h-3.5 animate-spin" />

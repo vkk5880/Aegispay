@@ -275,11 +275,15 @@ export function PayPalV6SdkMount({
             {/* Funding Source Selector */}
             <div className="pt-2">
               <span className="text-[11px] text-slate-500 block mb-1.5">Eligible Payment Sources (findEligibleMethods):</span>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Payment funding methods">
                 <button
                   type="button"
+                  role="tab"
+                  id="tab-paypal"
+                  aria-selected={activeFundingSource === 'paypal'}
+                  aria-controls="funding-tab-panel"
                   onClick={() => setActiveFundingSource('paypal')}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none ${
                     activeFundingSource === 'paypal'
                       ? 'border-[#0070ba] bg-[#0070ba]/10 text-[#0070ba] dark:text-blue-400'
                       : 'border-slate-300 dark:border-slate-800 text-slate-600 dark:text-slate-400'
@@ -289,9 +293,13 @@ export function PayPalV6SdkMount({
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  id="tab-venmo"
+                  aria-selected={activeFundingSource === 'venmo'}
+                  aria-controls="funding-tab-panel"
                   onClick={() => setActiveFundingSource('venmo')}
                   disabled={!eligibleMethods.venmo}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none ${
                     activeFundingSource === 'venmo'
                       ? 'border-[#008CFF] bg-[#008CFF]/10 text-[#008CFF]'
                       : 'border-slate-300 dark:border-slate-800 text-slate-600 dark:text-slate-400'
@@ -301,9 +309,13 @@ export function PayPalV6SdkMount({
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  id="tab-paylater"
+                  aria-selected={activeFundingSource === 'paylater'}
+                  aria-controls="funding-tab-panel"
                   onClick={() => setActiveFundingSource('paylater')}
                   disabled={!eligibleMethods.paylater}
-                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all ${
+                  className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-all focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:outline-none ${
                     activeFundingSource === 'paylater'
                       ? 'border-indigo-500 bg-indigo-500/10 text-indigo-500'
                       : 'border-slate-300 dark:border-slate-800 text-slate-600 dark:text-slate-400'

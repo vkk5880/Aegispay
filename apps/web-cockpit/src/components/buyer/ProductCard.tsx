@@ -198,7 +198,8 @@ export function ProductCard({
           {onAddToCart && (
             <button
               onClick={handleAdd}
-              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer ${
+              aria-label={`Add ${product.title || 'item'} to Knapsack Cart`}
+              className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none ${
                 added
                   ? 'bg-emerald-600 text-white'
                   : 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-cyan-950/50'
@@ -221,7 +222,8 @@ export function ProductCard({
           {onInstantBuy && (
             <button
               onClick={() => onInstantBuy(product)}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-colors cursor-pointer"
+              aria-label={`Instant buy ${product.title || 'item'}`}
+              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
             >
               Instant Buy
             </button>

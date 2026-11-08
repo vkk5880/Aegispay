@@ -170,7 +170,12 @@ export function ChatFlow({
 
   if (flowState === 'SEARCHING') {
     return (
-      <div className="flex flex-col items-center gap-3 w-full animate-fade-in-up">
+      <div
+        className="flex flex-col items-center gap-3 w-full animate-fade-in-up"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
         <div className="relative flex items-center gap-3 rounded-full px-5 py-2.5 shadow-xl border border-cyan-500/40 bg-slate-900/90 backdrop-blur-md">
           <div className="flex items-center gap-1.5 h-4">
             <span className="w-1.5 h-3 bg-cyan-400 rounded-full animate-pulse" />
@@ -194,7 +199,12 @@ export function ChatFlow({
 
   if (flowState === 'CLARIFYING') {
     return (
-      <div className="relative w-full max-w-2xl mx-auto rounded-2xl p-6 shadow-2xl flex flex-col gap-5 border border-slate-800 bg-slate-900/95 backdrop-blur-xl">
+      <div
+        className="relative w-full max-w-2xl mx-auto rounded-2xl p-6 shadow-2xl flex flex-col gap-5 border border-slate-800 bg-slate-900/95 backdrop-blur-xl"
+        role="region"
+        aria-label="Search clarification"
+        aria-live="polite"
+      >
         <div className="flex justify-between items-center pb-2 border-b border-slate-800">
           <span className="text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5" />
@@ -264,17 +274,19 @@ export function ChatFlow({
         </div>
         <input
           ref={inputRef}
-          type="text"
+          type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={disabled || isClarifyingLoading}
           placeholder={placeholder}
+          aria-label="Describe what you want to buy"
           className="flex-1 bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-slate-500 min-w-0"
         />
         <button
           type="submit"
           disabled={disabled || isClarifyingLoading || !query.trim()}
-          className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
+          aria-label="Execute search"
+          className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
         >
           <span>{isClarifyingLoading ? 'Analyzing...' : 'Execute'}</span>
           <ArrowRight className="w-3.5 h-3.5" />

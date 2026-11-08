@@ -633,6 +633,7 @@ export function FriendlyErrorTransmuter({
     <div
       className={`relative rounded-2xl border p-5 shadow-lg backdrop-blur-md transition-all ${borderStyles[transmuted.category]} ${className}`}
       role="alert"
+      aria-live="assertive"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3.5">

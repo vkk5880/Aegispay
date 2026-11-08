@@ -4,7 +4,7 @@ services:
     name: aegispay-web-cockpit
     runtime: node
     plan: standard
-    buildCommand: pnpm install --no-frozen-lockfile --prod=false && pnpm --filter @aegispay/web-cockpit build
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/web-cockpit build
     startCommand: pnpm --filter @aegispay/web-cockpit start
     envVars:
       - key: NODE_VERSION
@@ -22,7 +22,7 @@ services:
     name: aegispay-api-orchestrator
     runtime: node
     plan: standard
-    buildCommand: pnpm install --no-frozen-lockfile --prod=false && pnpm --filter @aegispay/api-orchestrator build
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/api-orchestrator build
     startCommand: pnpm --filter @aegispay/api-orchestrator start
     healthCheckPath: /api/integrations/verify
     envVars:
@@ -57,7 +57,7 @@ services:
     name: aegispay-workflows
     runtime: node
     plan: starter
-    buildCommand: pnpm install --no-frozen-lockfile --prod=false && pnpm --filter @aegispay/workflows build
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/workflows build
     startCommand: pnpm --filter @aegispay/workflows start
     envVars:
       - key: NODE_VERSION
@@ -85,6 +85,7 @@ services:
         sync: false
 
   # 4. Render Key-Value (Redis) for Atomic Lua Spend Enforcer
+  # Empty ipAllowList enforces zero-trust: ingress rejected from public internet, accessible strictly via Render internal private network CIDR
   - type: keyvalue
     name: aegispay-redis
     plan: starter

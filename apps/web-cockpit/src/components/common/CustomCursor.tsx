@@ -82,7 +82,11 @@ export function CustomCursor() {
   if (isTouch) return null;
 
   return (
-    <div className="hidden md:block pointer-events-none fixed inset-0 z-[9999] overflow-hidden">
+    <div
+      className="hidden md:block pointer-events-none fixed inset-0 z-[9999] overflow-hidden"
+      aria-hidden="true"
+      tabIndex={-1}
+    >
       {/* High-Precision Core Dot */}
       <div
         className="fixed rounded-full bg-cyan-400 shadow-[0_0_10px_#22d3ee] transition-transform duration-75 ease-out"

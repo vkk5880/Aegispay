@@ -4521,3 +4521,26 @@ export function getExactEvmPayloadPayer(payload: unknown): string | undefined {
   }
   return undefined;
 }
+
+/**
+ * Safe HTTP/HTTPS URL schema preventing javascript:, data:, or file: protocol exploits.
+ */
+export const SafeHttpUrlSchema = z.string().url().refine(
+  (urlStr) => {
+    try {
+      const parsed = new URL(urlStr);
+      return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+    } catch {
+      return false;
+    }
+  },
+  { message: 'URL must use http: or https: scheme' }
+);
+
+/**
+ * CommonMark content schema rejecting raw HTML tags (<script>, <iframe>, <img onerror=...>)
+ */
+export const CommonMarkContentSchema = z.string().refine(
+  (content) => !/<[a-z][\s\S]*>/i.test(content),
+  { message: 'Raw HTML tags are prohibited in CommonMark content' }
+);

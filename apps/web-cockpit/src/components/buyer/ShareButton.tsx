@@ -129,7 +129,7 @@ export function ShareButton({
   return (
     <button
       onClick={handleShare}
-      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-mono border transition-all duration-150 cursor-pointer ${
+      className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-mono border transition-all duration-150 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none ${
         state === 'copied'
           ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_rgba(52,211,153,0.25)]'
           : state === 'error'
@@ -138,6 +138,9 @@ export function ShareButton({
       } ${className}`}
       aria-label="Share comparison decision link"
     >
+      <span className="sr-only" aria-live="polite">
+        {state === 'copied' ? 'Comparison link copied to clipboard' : state === 'error' ? 'Copying link failed' : ''}
+      </span>
       {state === 'copied' ? (
         <>
           <Check className="w-3.5 h-3.5 text-emerald-400" />

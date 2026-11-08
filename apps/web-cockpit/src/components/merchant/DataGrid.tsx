@@ -125,7 +125,12 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
         aria-label="Search all columns"
         className="h-10 w-72 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c1424] px-3 text-sm outline-none focus:border-cyan-500 text-slate-800 dark:text-slate-100"
       />
-      <div className="min-h-[400px] h-[520px] flex-1 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm">
+      <div
+        className="min-h-[400px] h-[520px] flex-1 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm"
+        role="region"
+        aria-label="Merchant Data Table"
+        aria-busy={!rows}
+      >
         <AgGridProvider modules={modules}>
           <AgGridReact
             theme={theme}

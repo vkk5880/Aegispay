@@ -23,6 +23,7 @@ import { executeACPAction } from './acp-manifest.js';
 export interface MCPServerOptions {
   maxBufferSize?: number;
   maxToolInputElements?: number;
+  redisClient?: any;
 }
 
 export const DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB default buffer limit
@@ -347,7 +348,10 @@ export function createMCPServer(options: MCPServerOptions = {}) {
         if (!parsed.success) {
           throw new McpError(ErrorCode.InvalidParams, `Invalid arguments: ${parsed.error}`);
         }
-        const result = await toolHandlers.handleAuthorizeEscrow(parsed.data);
+        const result = await toolHandlers.handleAuthorizeEscrow({
+          ...parsed.data,
+          redis_client: parsed.data.redis_client || options.redisClient,
+        });
         return { content: [{ type: 'text', text: JSON.stringify(result) }] };
       }
       case 'broadcast_synthetic_intent_voucher': {

@@ -219,7 +219,14 @@ function ContenderCard({
             <span className="text-slate-400">Algorithmic Score</span>
             <span className="text-cyan-400 font-bold">{score}%</span>
           </div>
-          <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+          <div
+            className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden"
+            role="progressbar"
+            aria-valuenow={score}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${title} algorithmic score: ${score}%`}
+          >
             <div
               className={`h-full rounded-full transition-all duration-1000 ${
                 isWinner ? 'bg-gradient-to-r from-cyan-500 to-blue-500' : 'bg-slate-600'
@@ -233,7 +240,8 @@ function ContenderCard({
       {onSelect && isWinner && (
         <button
           onClick={onSelect}
-          className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+          aria-label={`Pre-authorize ${title} as winner`}
+          className="w-full py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
           <span>Pre-Authorize Winner in Cockpit</span>

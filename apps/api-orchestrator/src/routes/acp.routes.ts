@@ -39,8 +39,10 @@ interface CachedIdempotencyResponse {
   statusCode: number;
   headers: Record<string, string>;
   body: any;
+  requestFingerprint?: string;
 }
 const idempotencyStore = new Map<string, CachedIdempotencyResponse>();
+const inFlightCompletions = new Set<string>();
 
 // In-memory checkout sessions store for ACP sessions
 interface StoredCheckoutSession {
@@ -419,12 +421,35 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const idempotencyKey = (request.headers['idempotency-key'] as string) || '';
-    if (idempotencyKey && idempotencyStore.has(idempotencyKey)) {
-      const cached = idempotencyStore.get(idempotencyKey)!;
-      for (const [k, v] of Object.entries(cached.headers)) {
-        reply.header(k, v);
+    if (idempotencyKey) {
+      if (idempotencyKey.length > 255) {
+        return reply.status(400).send({
+          type: 'invalid_request',
+          code: 'invalid_idempotency_key',
+          message: 'Idempotency-Key must not exceed 255 characters',
+        });
       }
-      return reply.status(cached.statusCode).send(cached.body);
+
+      if (idempotencyStore.has(idempotencyKey)) {
+        const cached = idempotencyStore.get(idempotencyKey)!;
+        const currentFingerprint = crypto
+          .createHash('sha256')
+          .update(JSON.stringify(request.body || {}))
+          .digest('hex');
+
+        if (cached.requestFingerprint && cached.requestFingerprint !== currentFingerprint) {
+          return reply.status(422).send({
+            type: 'invalid_request',
+            code: 'idempotency_conflict',
+            message: 'Idempotency-Key was already used with a different request payload',
+          });
+        }
+
+        for (const [k, v] of Object.entries(cached.headers)) {
+          reply.header(k, v);
+        }
+        return reply.status(cached.statusCode).send(cached.body);
+      }
     }
 
     const parseResult = ACPCreateCheckoutSessionSchema.safeParse(request.body);
@@ -547,6 +572,11 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
     const publicResponse = toPublicCheckoutSession(sessionData);
 
     if (idempotencyKey) {
+      const payloadFingerprint = crypto
+        .createHash('sha256')
+        .update(JSON.stringify(request.body || {}))
+        .digest('hex');
+
       idempotencyStore.set(idempotencyKey, {
         statusCode: 201,
         headers: {
@@ -554,6 +584,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
           'API-Version': apiVersion || '2026-01-30',
         },
         body: publicResponse,
+        requestFingerprint: payloadFingerprint,
       });
     }
 
@@ -692,20 +723,35 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    const body: any = request.body || {};
-    const paymentMethod = body.payment_method || { type: 'vault_token' };
-    const affiliate_attribution = body.affiliate_attribution;
-    if (affiliate_attribution) {
-      session.affiliate_attribution = affiliate_attribution; // Store last-touch attribution
-    }
-    if (body.marketing_consents) {
-      session.marketing_consents = body.marketing_consents;
+    // Atomic in-flight mutex lock preventing concurrent double-capture races
+    if (inFlightCompletions.has(id)) {
+      reply.header('Retry-After', '1');
+      return reply.status(409).send({
+        type: 'processing_error',
+        code: 'idempotency_in_flight',
+        message: `Checkout session '${id}' is currently being captured by another concurrent request`,
+      });
     }
 
-    finalizeEnhancedOrder(session);
+    inFlightCompletions.add(id);
+    try {
+      const body: any = request.body || {};
+      const paymentMethod = body.payment_method || { type: 'vault_token' };
+      const affiliate_attribution = body.affiliate_attribution;
+      if (affiliate_attribution) {
+        session.affiliate_attribution = affiliate_attribution; // Store last-touch attribution
+      }
+      if (body.marketing_consents) {
+        session.marketing_consents = body.marketing_consents;
+      }
 
-    reply.header('API-Version', '2026-01-30');
-    return reply.status(200).send(toPublicCheckoutSession(session));
+      finalizeEnhancedOrder(session);
+
+      reply.header('API-Version', '2026-01-30');
+      return reply.status(200).send(toPublicCheckoutSession(session));
+    } finally {
+      inFlightCompletions.delete(id);
+    }
   });
 
   /**
@@ -1173,6 +1219,17 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
+    // Atomic in-flight mutex lock preventing concurrent delegated checkout capture races
+    if (inFlightCompletions.has(checkout_session_id)) {
+      reply.header('Retry-After', '1');
+      return reply.status(409).send({
+        type: 'processing_error',
+        code: 'idempotency_in_flight',
+        message: `Checkout session '${checkout_session_id}' is currently being captured by another concurrent request`,
+      });
+    }
+
+    inFlightCompletions.add(checkout_session_id);
     try {
       const checkoutResult = await defaultVaultOnboardingService.executeDelegatedCheckout({
         paymentTokenId: effectiveTokenId,
@@ -1242,6 +1299,8 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
         code: 'upstream_psp_failed',
         message: `Payment handler '${payment_handler_id}' failed: ${err.message}`,
       });
+    } finally {
+      inFlightCompletions.delete(checkout_session_id);
     }
   });
 

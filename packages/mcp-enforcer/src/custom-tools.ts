@@ -324,21 +324,39 @@ export const toolHandlers = {
     let newSpent = args.requested_cents;
     const enforcer = args.spend_enforcer || defaultAtomicSpendEnforcer;
 
+    // Fail-closed security policy: In production or when REDIS_URL is configured, atomic Redis Lua pre-reservation is mandatory
+    const isProduction = process.env.NODE_ENV === 'production';
+    const hasRedisConfig = Boolean(process.env.REDIS_URL);
+    if (!args.redis_client && (isProduction || hasRedisConfig)) {
+      throw new Error(
+        'ERR_FAIL_CLOSED_REDIS_REQUIRED: Autonomous spend authorization strictly requires an active Redis enforcer in production'
+      );
+    }
+
     if (args.redis_client) {
-      const reservation = await enforcer.reserveBudget(args.redis_client, {
-        mandate_id: args.mandate_id,
-        merchant_domain: args.merchant_domain,
-        requested_cents: args.requested_cents,
-        current_unix_ms: Date.now(),
-        category_id: args.category_id,
-        merchant_anomaly_score: anomalyScore,
-      });
+      try {
+        const reservation = await enforcer.reserveBudget(args.redis_client, {
+          mandate_id: args.mandate_id,
+          merchant_domain: args.merchant_domain,
+          requested_cents: args.requested_cents,
+          current_unix_ms: Date.now(),
+          category_id: args.category_id,
+          merchant_anomaly_score: anomalyScore,
+        });
 
-      if (!reservation.success) {
-        throw new Error(reservation.error_code || 'ERR_BUDGET_RESERVATION_FAILED');
+        if (!reservation.success) {
+          throw new Error(reservation.error_code || 'ERR_BUDGET_RESERVATION_FAILED');
+        }
+
+        newSpent = reservation.new_spent ?? args.requested_cents;
+      } catch (err: any) {
+        // Strict fail-closed policy: sanitize error to prevent internal connection string/token leakage
+        const rawMsg = err?.message || 'ERR_BUDGET_RESERVATION_FAILED';
+        const sanitized = rawMsg
+          .replace(/redis[s]?:\/\/[^\s@]+@[^\s/]+/gi, 'redis://[REDACTED]')
+          .replace(/password=[^\s&]+/gi, 'password=[REDACTED]');
+        throw new Error(sanitized);
       }
-
-      newSpent = reservation.new_spent ?? args.requested_cents;
     }
 
     const uniqueEntropy = crypto.randomUUID().slice(0, 12);

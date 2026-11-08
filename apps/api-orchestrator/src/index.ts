@@ -16,15 +16,40 @@ import { http402Plugin } from './middleware/http402-interceptor.js';
 dotenv.config();
 
 export async function buildApp() {
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',').map((o) => o.trim())
+    : process.env.CORS_ORIGIN
+    ? [process.env.CORS_ORIGIN.trim()]
+    : null;
+
   const fastify = Fastify({
     logger: {
       level: process.env.LOG_LEVEL || 'info',
+      redact: [
+        'req.headers.authorization',
+        'req.headers.cookie',
+        '*.token',
+        '*.secret',
+        'payment_data.instrument.credential.token',
+        'affiliate_attribution.token',
+        'payload.payment_method.token',
+      ],
     },
   });
 
   // Plugins
   await fastify.register(cors, {
-    origin: '*',
+    origin: (origin, cb) => {
+      // In development or when no restrictive origins configured, permit requests
+      if (!origin || !isProduction || !allowedOrigins) {
+        return cb(null, true);
+      }
+      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+        return cb(null, true);
+      }
+      return cb(new Error('CORS origin forbidden by security policy'), false);
+    },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   });
 

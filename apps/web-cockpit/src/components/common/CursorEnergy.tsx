@@ -72,7 +72,11 @@ export function CursorEnergy() {
   if (isTouch) return null;
 
   return (
-    <div className="hidden md:block pointer-events-none fixed inset-0 z-40 overflow-hidden">
+    <div
+      className="hidden md:block pointer-events-none fixed inset-0 z-40 overflow-hidden"
+      aria-hidden="true"
+      tabIndex={-1}
+    >
       {/* Outer soft ambient radial glow */}
       <div
         className="absolute rounded-full blur-3xl mix-blend-screen transition-transform duration-300"
