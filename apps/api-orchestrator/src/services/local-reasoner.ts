@@ -1,17 +1,14 @@
-import { McpToolCallSchema, type McpToolCall } from '@aegispay/shared-types';
+import {
+  McpToolCallSchema,
+  LocalReasonerProposalSchema,
+  type McpToolCall,
+  type LocalReasonerProposal,
+} from '@aegispay/shared-types';
 
 export const MAX_PROMPT_LENGTH = 4000;
 
-export interface LocalReasonerProposal {
-  toolCall: McpToolCall;
-  rationale: string;
-  modelUsed: string;
-  confidence: number;
-  thinking?: string;
-  category?: string;
-  merchant?: string;
-  urgency?: 'immediate' | 'high' | 'normal' | 'low';
-}
+export { LocalReasonerProposalSchema };
+export type { LocalReasonerProposal };
 
 /**
  * Extracts a numeric amount from natural language queries.
@@ -66,9 +63,9 @@ export function extractAmount(text: string): number {
     return 0;
   }
 
-  // 3. Prepositional amount match: for 45, pay 20.00, amount of 100
+  // 3. Prepositional amount match: for 45, pay 20.00, amount of 100, fee of 50
   // Disambiguate against non-USD currencies (EUR, GBP, JPY, etc., or €/£/¥/₹ prefix)
-  const prepMatches = Array.from(clean.matchAll(/(?:for|the|amount(?:\s+of)?|pay)\s+(?:([-]|minus|negative)\s*)?(?:(?:\$\s*)?([€£¥₹]?)\s*(\d+(?:\.\d{1,2})?))(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
+  const prepMatches = Array.from(clean.matchAll(/(?:for|the|amount(?:\s+of)?|of|pay)\s+(?:([-]|minus|negative)\s*)?(?:(?:\$\s*)?([€£¥₹]?)\s*(\d+(?:\.\d{1,2})?))(?!\s*(?:eur|gbp|jpy|inr|cad|aud|chf|cny|rub|brl|zar|mxn|sgd|hkd|nzd|krw|sek|nok|dkk|pln|thb|myr|php|idr|czk|ils|clp|try|twd|huf|aed|sar|eth|btc))\b/gi));
   let hasNegativePrep = false;
   for (const m of prepMatches) {
     if (m[1]) {
@@ -135,8 +132,8 @@ export function extractMerchant(text: string): string | undefined {
   // ReDoS hardened regex patterns: bounded repetition {0,5}
   const explicitMatch = input.match(/(?:merchant:\s*|to\s+)([A-Z][A-Za-z0-9'&.-]*(?:\s+[A-Z][A-Za-z0-9'&.-]*){0,5})/);
   if (explicitMatch && explicitMatch[1]) {
-    const candidate = explicitMatch[1].trim().replace(/[.,;:]+$/, '');
-    if (!['The', 'A', 'An', 'Order', 'Invoice'].includes(candidate)) {
+    const candidate = explicitMatch[1].trim().replace(/[.,;:]+$/, '').slice(0, 256);
+    if (!['The', 'A', 'An', 'Order', 'Invoice'].includes(candidate) && candidate.length > 0) {
       return candidate;
     }
   }
@@ -152,7 +149,7 @@ export function extractUrgency(text: string): 'immediate' | 'high' | 'normal' | 
   const input = typeof text === 'string' ? text.slice(0, MAX_PROMPT_LENGTH) : String(text).slice(0, MAX_PROMPT_LENGTH);
   const lower = input.toLowerCase();
 
-  if (/\b(immediate(?:ly)?|asap|emergency|stat|urgent(?:ly)?|right now|now)\b/i.test(lower)) {
+  if (/\b(immediate(?:ly)?|asap|emergency|stat|urgent(?:ly)?|right now|now|instant(?:ly)?)\b/i.test(lower)) {
     return 'immediate';
   }
   if (/\b(high|soon|today|priority|critical|important|expedite)\b/i.test(lower)) {
@@ -319,7 +316,8 @@ export function runLocalReasoner(prompt: string): LocalReasonerProposal {
     };
   }
 
-  // Ensure all generated fallback proposals strictly conform to McpToolCallSchema
+  // Ensure all generated fallback proposals strictly conform to McpToolCallSchema and LocalReasonerProposalSchema
   McpToolCallSchema.parse(proposal.toolCall);
+  LocalReasonerProposalSchema.parse(proposal);
   return proposal;
 }

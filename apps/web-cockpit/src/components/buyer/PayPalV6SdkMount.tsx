@@ -1,30 +1,48 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { CreditCard, ShieldCheck, CheckCircle2, Clock, AlertCircle, RefreshCw } from 'lucide-react';
+import { CreditCard, ShieldCheck, CheckCircle2, Clock, AlertCircle, RefreshCw, ExternalLink } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransmuter';
 
 export interface PayPalV6SdkMountProps {
   orderAmountCents: number;
   orderIntent?: 'AUTHORIZE' | 'CAPTURE';
   currency?: string;
   onAuthorizeSuccess?: (orderId: string) => void;
+  onError?: (error: Error | string) => void;
+  on3DSChallenge?: (orderId: string, challengeUrl?: string) => void;
+  onLiabilityShiftNo?: (orderId: string) => void;
   clientId?: string;
   clientToken?: string;
 }
+
+export type SdkMountStatus =
+  | 'IDLE'
+  | 'LOADING_SDK'
+  | 'MOUNTED'
+  | 'AUTHORIZING'
+  | '3DS_CHALLENGE'
+  | 'LIABILITY_SHIFT_FAILED'
+  | 'SUCCESS'
+  | 'ERROR';
 
 export function PayPalV6SdkMount({
   orderAmountCents,
   orderIntent = 'AUTHORIZE',
   currency = 'USD',
   onAuthorizeSuccess,
+  onError,
+  on3DSChallenge,
+  onLiabilityShiftNo,
   clientId,
   clientToken,
 }: PayPalV6SdkMountProps) {
   const [secondsRemaining, setSecondsRemaining] = useState<number>(15 * 60); // 15 min session window
-  const [sdkStatus, setSdkStatus] = useState<'IDLE' | 'LOADING_SDK' | 'MOUNTED' | 'AUTHORIZING' | 'SUCCESS' | 'ERROR'>('IDLE');
+  const [sdkStatus, setSdkStatus] = useState<SdkMountStatus>('IDLE');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [authorizedOrderId, setAuthorizedOrderId] = useState<string | null>(null);
+  const [activeChallengeUrl, setActiveChallengeUrl] = useState<string | null>(null);
   const [eligibleMethods, setEligibleMethods] = useState<{
     paypal: boolean;
     venmo: boolean;
@@ -119,20 +137,26 @@ export function PayPalV6SdkMount({
     } catch (err: any) {
       if (isMountedRef.current) {
         console.error('PayPal JS SDK v6 initialization error:', err);
-        setErrorMessage(err?.message || 'Failed to initialize PayPal JS SDK v6 component');
+        const errMsg = err?.message || 'Failed to initialize PayPal JS SDK v6 component';
+        setErrorMessage(errMsg);
         setSdkStatus('ERROR');
+        onError?.(err);
       }
     }
-  }, [clientId, clientToken, currency, orderAmountCents]);
+  }, [clientId, clientToken, currency, orderAmountCents, onError]);
 
   useEffect(() => {
     checkEligibility();
   }, [checkEligibility]);
 
-  const handleSimulatePayPalAuthorization = async (funding: 'paypal' | 'venmo' | 'paylater' = 'paypal') => {
+  const handleSimulatePayPalAuthorization = async (
+    funding: 'paypal' | 'venmo' | 'paylater' = 'paypal',
+    options?: { simulate3DS?: boolean; simulateLiabilityShiftNo?: boolean }
+  ) => {
     setActiveFundingSource(funding);
     setSdkStatus('AUTHORIZING');
     setErrorMessage(null);
+    setActiveChallengeUrl(null);
 
     try {
       await new Promise<void>((resolve) => {
@@ -145,6 +169,28 @@ export function PayPalV6SdkMount({
       if (!isMountedRef.current) return;
 
       const simulatedOrderId = `PP-ORD-V6-${Date.now()}`;
+
+      // Simulate 3DS challenge interception if requested or flagged
+      if (options?.simulate3DS) {
+        const challengeUrl = `https://www.sandbox.paypal.com/checkoutnow/payer-action?orderId=${simulatedOrderId}`;
+        setAuthorizedOrderId(simulatedOrderId);
+        setActiveChallengeUrl(challengeUrl);
+        setSdkStatus('3DS_CHALLENGE');
+        on3DSChallenge?.(simulatedOrderId, challengeUrl);
+        return;
+      }
+
+      // Simulate liability_shift === 'NO' enforcement
+      if (options?.simulateLiabilityShiftNo) {
+        setAuthorizedOrderId(simulatedOrderId);
+        setSdkStatus('LIABILITY_SHIFT_FAILED');
+        const errNotice = `LIABILITY_SHIFT_NO: Card issuer did not grant liability shift for order ${simulatedOrderId}. Merchant protection declined; order blocked.`;
+        setErrorMessage(errNotice);
+        onLiabilityShiftNo?.(simulatedOrderId);
+        onError?.(errNotice);
+        return;
+      }
+
       setAuthorizedOrderId(simulatedOrderId);
       setSdkStatus('SUCCESS');
 
@@ -153,10 +199,22 @@ export function PayPalV6SdkMount({
       }
     } catch (err: any) {
       if (isMountedRef.current) {
-        setErrorMessage(err?.message || 'Authorization attempt failed');
+        const msg = err?.message || 'Authorization attempt failed';
+        setErrorMessage(msg);
         setSdkStatus('ERROR');
+        onError?.(err);
       }
     }
+  };
+
+  const handleComplete3DSChallenge = () => {
+    if (!authorizedOrderId) return;
+    setSdkStatus('AUTHORIZING');
+    setTimeout(() => {
+      if (!isMountedRef.current) return;
+      setSdkStatus('SUCCESS');
+      onAuthorizeSuccess?.(authorizedOrderId);
+    }, 600);
   };
 
   return (
@@ -262,6 +320,54 @@ export function PayPalV6SdkMount({
           </div>
 
           <div className="pt-5 space-y-2">
+            {/* 3DS Challenge Prompt */}
+            {sdkStatus === '3DS_CHALLENGE' && (
+              <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-300 dark:border-indigo-500/40 text-indigo-900 dark:text-indigo-200 text-xs space-y-2.5">
+                <div className="flex items-center gap-2 font-semibold">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>Strong Customer Authentication (3D Secure) Required</span>
+                </div>
+                <p className="text-[11px] text-indigo-800 dark:text-indigo-300 leading-relaxed font-sans">
+                  PSD2 compliance requires two-factor verification. Confirm the push notification or one-time passcode with your bank.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleComplete3DSChallenge}
+                    className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-xs transition-colors"
+                  >
+                    <span>Complete 3DS Authentication</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSdkStatus('IDLE');
+                      setActiveChallengeUrl(null);
+                    }}
+                    className="px-3 py-1.5 rounded-lg border border-indigo-300 dark:border-indigo-700 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-indigo-800 dark:text-indigo-300 font-medium text-xs transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Liability Shift Failed / Compensating Rollback Prompt */}
+            {sdkStatus === 'LIABILITY_SHIFT_FAILED' && (
+              <div className="space-y-2">
+                <FriendlyErrorTransmuter
+                  error={errorMessage || 'LIABILITY_SHIFT_NO'}
+                  onAction={(actionId) => {
+                    if (actionId === 'SWITCH_PAYMENT_METHOD' || actionId === 'CHOOSE_ALTERNATIVE_METHOD') {
+                      setSdkStatus('IDLE');
+                      setActiveFundingSource('paypal');
+                    }
+                  }}
+                />
+              </div>
+            )}
+
             {sdkStatus === 'ERROR' && (
               <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-300 text-xs flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -287,7 +393,7 @@ export function PayPalV6SdkMount({
                 </div>
                 <span className="text-[10px] text-emerald-700 dark:text-emerald-400/80 font-bold">ACTIVE HOLD</span>
               </div>
-            ) : (
+            ) : sdkStatus !== '3DS_CHALLENGE' && sdkStatus !== 'LIABILITY_SHIFT_FAILED' ? (
               <button
                 type="button"
                 onClick={() => handleSimulatePayPalAuthorization(activeFundingSource)}
@@ -301,7 +407,7 @@ export function PayPalV6SdkMount({
                   ? 'Authorizing with PayPal SDK v6...'
                   : `Authorize with ${activeFundingSource === 'venmo' ? 'Venmo' : activeFundingSource === 'paylater' ? 'PayPal Pay Later' : 'PayPal'}`}
               </button>
-            )}
+            ) : null}
 
             <div className="text-center text-[10px] text-slate-500">
               Zero upfront capture • 72-hour Render Workflow automated price-drop protection

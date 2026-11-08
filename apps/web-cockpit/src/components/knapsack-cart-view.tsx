@@ -23,6 +23,7 @@ export interface MultiMerchantCartItem {
   quantity: number;
   rebateCents: number;
   shippingWaived: boolean;
+  deliveryWindow?: string;
 }
 
 export interface KnapsackCartViewProps {
@@ -41,6 +42,7 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
       quantity: 1,
       rebateCents: 375, // alpha = 0.75 rebate
       shippingWaived: true,
+      deliveryWindow: '2-Day Express Consolidated',
     },
     {
       id: 'item_2',
@@ -50,6 +52,7 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
       quantity: 1,
       rebateCents: 600,
       shippingWaived: true,
+      deliveryWindow: '2-Day Express Consolidated',
     },
     {
       id: 'item_3',
@@ -59,6 +62,7 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
       quantity: 1,
       rebateCents: 450,
       shippingWaived: false,
+      deliveryWindow: '3-4 Day Priority Freight',
     },
   ];
 
@@ -131,6 +135,7 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
         {Object.entries(groupedByMerchant).map(([merchant, merchantItems]) => {
           const merchantSubtotal = merchantItems.reduce((s, it) => s + it.priceCents * it.quantity, 0);
           const hasShippingWaiver = merchantItems.some((it) => it.shippingWaived);
+          const merchantDeliveryWindow = merchantItems.find((it) => it.deliveryWindow)?.deliveryWindow || '2-3 Business Days';
 
           return (
             <div key={merchant} className="rounded-xl border border-slate-800/80 bg-[#060b14] p-4 space-y-3">
@@ -138,6 +143,7 @@ export function KnapsackCartView({ items, onCheckout, loading }: KnapsackCartVie
                 <div className="flex items-center gap-2">
                   <Store className="w-3.5 h-3.5 text-cyan-400" />
                   <span className="font-mono font-semibold text-white">{merchant}</span>
+                  <span className="text-[10px] font-mono text-slate-400">({merchantDeliveryWindow})</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {hasShippingWaiver && (
