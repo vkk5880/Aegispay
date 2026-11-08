@@ -212,8 +212,40 @@ test('ACP Endpoint 2b: POST /checkout_sessions creates session, validates API-Ve
   // Crucial Security & Privacy Check: Affiliate Attribution must NOT be echoed in public response
   assert.equal(session.affiliate_attribution, undefined);
 
-  // Test Idempotency replay
+  // Test Idempotency replay with identical payload
+  const replayPayload = {
+    currency: 'USD',
+    items: [
+      { id: 'item_prod_1', name: 'Ergonomic Desk', quantity: 1, unit_price_cents: 12000 },
+    ],
+    fulfillment_details: {
+      address: {
+        line_one: '123 Market St',
+        city: 'Austin',
+        state: 'TX',
+        postal_code: '78701',
+      },
+    },
+    affiliate_attribution: {
+      provider: 'channel3.ai',
+      token: 'atp_tok_secret_affiliate_123',
+      touchpoint: 'first',
+    },
+  };
+
   const replayRes = await app.inject({
+    method: 'POST',
+    url: '/checkout_sessions',
+    headers: {
+      'idempotency-key': 'idemp_unique_test_123',
+    },
+    payload: replayPayload,
+  });
+  assert.equal(replayRes.statusCode, 201);
+  assert.equal(replayRes.json().id, session.id);
+
+  // Test Idempotency conflict with different payload returns 422
+  const conflictRes = await app.inject({
     method: 'POST',
     url: '/checkout_sessions',
     headers: {
@@ -224,8 +256,8 @@ test('ACP Endpoint 2b: POST /checkout_sessions creates session, validates API-Ve
       items: [{ id: 'different_payload', quantity: 1 }],
     },
   });
-  assert.equal(replayRes.statusCode, 201);
-  assert.equal(replayRes.json().id, session.id);
+  assert.equal(conflictRes.statusCode, 422);
+  assert.equal(conflictRes.json().code, 'idempotency_conflict');
 });
 
 test('ACP Endpoint 3: POST /acp/payment_handler executes delegated payment using PayPal Vault', async () => {

@@ -214,6 +214,12 @@ export class DisputeForensicsService {
     modifyDate?: string;
     rawBuffer?: Buffer | Uint8Array;
   }): ExifTamperAnalysisResult {
+    // Checkpoint 6.1 Bounded Forensic Processing: Enforce 10 MB payload limit on evidence buffers
+    const MAX_FORENSIC_BUFFER_BYTES = 10 * 1024 * 1024; // 10 MB
+    if (metadata?.rawBuffer && metadata.rawBuffer.length > MAX_FORENSIC_BUFFER_BYTES) {
+      throw new Error(`Evidence buffer exceeds maximum forensic limit of 10 MB (${metadata.rawBuffer.length} bytes)`);
+    }
+
     const anomalyReasons: string[] = [];
     let softwareDetected: string | undefined;
 

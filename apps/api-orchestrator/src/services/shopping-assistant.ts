@@ -38,6 +38,7 @@ import {
   transformToProductCard,
   buildComparisonMatrix,
 } from './mastra-tools.js';
+import { runLocalReasoner } from './local-reasoner.js';
 
 export { ComparisonMatrixSchema };
 
@@ -1032,6 +1033,8 @@ export class ShoppingAssistantService {
 
   /**
    * Main entry point for conversational agent requests via Mastra Agent Workflow.
+   * Hardened with a 12-second circuit breaker and automatic failover to local-reasoner
+   * on upstream LLM timeouts or HTTP 429 rate limits.
    */
   async processMessage(request: ChatMessageRequest): Promise<ChatResponsePayload> {
     const input: WorkflowInput = {
@@ -1046,19 +1049,49 @@ export class ShoppingAssistantService {
       user_api_key: request.user_api_key,
     };
 
-    const run = await this.chatWorkflow.createRun();
-    const runResult = await run.start({ inputData: input });
+    try {
+      // 12-second timeout circuit breaker per Phase 4
+      let timeoutId: NodeJS.Timeout | null = null;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('Mastra Workflow execution timed out (12s circuit breaker)')), 12000);
+      });
 
-    if (runResult.status !== 'success' || !runResult.result) {
-      throw new Error(`Mastra Workflow DAG failed execution with status: ${runResult.status}`);
+      const run = await this.chatWorkflow.createRun();
+      const runPromise = run.start({ inputData: input });
+      const runResult = await Promise.race([runPromise, timeoutPromise]);
+      if (timeoutId) clearTimeout(timeoutId);
+
+      if (runResult?.status !== 'success' || !runResult?.result) {
+        throw new Error(`Mastra Workflow DAG failed execution with status: ${runResult?.status}`);
+      }
+
+      // Validate emitted output strictly against Zod schema
+      const validated = WorkflowOutputSchema.parse(runResult.result);
+      return {
+        ...(validated as ChatResponsePayload),
+        active_model: resolveCommerceModel(request.model),
+      };
+    } catch (err: any) {
+      // Upstream LLM timeout or 429 rate limit failover to deterministic local reasoner
+      const proposal = runLocalReasoner(request.message);
+      const fallbackAmountCents = proposal.toolCall.args.amountUsd
+        ? Math.round(proposal.toolCall.args.amountUsd * 100)
+        : request.budget_cap_cents || 5000;
+
+      const fallbackQuery = this.extractSearchQuery(request.message);
+      const discoverResult = await this.executeDiscoverWorkflow({
+        query: fallbackQuery,
+        budget_cap_cents: fallbackAmountCents,
+        trace: [
+          `[Circuit Breaker Fallback] Upstream LLM unavailable (${err?.message || 'timeout/429'}). Seamlessly switched to deterministic LocalReasoner proposal: ${proposal.toolCall.toolName}`,
+        ],
+      });
+
+      return {
+        ...discoverResult,
+        active_model: 'local-financial-reasoner-v1',
+      };
     }
-
-    // Validate emitted output strictly against Zod schema
-    const validated = WorkflowOutputSchema.parse(runResult.result);
-    return {
-      ...(validated as ChatResponsePayload),
-      active_model: resolveCommerceModel(request.model),
-    };
   }
 
   // --- Sub-Workflows Executed within the Workflow DAG ---

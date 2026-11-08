@@ -967,7 +967,7 @@ export type AcpAddress = z.infer<typeof AcpAddressSchema>;
 
 export const AcpCheckoutSessionSchema = z.object({
   id: z.string(),
-  status: z.enum(['created', 'in_progress', 'ready_for_payment', 'completed', 'canceled']).default('created'),
+  status: z.enum(['created', 'in_progress', 'ready_for_payment', 'not_ready_for_payment', 'completed', 'canceled']).default('created'),
   cart: AcpCartPayloadSchema,
   shipping_address: AcpAddressSchema.optional(),
   billing_address: AcpAddressSchema.optional(),
@@ -4544,3 +4544,23 @@ export const CommonMarkContentSchema = z.string().refine(
   (content) => !/<[a-z][\s\S]*>/i.test(content),
   { message: 'Raw HTML tags are prohibited in CommonMark content' }
 );
+
+/**
+ * ACP RFC 9535 Compliant Conversational Message Error Schema
+ */
+export const AcpMessageErrorSchema = z.object({
+  type: z.literal('error').default('error'),
+  code: z.enum([
+    'invalid',
+    'out_of_stock',
+    'address_unsupported',
+    'three_ds_required',
+    'declined',
+    'missing',
+    'expired',
+  ]),
+  message: z.string(),
+  param: z.string().regex(/^\$\.[a-zA-Z0-9_.[\]]+$/, 'Must be a valid RFC 9535 JSONPath starting with $.'),
+});
+
+export type AcpMessageError = z.infer<typeof AcpMessageErrorSchema>;

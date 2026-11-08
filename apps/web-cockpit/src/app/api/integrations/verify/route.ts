@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export async function GET() {
-  const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
 
   try {
     const res = await fetch(`${orchestratorUrl}/api/integrations/verify`, {

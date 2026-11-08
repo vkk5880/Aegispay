@@ -9,8 +9,9 @@
  */
 
 import { useState, useRef, useCallback } from 'react';
+import { getApiBaseUrl } from '@/lib/utils';
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? '';
+const API = getApiBaseUrl();
 
 export interface PriceLockPayload {
   product_id: string;

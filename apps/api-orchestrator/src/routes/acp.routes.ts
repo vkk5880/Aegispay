@@ -150,6 +150,11 @@ interface StoredEnhancedOrder {
 
 const ordersStore = new Map<string, StoredEnhancedOrder>();
 
+function sanitizeMarkdown(text: string): string {
+  if (!text) return '';
+  return text.replace(/<[^>]*>/g, '');
+}
+
 /**
  * Strips sensitive/write-only fields before returning checkout session to clients
  * Complies with rfc.affiliate_attribution.md privacy-by-design requirements.
@@ -250,7 +255,10 @@ function toPublicCheckoutSession(session: StoredCheckoutSession) {
       ],
       fulfillment_types: ['shipping'],
     },
-    messages: [],
+    messages: ((session as any).messages || []).map((m: any) => ({
+      ...m,
+      message: typeof m.message === 'string' ? sanitizeMarkdown(m.message) : m.message,
+    })),
     links: [
       {
         rel: 'self',
@@ -417,6 +425,15 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
         code: 'unsupported_api_version',
         message: `API version '${apiVersion}' is not supported.`,
         supported_versions: SUPPORTED_API_VERSIONS,
+      });
+    }
+
+    const rawIdempHeader = request.headers['idempotency-key'];
+    if (rawIdempHeader !== undefined && typeof rawIdempHeader === 'string' && rawIdempHeader.trim().length === 0) {
+      return reply.status(400).send({
+        type: 'invalid_request',
+        code: 'invalid_idempotency_key',
+        message: 'Idempotency-Key must not be empty if provided',
       });
     }
 
@@ -770,11 +787,11 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
 
-    if (session.status === 'completed') {
-      return reply.status(409).send({
+    if (session.status === 'completed' || session.status === 'cancelled') {
+      return reply.status(405).send({
         type: 'invalid_request',
-        code: 'session_already_completed',
-        message: `Checkout session '${id}' is already completed and cannot be cancelled`,
+        code: 'method_not_allowed',
+        message: `Checkout session '${id}' is in state '${session.status}' and cannot be cancelled`,
       });
     }
 

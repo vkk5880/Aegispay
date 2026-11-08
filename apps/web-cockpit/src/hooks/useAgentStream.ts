@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export interface ScoredProduct {
   title: string;
@@ -96,7 +97,7 @@ export function useAgentStream(query: string | null) {
     setStatus('');
     setStreamError(null);
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? '';
+    const apiUrl = getApiBaseUrl();
 
     const runFallbackSearch = async (reason: string) => {
       if (usedFallback || !isActive) return;

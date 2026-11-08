@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { ChatResponsePayload } from '@aegispay/shared-types';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export async function POST(req: Request) {
-  const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
   const body = await req.json();
 
   try {

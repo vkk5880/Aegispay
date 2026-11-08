@@ -317,3 +317,22 @@ test('Subagent 3B: Mastra Commerce Workflow DAG properly wires all 4 pipeline st
   const factoryWf = createCommercePipelineWorkflow(service);
   assert.ok(factoryWf);
 });
+
+test('Checkpoint 5.1-5.3: processMessage fails over cleanly to local-reasoner on simulated error', async () => {
+  const service = new ShoppingAssistantService();
+  // Override chatWorkflow.createRun to simulate an upstream 429/error
+  (service as any).chatWorkflow.createRun = async () => ({
+    start: async () => {
+      throw new Error('429 Rate Limit Exceeded: Upstream LLM provider quota exhausted');
+    },
+  });
+
+  const res = await service.processMessage({
+    message: 'pay $150 to Acme for electronics',
+  });
+
+  assert.ok(res);
+  assert.strictEqual(res.active_model, 'local-financial-reasoner-v1');
+  assert.ok(res.products && res.products.length > 0);
+  assert.ok(res.thought_trace && res.thought_trace.some((t: string) => t.includes('[Circuit Breaker Fallback]')));
+});

@@ -3,9 +3,13 @@ node_modules
 dist
 .next
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 coverage
+*.tsbuildinfo
+.DS_Store
+.vercel
 .reference-repos/
 .task_prompt_tmp.txt
 paypal-agentic-cockpit-main/
