@@ -4565,3 +4565,114 @@ export const AcpMessageErrorSchema = z.object({
 });
 
 export type AcpMessageError = z.infer<typeof AcpMessageErrorSchema>;
+
+/**
+ * Category Smuggling & Prohibited Asset Interception Schemas
+ */
+export const ProhibitedAssetTokenSchema = z.enum([
+  'gift card',
+  'gift_card',
+  'prepaid',
+  'prepaid debit',
+  'crypto',
+  'cryptocurrency',
+  'bitcoin',
+  'usdt',
+  'wire transfer',
+  'wire',
+  'casino',
+  'gambling',
+  'lottery',
+  'reloadable voucher',
+]);
+
+export const CategorySmugglingItemSchema = z.object({
+  id: z.string().optional(),
+  title: z.string(),
+  description: z.string().optional().default(''),
+  category: z.string().optional().default(''),
+  price_cents: z.number().int().nonnegative(),
+});
+
+export const CategorySmugglingCheckResultSchema = z.object({
+  is_smuggled: z.boolean(),
+  verdict: z.enum(['ALLOW', 'HOLD', 'BLOCK']),
+  detected_tokens: z.array(z.string()),
+  reason: z.string(),
+  scanned_items_count: z.number().int().nonnegative(),
+});
+
+export type CategorySmugglingItem = z.infer<typeof CategorySmugglingItemSchema>;
+export type CategorySmugglingCheckResult = z.infer<typeof CategorySmugglingCheckResultSchema>;
+
+/**
+ * Visa Compelling Evidence 3.0 (Rule 10.4) Evidence Schemas
+ */
+export const VisaCe3QualifyingTransactionSchema = z.object({
+  order_id: z.string(),
+  settled_at: z.string(),
+  amount_cents: z.number().int().positive(),
+  currency: z.string().default('USD'),
+  matched_qualifiers: z.array(z.enum([
+    'IP_ADDRESS',
+    'DEVICE_FINGERPRINT',
+    'SHIPPING_ADDRESS',
+    'CUSTOMER_ACCOUNT_ID'
+  ])),
+});
+
+export const VisaCe3EvidenceSchema = z.object({
+  dispute_id: z.string(),
+  buyer_id: z.string(),
+  eligible: z.boolean(),
+  reason: z.string().optional(),
+  qualifying_transactions: z.array(VisaCe3QualifyingTransactionSchema),
+  correlation_confidence: z.number().min(0).max(100),
+  rebuttal_brief: z.string().optional(),
+  exhibit_hashes: z.array(z.object({
+    name: z.string(),
+    sha256: z.string().length(64),
+  })).optional(),
+});
+
+export type VisaCe3QualifyingTransaction = z.infer<typeof VisaCe3QualifyingTransactionSchema>;
+export type VisaCe3Evidence = z.infer<typeof VisaCe3EvidenceSchema>;
+
+/**
+ * Pure TypeScript Perceptual Hash (dHash) & Deduplication Schemas
+ */
+export const PerceptualHashResultSchema = z.object({
+  sha256: z.string().length(64),
+  dHash: z.string().regex(/^[0-9a-fA-F]{16}$/, 'Must be a 64-bit hexadecimal dHash string'),
+  is_duplicate: z.boolean(),
+  hamming_distance: z.number().int().nonnegative().optional(),
+  matched_claim_id: z.string().optional(),
+});
+
+export type PerceptualHashResult = z.infer<typeof PerceptualHashResultSchema>;
+
+/**
+ * Group Expense & Multi-Party Cart Split Schemas
+ */
+export const GroupSplitParticipantSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  weight: z.number().positive().optional().default(1),
+});
+
+export const GroupExpenseSplitSchema = z.object({
+  total_cents: z.number().int().positive(),
+  tip_cents: z.number().int().nonnegative().default(0),
+  tax_cents: z.number().int().nonnegative().default(0),
+  participants: z.array(GroupSplitParticipantSchema).min(1),
+  shares: z.array(z.object({
+    participant_id: z.string(),
+    share_cents: z.number().int().nonnegative(),
+    percentage: z.number().min(0).max(100),
+  })),
+  rounding_residual_cents: z.number().int().default(0),
+});
+
+export type GroupSplitParticipant = z.infer<typeof GroupSplitParticipantSchema>;
+export type GroupExpenseSplit = z.infer<typeof GroupExpenseSplitSchema>;
+

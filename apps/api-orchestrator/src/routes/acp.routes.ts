@@ -415,6 +415,59 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * GET /.well-known/ucp.json
+   * Universal Commerce Protocol (UCP) discovery endpoint.
+   */
+  fastify.get('/.well-known/ucp.json', async (request, reply) => {
+    reply.header('Content-Type', 'application/json');
+    reply.header('Cache-Control', 'public, max-age=3600');
+    return reply.send({
+      ucp_version: '1.0',
+      provider: 'AegisPay Autonomous Commerce',
+      endpoints: {
+        acp_manifest: '/.well-known/acp.json',
+        agent_card: '/.well-known/agent-card.json',
+        openrpc: '/.well-known/openrpc.json',
+        llms_txt: '/llms.txt',
+        checkout_sessions: '/checkout_sessions',
+        mcp_gateway: '/mcp',
+        feeds: '/feeds',
+      },
+      supported_currencies: ['USD'],
+      payment_rails: ['paypal_vault_v3', 'http402_hmac_escrow'],
+      custodian_policy: {
+        model: 'deterministic_zero_math_hallucination',
+        escrow_supported: true,
+        dispute_sla_guarantee: true,
+      },
+    });
+  });
+
+  /**
+   * GET /llms.txt
+   * Standardized machine-readable agent guide and capability directory.
+   */
+  fastify.get('/llms.txt', async (request, reply) => {
+    reply.header('Content-Type', 'text/plain; charset=utf-8');
+    reply.header('Cache-Control', 'public, max-age=3600');
+    const llmsTxtContent = [
+      '# AegisPay Agentic Commerce Cockpit',
+      '',
+      '> Autonomous merchant and buyer commerce cockpit with PayPal Vault v3, Fastify ACP, and deterministic spend firewalls.',
+      '',
+      '## API & MCP Capabilities',
+      '- ACP Checkout Sessions: /checkout_sessions',
+      '- Universal Commerce Discovery: /.well-known/ucp.json',
+      '- Agent Discovery Card: /.well-known/agent-card.json',
+      '- MCP Tool Gateway: /mcp (Tools: optimize_channel3_multi_merchant_basket, authorize_conditional_escrow_order, submit_dispute_evidence_bundle)',
+      '- HTTP 402 Paywall & Receipts: /api/buyer/capture',
+      '- Dispute Forensics: /api/disputes/:id/evidence',
+      '',
+    ].join('\n');
+    return reply.send(llmsTxtContent);
+  });
+
+  /**
    * Shared Session Creation Handler
    */
   const handleSessionCreate = async (request: any, reply: any) => {

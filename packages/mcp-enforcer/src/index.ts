@@ -5,6 +5,8 @@ export * from './custom-tools.js';
 export * from './acp-manifest.js';
 export * from './audit-chain.js';
 export * from './server.js';
+export * from './category-smuggling-detector.js';
+export * from './monotonic-risk-evaluator.js';
 
 // Modular Tool Clean Exports (handlers, Zod schemas, validators, and types)
 export * from './tools/catalog-search.js';

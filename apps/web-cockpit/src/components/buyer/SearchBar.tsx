@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, X, Loader2, ArrowRight } from 'lucide-react';
+import { VoiceSearchButton } from './VoiceSearchButton';
 
 export interface SearchBarProps {
   onSearch: (query: string) => void;
@@ -141,6 +142,15 @@ export function SearchBar({
             <X className="w-3.5 h-3.5" />
           </button>
         )}
+
+        <VoiceSearchButton
+          onTranscript={(spokenText) => {
+            setValue(spokenText);
+            triggerSearch(spokenText);
+          }}
+          disabled={loading}
+          className="mr-1"
+        />
 
         <button
           type="submit"

@@ -1,5 +1,7 @@
 import { ForensicsFactors, DisputeMatrixDecision, defaultDisputeMatrixService } from './dispute-matrix.js';
 import { defaultPayPalClient, PayPalApimaticClient } from './paypal-apimatic.js';
+import { evaluatePerceptualDuplicate, KnownEvidenceRecord } from './image-hasher.js';
+import { PerceptualHashResult } from '@aegispay/shared-types';
 
 export interface BoundingBoxCoordinates {
   ymin: number;
@@ -465,6 +467,89 @@ export class DisputeForensicsService {
       links,
       recommendedAction,
       matrixDecision,
+    };
+  }
+
+  /**
+   * Computes pure TypeScript perceptual hash (dHash) and checks against existing dispute claim records.
+   * Adheres strictly to Guardrail 1 (Zero C++ native binaries).
+   */
+  evaluateImagePerceptualDuplicate(
+    buffer: Buffer | Uint8Array,
+    knownRecords: KnownEvidenceRecord[] = [],
+    hammingThreshold: number = 10
+  ): PerceptualHashResult {
+    return evaluatePerceptualDuplicate(buffer, knownRecords, hammingThreshold);
+  }
+
+  /**
+   * Lost-in-Transit Fee Avoidance Guardrail:
+   * When carrier telemetry confirms package was genuinely lost by the courier,
+   * immediately accepts the claim via PayPal Disputes API to save the $15.00+ network penalty fee.
+   */
+  async handleLostInTransitFeeAvoidance(
+    disputeId: string,
+    carrierStatus: string
+  ): Promise<{ handled: boolean; actionTaken: string; feeAvoided: boolean }> {
+    const isLost = carrierStatus.toUpperCase().includes('LOST') || carrierStatus.toUpperCase() === 'LOST_IN_TRANSIT';
+    if (!isLost) {
+      return {
+        handled: false,
+        actionTaken: 'NO_ACTION_CARRIER_NOT_LOST',
+        feeAvoided: false,
+      };
+    }
+
+    await this.paypalClient.acceptDisputeClaim(
+      disputeId,
+      'Automated claim concession under Lost-in-Transit Fee Avoidance policy.'
+    );
+
+    return {
+      handled: true,
+      actionTaken: 'CLAIM_ACCEPTED_FEE_AVOIDED',
+      feeAvoided: true,
+    };
+  }
+
+  /**
+   * Post-Loss Delivered Revenue Recovery:
+   * Scans a previously closed/lost dispute where carrier tracking subsequently flipped to DELIVERED.
+   * Generates recovery demand record and settlement payload.
+   */
+  scanPostLossDeliveredRecovery(
+    disputeId: string,
+    buyerEmail: string,
+    orderId: string,
+    amountCents: number,
+    latestTrackingStatus: string
+  ): { recoveryEligible: boolean; demandLetter?: string; settlementPayload?: Record<string, any> } {
+    const isDelivered = latestTrackingStatus.toUpperCase() === 'DELIVERED';
+    if (!isDelivered) {
+      return { recoveryEligible: false };
+    }
+
+    const demandLetter = [
+      `POST-DISPUTE REVENUE RECOVERY DEMAND`,
+      `To: ${buyerEmail}`,
+      `Order: ${orderId} | Original Dispute: ${disputeId}`,
+      `Our logistics telemetry confirms that shipment tracking for Order ${orderId} has updated to DELIVERED.`,
+      `Because dispute settlement previously released funds while goods have now been successfully received,`,
+      `a commercial recovery balance of $${(amountCents / 100).toFixed(2)} is outstanding.`,
+      `Please remit settlement via PayPal to resolve your account standing.`,
+    ].join('\n');
+
+    return {
+      recoveryEligible: true,
+      demandLetter,
+      settlementPayload: {
+        dispute_id: disputeId,
+        buyer_email: buyerEmail,
+        order_id: orderId,
+        amount_cents: amountCents,
+        tracking_status: 'DELIVERED',
+        settlement_link: `https://www.paypal.com/paypalme/merchant/${(amountCents / 100).toFixed(2)}USD`,
+      },
     };
   }
 }
