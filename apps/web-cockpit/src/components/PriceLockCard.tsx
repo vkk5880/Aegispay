@@ -1,1 +1,1 @@
-export { PriceLockCard, type PriceLockPayload, type PriceLockCardProps } from './buyer/PriceLockCard';
+export { PriceLockCard, type PriceLockPayload, type PriceLockCardProps, type AutopilotMode } from './buyer/PriceLockCard';

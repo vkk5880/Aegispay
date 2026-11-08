@@ -390,3 +390,27 @@ test('ExplainDrawer: SVG radar coordinate calculation handles zero, 1.0, null, a
   const polygonStr = testPoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
   assert.equal(polygonStr.includes('NaN'), false);
 });
+
+test('Phase 4: Proactive 1-Tap Recovery Pills & Variant Selection', async () => {
+  const { inferRecoveryPillsFromWarning } = await import('./ChatFlow.js');
+
+  // 1. Shipping threshold warning
+  const shippingPills = inferRecoveryPillsFromWarning('Cart is $8 away from free shipping');
+  assert.equal(shippingPills.length, 1);
+  assert.equal(shippingPills[0].type, 'free_shipping');
+  assert.ok(shippingPills[0].label.includes('$8'));
+
+  // 2. Low stock warning
+  const stockPills = inferRecoveryPillsFromWarning('Item low in stock from merchant');
+  assert.equal(stockPills.length, 1);
+  assert.equal(stockPills[0].type, 'substitute');
+
+  // 3. Variant disambiguation warning
+  const variantPills = inferRecoveryPillsFromWarning('Size option required before checkout');
+  assert.equal(variantPills.length, 1);
+  assert.equal(variantPills[0].type, 'variant');
+
+  // 4. Safe fallback on empty or undefined
+  assert.deepEqual(inferRecoveryPillsFromWarning(undefined), []);
+  assert.deepEqual(inferRecoveryPillsFromWarning(''), []);
+});

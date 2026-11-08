@@ -450,3 +450,46 @@ test('Cryptographic Random UUID Generation: Verifies UUID format across mock gen
   assert.equal(/^[0-9a-f]{8}$/.test(voucherId.split('_')[2]), true);
   assert.equal(/^[0-9a-f]{8}$/.test(captureId.split('_')[3]), true);
 });
+
+test('Phase 3: INGEST_RECORD_BATCH worker message contract and batch record ingestion', async () => {
+  const sampleBatch: AnonymizedDisputeRecord[] = [
+    {
+      paypal_dispute_id: 'PP-D-9001',
+      dispute_reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+      dispute_state: 'REQUIRED_ACTION',
+      dispute_amount_cents: 6500,
+      liability_score_l: 0.75,
+      abuse_risk_score_r: 0.15,
+      exif_tamper_flag: false,
+      selected_tier_action: 'TIER1_REFUND',
+      seller_response_due_date: new Date().toISOString(),
+    },
+    {
+      paypal_dispute_id: 'PP-D-9002',
+      dispute_reason: 'UNAUTHORISED',
+      dispute_state: 'UNDER_REVIEW',
+      dispute_amount_cents: 12000,
+      liability_score_l: 0.35,
+      abuse_risk_score_r: 0.85,
+      exif_tamper_flag: true,
+      selected_tier_action: 'TIER4_CONTEST_PDF',
+      seller_response_due_date: new Date().toISOString(),
+    },
+  ];
+
+  // 1. Validate worker message contract
+  const validBatchMsg = {
+    id: 'msg_batch_01',
+    action: 'INGEST_RECORD_BATCH',
+    payload: { records: sampleBatch },
+  };
+  assert.equal(validateWorkerMessage(validBatchMsg), true);
+
+  // 2. Dispatch batch ingestion
+  const response = await handleWorkerMessage(null, validBatchMsg, []);
+  assert.equal(response.success, true);
+  assert.equal(response.action, 'INGEST_RECORD_BATCH');
+  if (response.success) {
+    assert.equal(response.data.ingested_count, 2);
+  }
+});

@@ -8,7 +8,11 @@ import {
   TrendingDown,
   CheckCircle2,
   RotateCcw,
+  Zap,
+  Sliders,
 } from 'lucide-react';
+
+export type AutopilotMode = 'ASK_BEFORE_PAYING' | 'AUTO_EXECUTE_UNDER_CAP';
 
 export interface PriceLockPayload {
   lock_id: string;
@@ -27,6 +31,10 @@ export interface PriceLockCardProps {
   onExecuteCheckout?: () => Promise<void> | void;
   onVoidLock?: () => Promise<void> | void;
   className?: string;
+  defaultAutopilotMode?: AutopilotMode;
+  maxSpendCapCents?: number;
+  currentSpendCents?: number;
+  onAutopilotModeChange?: (mode: AutopilotMode) => void;
 }
 
 export function PriceLockCard({
@@ -34,12 +42,29 @@ export function PriceLockCard({
   onExecuteCheckout,
   onVoidLock,
   className = '',
+  defaultAutopilotMode = 'ASK_BEFORE_PAYING',
+  maxSpendCapCents = 50000,
+  currentSpendCents,
+  onAutopilotModeChange,
 }: PriceLockCardProps) {
   const [timeLeft, setTimeLeft] = useState<string>('71:59:59');
   const [isExpired, setIsExpired] = useState<boolean>(false);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [status, setStatus] = useState<'LOCKED' | 'CAPTURED' | 'VOIDED'>('LOCKED');
+  const [autopilotMode, setAutopilotMode] = useState<AutopilotMode>(defaultAutopilotMode);
+  const [showDrawer, setShowDrawer] = useState<boolean>(false);
   const mountedRef = useRef<boolean>(true);
+
+  const handleModeSwitch = (mode: AutopilotMode) => {
+    setAutopilotMode(mode);
+    if (onAutopilotModeChange) {
+      onAutopilotModeChange(mode);
+    }
+  };
+
+  const capCents = maxSpendCapCents;
+  const spentCents = currentSpendCents !== undefined ? currentSpendCents : priceLock.locked_price_cents;
+  const progressPct = Math.min(100, Math.max(0, Math.round((spentCents / capCents) * 100)));
 
   useEffect(() => {
     mountedRef.current = true;
@@ -189,6 +214,85 @@ export function PriceLockCard({
       <p className="text-xs text-slate-300 mb-3 leading-snug">
         Price protected via PayPal Orders v2 Two-Phase Commit Escrow at <strong>{priceLock.merchant_domain}</strong>.
       </p>
+
+      {/* Phase 5: Autopilot Spend Governance Drawer & Spend Cap Bar */}
+      <div className="mt-3 pt-3 border-t border-cyan-500/15 mb-3">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[11px] font-mono text-cyan-300 font-semibold flex items-center gap-1.5">
+            <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Autopilot Spend Governance</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowDrawer(!showDrawer)}
+            className="text-[10px] font-mono text-slate-400 hover:text-cyan-300 transition-colors cursor-pointer"
+          >
+            {showDrawer ? '[ Hide Controls ]' : '[ Configure Cap ]'}
+          </button>
+        </div>
+
+        {/* Spend Cap Progress Bar */}
+        <div className="mb-2.5">
+          <div className="flex justify-between text-[10px] font-mono text-slate-400 mb-1">
+            <span>Spend Cap: {formatPrice(spentCents)} / {formatPrice(capCents)}</span>
+            <span>{progressPct}% Allocated</span>
+          </div>
+          <div
+            role="progressbar"
+            aria-valuenow={progressPct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Agent spend cap utilization"
+            className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden"
+          >
+            <div
+              className={`h-full transition-all duration-300 ${
+                progressPct > 90 ? 'bg-red-500' : progressPct > 70 ? 'bg-amber-400' : 'bg-gradient-to-r from-cyan-500 to-blue-500'
+              }`}
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+        </div>
+
+        {/* High-Trust Autopilot Mode Toggles */}
+        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Autopilot execution mode">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={autopilotMode === 'ASK_BEFORE_PAYING'}
+            onClick={() => handleModeSwitch('ASK_BEFORE_PAYING')}
+            className={`p-2 rounded-xl text-left transition-all border text-[11px] font-mono cursor-pointer ${
+              autopilotMode === 'ASK_BEFORE_PAYING'
+                ? 'bg-cyan-950/60 text-cyan-200 border-cyan-500/60 ring-1 ring-cyan-500/30'
+                : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+          >
+            <div className="font-bold flex items-center gap-1 mb-0.5 text-white">
+              <ShieldCheck className="w-3 h-3 text-cyan-400 shrink-0" />
+              <span>Ask Before Paying</span>
+            </div>
+            <p className="text-[9px] text-slate-400 leading-tight">Explicit 1-click buyer confirmation required</p>
+          </button>
+
+          <button
+            type="button"
+            role="radio"
+            aria-checked={autopilotMode === 'AUTO_EXECUTE_UNDER_CAP'}
+            onClick={() => handleModeSwitch('AUTO_EXECUTE_UNDER_CAP')}
+            className={`p-2 rounded-xl text-left transition-all border text-[11px] font-mono cursor-pointer ${
+              autopilotMode === 'AUTO_EXECUTE_UNDER_CAP'
+                ? 'bg-emerald-950/60 text-emerald-200 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
+            }`}
+          >
+            <div className="font-bold flex items-center gap-1 mb-0.5 text-white">
+              <Zap className="w-3 h-3 text-emerald-400 shrink-0" />
+              <span>Auto-Execute Under Cap</span>
+            </div>
+            <p className="text-[9px] text-slate-400 leading-tight">Auto-buy if price ≤ cap and trust ≥ 80%</p>
+          </button>
+        </div>
+      </div>
 
       {/* Actions */}
       {status === 'LOCKED' && (

@@ -17,7 +17,7 @@ export interface AnonymizedDisputeRecord {
 /**
  * Web Worker Message Protocol Definitions
  */
-export type DuckDBWorkerAction = 'QUERY' | 'INGEST' | 'AGGREGATE' | 'CLEAR_CACHE';
+export type DuckDBWorkerAction = 'QUERY' | 'INGEST' | 'INGEST_RECORD_BATCH' | 'AGGREGATE' | 'CLEAR_CACHE';
 
 export interface DuckDBQueryPayload {
   query: string;
@@ -84,7 +84,7 @@ export function validateWorkerMessage(message: unknown): message is DuckDBWorker
     return false;
   }
 
-  const validActions: DuckDBWorkerAction[] = ['QUERY', 'INGEST', 'AGGREGATE', 'CLEAR_CACHE'];
+  const validActions: DuckDBWorkerAction[] = ['QUERY', 'INGEST', 'INGEST_RECORD_BATCH', 'AGGREGATE', 'CLEAR_CACHE'];
   if (!validActions.includes(msg.action)) {
     return false;
   }
@@ -101,7 +101,7 @@ export function validateWorkerMessage(message: unknown): message is DuckDBWorker
     }
   }
 
-  if (msg.action === 'INGEST') {
+  if (msg.action === 'INGEST' || msg.action === 'INGEST_RECORD_BATCH') {
     if (!msg.payload || typeof msg.payload !== 'object' || !Array.isArray(msg.payload.records)) {
       return false;
     }
@@ -530,7 +530,8 @@ export async function handleWorkerMessage(
           executionTimeMs: Date.now() - startTime,
         };
       }
-      case 'INGEST': {
+      case 'INGEST':
+      case 'INGEST_RECORD_BATCH': {
         const payload = message.payload as DuckDBIngestPayload;
         const projected = payload.records.map(projectOptimizedDisputeRecord);
         return {

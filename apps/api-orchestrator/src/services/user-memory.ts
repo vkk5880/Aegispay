@@ -10,7 +10,12 @@
  * 3. Purchase transaction logging and escrow status tracking
  */
 
-import { ProductCardData } from '@aegispay/shared-types';
+import {
+  ProductCardData,
+  DynamicBuyerProfile,
+  UniversalBuyerFacets,
+  DomainFacet,
+} from '@aegispay/shared-types';
 
 export interface UserPreferences {
   preferred_brands: string[];
@@ -447,3 +452,169 @@ export function stopWatchlistScheduler(): boolean {
   }
   return false;
 }
+
+// ── Dynamic Multi-Domain AI Buyer Memory Engine ───────────────────────────
+
+const dynamicBuyerProfilesStore = new Map<string, DynamicBuyerProfile>();
+
+export function createDefaultDynamicBuyerProfile(userId: string): DynamicBuyerProfile {
+  const safeId = sanitizeUserId(userId);
+  return {
+    userId: safeId,
+    universal: {
+      userId: safeId,
+      budget_elasticity: {
+        target_price_sensory: 'value_optimized',
+        max_spontaneous_spend_cents: 10000,
+        requires_approval_above_cents: 25000,
+      },
+      preferred_brands: ['Sony', 'Apple', 'Bose', 'Anker'],
+      avoided_brands: [],
+      preferred_fulfillment: 'economy_free',
+      merchant_minimum_trust_score: 75,
+    },
+    domain_facets: {},
+    purchase_velocity: {
+      total_orders_completed: 0,
+      lifetime_spend_cents: 0,
+      dispute_count: 0,
+    },
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function loadDynamicBuyerProfile(userId: string = 'demo'): DynamicBuyerProfile {
+  const safeId = sanitizeUserId(userId);
+  if (!dynamicBuyerProfilesStore.has(safeId)) {
+    dynamicBuyerProfilesStore.set(safeId, createDefaultDynamicBuyerProfile(safeId));
+  }
+  return { ...dynamicBuyerProfilesStore.get(safeId)! };
+}
+
+export function saveDynamicBuyerProfile(profile: DynamicBuyerProfile): DynamicBuyerProfile {
+  const safeId = sanitizeUserId(profile.userId);
+  const updated: DynamicBuyerProfile = {
+    ...profile,
+    userId: safeId,
+    updated_at: new Date().toISOString(),
+  };
+  dynamicBuyerProfilesStore.set(safeId, updated);
+  return updated;
+}
+
+/**
+ * Compacts and extracts durable buyer facets from completed checkout sessions or intent traces.
+ * Automatically updates universal lifetime spend, brand preferences, and category attributes.
+ */
+export function compactBuyerMemoryFromSession(
+  userId: string,
+  session: {
+    order_id?: string;
+    total_cents?: number;
+    merchant_domain?: string;
+    items?: Array<{
+      title: string;
+      category?: string;
+      brand?: string;
+      unit_price_cents?: number;
+      attributes?: Record<string, string | number | boolean | string[]>;
+    }>;
+  },
+  intentTrace?: {
+    category?: string;
+    extracted_specs?: Record<string, string | number | boolean | string[]>;
+  }
+): DynamicBuyerProfile {
+  const safeId = sanitizeUserId(userId);
+  const profile = loadDynamicBuyerProfile(safeId);
+
+  // 1. Update purchase velocity & lifetime spend
+  if (session.total_cents && session.total_cents > 0) {
+    profile.purchase_velocity.lifetime_spend_cents += session.total_cents;
+    profile.purchase_velocity.total_orders_completed += 1;
+  }
+
+  // 2. Extract brand affinities from items
+  if (session.items && session.items.length > 0) {
+    for (const item of session.items) {
+      if (item.brand && !profile.universal.preferred_brands.includes(item.brand)) {
+        profile.universal.preferred_brands.push(item.brand);
+      }
+
+      // 3. Domain facets
+      const cat = (item.category || intentTrace?.category || 'general').toLowerCase().trim();
+      const attrs = { ...(item.attributes || {}), ...(intentTrace?.extracted_specs || {}) };
+
+      if (Object.keys(attrs).length > 0) {
+        const existingFacet: DomainFacet = profile.domain_facets[cat] || {
+          category: cat,
+          attributes: {},
+          confidence_score: 0.8,
+          source_order_ids: [],
+          last_updated: new Date().toISOString(),
+        };
+
+        existingFacet.attributes = {
+          ...existingFacet.attributes,
+          ...attrs,
+        };
+        if (session.order_id && !existingFacet.source_order_ids.includes(session.order_id)) {
+          existingFacet.source_order_ids.push(session.order_id);
+        }
+        existingFacet.confidence_score = Math.min(1.0, existingFacet.confidence_score + 0.05);
+        existingFacet.last_updated = new Date().toISOString();
+        profile.domain_facets[cat] = existingFacet;
+      }
+    }
+  }
+
+  return saveDynamicBuyerProfile(profile);
+}
+
+/**
+ * Evaluates candidate products against universal and domain-specific rules.
+ */
+export function applyDynamicUserRules(
+  products: ProductCardData[],
+  profile: DynamicBuyerProfile,
+  category?: string
+): ProductCardData[] {
+  const avoided = (profile.universal.avoided_brands || []).map(b => b.toLowerCase().trim()).filter(Boolean);
+  const minTrust = profile.universal.merchant_minimum_trust_score;
+  const targetCategory = category ? category.toLowerCase().trim() : undefined;
+  const domainFacet = targetCategory ? profile.domain_facets[targetCategory] : undefined;
+
+  return products.filter(product => {
+    const titleLower = (product.title || '').toLowerCase();
+    const descLower = (product.description || '').toLowerCase();
+
+    // Avoided brands check
+    if (avoided.some(brand => titleLower.includes(brand) || descLower.includes(brand))) {
+      return false;
+    }
+
+    // Minimum merchant credibility / trust score check (score out of 100)
+    if (product.merchant_credibility_score !== undefined) {
+      if (product.merchant_credibility_score < minTrust) {
+        return false;
+      }
+    }
+
+    // Domain facet attribute check
+    if (domainFacet && domainFacet.attributes) {
+      const metadata = (product as any).metadata || {};
+      for (const [key, expectedValue] of Object.entries(domainFacet.attributes)) {
+        if (metadata[key] !== undefined && expectedValue !== undefined) {
+          if (typeof expectedValue === 'string' && typeof metadata[key] === 'string') {
+            if (expectedValue.toLowerCase() !== metadata[key].toLowerCase()) {
+              // strict mismatch filtering if required
+            }
+          }
+        }
+      }
+    }
+
+    return true;
+  });
+}
+

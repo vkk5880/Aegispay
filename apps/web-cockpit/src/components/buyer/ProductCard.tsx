@@ -31,6 +31,13 @@ export function ProductCard({
   const [added, setAdded] = useState(false);
   const [imgError, setImgError] = useState(false);
 
+  // Optional Variant Options (Sizes / Colors / Models)
+  const variants: string[] =
+    Array.isArray((product as any).variants)
+      ? (product as any).variants
+      : (product as any).options?.sizes || (product as any).options?.colors || [];
+  const [selectedVariant, setSelectedVariant] = useState<string>(variants[0] || '');
+
   const formatPrice = (cents: number) => {
     return (cents / 100).toLocaleString('en-US', {
       style: 'currency',
@@ -40,7 +47,7 @@ export function ProductCard({
 
   const handleAdd = () => {
     if (onAddToCart) {
-      onAddToCart(product);
+      onAddToCart(selectedVariant ? { ...product, title: `${product.title} (${selectedVariant})` } : product);
       setAdded(true);
       setTimeout(() => setAdded(false), 2000);
     }
@@ -180,6 +187,31 @@ export function ProductCard({
             </span>
           )}
         </div>
+
+        {/* Phase 4: Selectable Variant Chips (Sizes / Colors) */}
+        {variants.length > 0 && (
+          <div className="mb-3.5" role="group" aria-label="Product variant options">
+            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block mb-1.5 font-semibold">
+              Select Option:
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {variants.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setSelectedVariant(v)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-mono transition-all cursor-pointer ${
+                    selectedVariant === v
+                      ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/60 font-bold shadow-sm'
+                      : 'bg-slate-800/60 text-slate-400 border border-slate-700/60 hover:text-white'
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Embedded Community Sentiment Accordion */}
         <div className="mb-4">

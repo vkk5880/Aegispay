@@ -1,13 +1,59 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Sparkles, ArrowRight, CornerDownLeft, RotateCcw } from 'lucide-react';
+import { Search, Sparkles, ArrowRight, CornerDownLeft, RotateCcw, AlertTriangle, Zap } from 'lucide-react';
+
+export interface RecoveryPill {
+  label: string;
+  prompt: string;
+  type?: 'free_shipping' | 'stock' | 'substitute' | 'variant' | 'general';
+}
 
 export interface ChatFlowProps {
   onSearch: (query: string) => void;
   disabled?: boolean;
   initialQuery?: string;
   placeholder?: string;
+  messageWarning?: string;
+  recoveryPills?: RecoveryPill[];
+  onSelectRecoveryPill?: (pill: RecoveryPill) => void;
+}
+
+/**
+ * Infers proactive 1-tap recovery pills from ACP MessageWarnings
+ */
+export function inferRecoveryPillsFromWarning(warning?: string): RecoveryPill[] {
+  if (!warning || typeof warning !== 'string') return [];
+  const pills: RecoveryPill[] = [];
+  const lower = warning.toLowerCase();
+
+  if (lower.includes('shipping') || lower.includes('away from free')) {
+    const match = warning.match(/\$(\d+(\.\d{2})?)/);
+    const amount = match ? match[0] : '$8';
+    pills.push({
+      label: `+ Add ${amount} filler item for free shipping`,
+      prompt: `Find a useful filler item under ${amount} to qualify for free shipping`,
+      type: 'free_shipping',
+    });
+  }
+
+  if (lower.includes('low') && (lower.includes('stock') || lower.includes('inventory'))) {
+    pills.push({
+      label: 'Accept alternative seller with verified stock',
+      prompt: 'Show alternative verified sellers with immediate stock',
+      type: 'substitute',
+    });
+  }
+
+  if (lower.includes('size') || lower.includes('option') || lower.includes('variant')) {
+    pills.push({
+      label: 'Disambiguate size / color options',
+      prompt: 'Help me select the best variant for my requirements',
+      type: 'variant',
+    });
+  }
+
+  return pills;
 }
 
 type FlowState = 'IDLE' | 'CLARIFYING' | 'SEARCHING';
@@ -47,6 +93,9 @@ export function ChatFlow({
   disabled,
   initialQuery,
   placeholder = 'Describe what you want to buy (e.g. Sony WH-1000XM5 under $350)...',
+  messageWarning,
+  recoveryPills,
+  onSelectRecoveryPill,
 }: ChatFlowProps) {
   const [flowState, setFlowState] = useState<FlowState>('IDLE');
   const [query, setQuery] = useState('');
@@ -58,6 +107,19 @@ export function ChatFlow({
   const [isEnriching, setIsEnriching] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const effectivePills: RecoveryPill[] =
+    recoveryPills && recoveryPills.length > 0
+      ? recoveryPills
+      : inferRecoveryPillsFromWarning(messageWarning);
+
+  const handlePillClick = (pill: RecoveryPill) => {
+    if (onSelectRecoveryPill) {
+      onSelectRecoveryPill(pill);
+    }
+    setQuery(pill.prompt);
+    onSearch(pill.prompt);
+  };
 
   useEffect(() => {
     if (flowState === 'CLARIFYING' && questions.length > 0) {
@@ -292,6 +354,33 @@ export function ChatFlow({
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      {/* Phase 4: Proactive 1-Tap Recovery Action Pills */}
+      {(messageWarning || effectivePills.length > 0) && (
+        <div className="mt-3 flex flex-col gap-2 animate-fade-in-up" role="region" aria-label="Proactive recommendations">
+          {messageWarning && (
+            <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-500/30 rounded-xl px-3 py-1.5 shadow-sm">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span>{messageWarning}</span>
+            </div>
+          )}
+          {effectivePills.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-0.5">
+              {effectivePills.map((pill, pIdx) => (
+                <button
+                  key={pIdx}
+                  type="button"
+                  onClick={() => handlePillClick(pill)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 hover:border-cyan-400 shadow-sm transition-all cursor-pointer group"
+                >
+                  <Zap className="w-3 h-3 text-cyan-400 group-hover:scale-110 transition-transform" />
+                  <span>{pill.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </form>
   );
 }

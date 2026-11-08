@@ -1089,3 +1089,96 @@ test("Post-Purchase Lifecycle: POST /orders/:id/fulfillments records tracking, a
   assert.equal(notFoundRes.statusCode, 404);
   assert.equal(notFoundRes.json().code, "order_not_found");
 });
+
+test("Phase 2 ACP: Pre-shipment order mutation and partial PayPal refund", async () => {
+  const app = await buildTestApp();
+
+  // 1. Create and complete a checkout session with 2 items
+  const sessionRes = await app.inject({
+    method: "POST",
+    url: "/checkout_sessions",
+    payload: {
+      items: [
+        {
+          id: "item_mech_keyboard",
+          unit_price_cents: 9900,
+          quantity: 2,
+          name: "Wireless Mechanical Keyboard",
+        },
+      ],
+    },
+  });
+  assert.equal(sessionRes.statusCode, 201);
+  const session = sessionRes.json();
+
+  const completeRes = await app.inject({
+    method: "POST",
+    url: `/checkout_sessions/${session.id}/complete`,
+    payload: {},
+  });
+  assert.equal(completeRes.statusCode, 200);
+  const orderId = completeRes.json().order.id;
+
+  // 2. Mutate delivery address and partially cancel 1 unit (quantity 2 -> 1)
+  const mutationRes = await app.inject({
+    method: "PATCH",
+    url: `/checkout_sessions/${session.id}/order`,
+    payload: {
+      fulfillment_address: {
+        street_address: "742 Evergreen Terrace",
+        city: "Springfield",
+        state: "OR",
+        postal_code: "97477",
+        country: "US",
+      },
+      line_items: [
+        {
+          id: "li_item_mech_keyboard",
+          quantity: 1,
+        },
+      ],
+    },
+  });
+
+  assert.equal(mutationRes.statusCode, 200);
+  const mutateData = mutationRes.json();
+  assert.equal(mutateData.success, true);
+  assert.equal(mutateData.address_updated, true);
+  assert.equal(mutateData.refund_amount_cents, 9900); // 1 item * 9900 cents
+  assert.equal(mutateData.order.line_items[0].quantity.current, 1);
+  assert.equal(mutateData.order.line_items[0].subtotal, 9900);
+  assert.ok(mutateData.order.adjustments.length > 0);
+  assert.equal(mutateData.order.adjustments[0].type, "refund");
+  assert.equal(mutateData.order.adjustments[0].amount, 9900);
+
+  // 3. Verify order status read-back through /orders/:id
+  const orderReadRes = await app.inject({
+    method: "GET",
+    url: `/orders/${orderId}`,
+  });
+  assert.equal(orderReadRes.statusCode, 200);
+  const readOrder = orderReadRes.json();
+  assert.equal(readOrder.line_items[0].quantity.current, 1);
+
+  // 4. Advance order to shipped
+  await app.inject({
+    method: "POST",
+    url: `/orders/${orderId}/fulfillments`,
+    payload: {
+      carrier: "UPS",
+      tracking_number: "1Z9999999999999999",
+      status: "shipped",
+    },
+  });
+
+  // 5. State Gate: Ensure mutation is rejected with 409 after shipment
+  const rejectedRes = await app.inject({
+    method: "PATCH",
+    url: `/orders/${orderId}`,
+    payload: {
+      line_items: [{ id: "li_item_mech_keyboard", quantity: 0 }],
+    },
+  });
+  assert.equal(rejectedRes.statusCode, 409);
+  assert.equal(rejectedRes.json().code, "order_already_fulfilled");
+});

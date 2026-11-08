@@ -4676,3 +4676,43 @@ export const GroupExpenseSplitSchema = z.object({
 export type GroupSplitParticipant = z.infer<typeof GroupSplitParticipantSchema>;
 export type GroupExpenseSplit = z.infer<typeof GroupExpenseSplitSchema>;
 
+/**
+ * Dynamic Multi-Domain AI Buyer Memory Schemas
+ */
+export const UniversalBuyerFacetsSchema = z.object({
+  userId: z.string().min(1),
+  budget_elasticity: z.object({
+    target_price_sensory: z.enum(['budget_strict', 'value_optimized', 'premium_first']).default('value_optimized'),
+    max_spontaneous_spend_cents: z.number().int().nonnegative().default(10000), // $100
+    requires_approval_above_cents: z.number().int().positive().default(25000), // $250
+  }),
+  preferred_brands: z.array(z.string()).default([]),
+  avoided_brands: z.array(z.string()).default([]),
+  preferred_fulfillment: z.enum(['express_shipping', 'economy_free', 'curbside_pickup']).default('economy_free'),
+  merchant_minimum_trust_score: z.number().min(0).max(100).default(75),
+});
+
+export const DomainFacetSchema = z.object({
+  category: z.string().min(1), // e.g. "computing", "apparel", "audio", "automotive", "grocery"
+  attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])),
+  confidence_score: z.number().min(0).max(1).default(0.8),
+  source_order_ids: z.array(z.string()).default([]),
+  last_updated: z.string().datetime(),
+});
+
+export const DynamicBuyerProfileSchema = z.object({
+  userId: z.string().min(1),
+  universal: UniversalBuyerFacetsSchema,
+  domain_facets: z.record(z.string(), DomainFacetSchema).default({}),
+  purchase_velocity: z.object({
+    total_orders_completed: z.number().int().nonnegative().default(0),
+    lifetime_spend_cents: z.number().int().nonnegative().default(0),
+    dispute_count: z.number().int().nonnegative().default(0),
+  }),
+  updated_at: z.string().datetime(),
+});
+
+export type UniversalBuyerFacets = z.infer<typeof UniversalBuyerFacetsSchema>;
+export type DomainFacet = z.infer<typeof DomainFacetSchema>;
+export type DynamicBuyerProfile = z.infer<typeof DynamicBuyerProfileSchema>;
+

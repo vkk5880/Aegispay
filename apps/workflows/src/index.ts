@@ -5,6 +5,7 @@ import './tasks/priceDropWatcher.js';
 import './tasks/syntheticBidMatcher.js';
 import './tasks/disputeForensicsTask.js';
 import './tasks/reverseShippingLabelTask.js';
+import './tasks/fulfillmentWatcherTask.js';
 
 async function main() {
   console.log('Starting AegisPay Render Workflows...');
