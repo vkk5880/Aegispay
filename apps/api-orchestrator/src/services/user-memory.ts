@@ -466,14 +466,18 @@ export function clearDynamicBuyerProfilesStore(): void {
 let dbClient: ReturnType<typeof createDb> | null = null;
 
 export function getUserMemoryDb(): ReturnType<typeof createDb> | null {
-  if (!dbClient) {
-    try {
-      const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
-      dbClient = createDb(connectionString);
-    } catch (err) {
-      console.warn('[user-memory] Failed to initialize PostgreSQL client:', err);
-      dbClient = null;
-    }
+  if (dbClient) {
+    return dbClient;
+  }
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    return null;
+  }
+  try {
+    dbClient = createDb(connectionString);
+  } catch (err) {
+    console.warn('[user-memory] Failed to initialize PostgreSQL client:', err);
+    dbClient = null;
   }
   return dbClient;
 }

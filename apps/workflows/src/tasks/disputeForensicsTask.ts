@@ -8,8 +8,8 @@ import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import { executeReverseShippingLabel } from './reverseShippingLabelTask.js';
 import type { AutonomyDialMode, ReturnLabelInfo } from '@aegispay/shared-types';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
-const db = createDb(connectionString);
+const connectionString = process.env.DATABASE_URL;
+const db = connectionString ? createDb(connectionString) : null;
 
 export interface DisputeForensicsPayload {
   paypal_dispute_id: string;
@@ -255,6 +255,16 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
   const autonomyMode: AutonomyDialMode = payload.autonomy_mode || 'SUPERVISED';
 
   const dispute = await eCtx.step('fetch-dispute', async () => {
+    if (!db) {
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`Production database failure: DATABASE_URL not set in disputeForensicsTask`);
+      }
+      return {
+        paypal_dispute_id: disputeId,
+        purchase_unit_id: 'mock_pu_id',
+        dispute_amount_cents: 10000
+      };
+    }
     try {
       // @ts-ignore
       const results = await db.select().from(disputeArbitrations).where(eq(disputeArbitrations.paypal_dispute_id, disputeId));
@@ -270,7 +280,7 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
       if (process.env.NODE_ENV === 'production') {
         throw new Error(`Production database failure in disputeForensicsTask: ${e.message}`);
       }
-      console.warn("DB not available, using mock dispute");
+      console.warn("DB query failed, using mock dispute");
       return {
         paypal_dispute_id: disputeId,
         purchase_unit_id: 'mock_pu_id',
@@ -328,18 +338,20 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
     else if (L >= 0.75 && R < 0.40 && dispute.dispute_amount_cents > 5000) tierAction = 'TIER3_RETURN_OFFER';
     else if (L >= 0.30 && L < 0.75 && R < 0.35) tierAction = 'TIER2_PARTIAL_OFFER';
 
-    try {
-       // @ts-ignore
-       await db.update(disputeArbitrations).set({
-         liability_score_l: L.toString(),
-         abuse_risk_score_r: R.toString(),
-         selected_tier_action: tierAction,
-         exif_tamper_flag: visionResult.exif_tamper_flag,
-         defect_bounding_box: visionResult.defect_bounding_box
-       // @ts-ignore
-       }).where(eq(disputeArbitrations.paypal_dispute_id, disputeId));
-    } catch (e) {
-       console.warn("DB update failed (mocking L/R)");
+    if (db) {
+      try {
+         // @ts-ignore
+         await db.update(disputeArbitrations).set({
+           liability_score_l: L.toString(),
+           abuse_risk_score_r: R.toString(),
+           selected_tier_action: tierAction,
+           exif_tamper_flag: visionResult.exif_tamper_flag,
+           defect_bounding_box: visionResult.defect_bounding_box
+         // @ts-ignore
+         }).where(eq(disputeArbitrations.paypal_dispute_id, disputeId));
+      } catch (e) {
+         console.warn("DB update failed (mocking L/R)");
+      }
     }
 
     return { L, R, tierAction };
@@ -431,14 +443,16 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
       const pdfBytes = await pdfDoc.save();
       const base64 = Buffer.from(pdfBytes).toString('base64');
 
-      try {
-         // @ts-ignore
-         await db.update(disputeArbitrations).set({
-           compiled_evidence_pdf_base64: base64
-         // @ts-ignore
-         }).where(eq(disputeArbitrations.paypal_dispute_id, disputeId));
-      } catch (e) {
-         console.warn("DB update failed (mocking PDF submission)");
+      if (db) {
+        try {
+           // @ts-ignore
+           await db.update(disputeArbitrations).set({
+             compiled_evidence_pdf_base64: base64
+           // @ts-ignore
+           }).where(eq(disputeArbitrations.paypal_dispute_id, disputeId));
+        } catch (e) {
+           console.warn("DB update failed (mocking PDF submission)");
+        }
       }
     });
   }

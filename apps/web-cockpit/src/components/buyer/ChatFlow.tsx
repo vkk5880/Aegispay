@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Sparkles, ArrowRight, CornerDownLeft, RotateCcw, AlertTriangle, Zap } from 'lucide-react';
 
 export interface RecoveryPill {
@@ -132,12 +132,59 @@ export function ChatFlow({
     }
   }, [flowState, questions, revealedIdx]);
 
+  const triggerFinalSearch = useCallback(
+    (q: string) => {
+      const clean = sanitizeChatInput(q);
+      setEnrichedQuery(clean);
+      setFlowState('SEARCHING');
+      onSearch(clean);
+    },
+    [onSearch]
+  );
+
+  const triggerClarify = useCallback(
+    async (q: string) => {
+      const qClean = sanitizeChatInput(q);
+      if (!qClean || disabled) return;
+
+      if (VS_PATTERN.test(qClean)) {
+        triggerFinalSearch(qClean);
+        return;
+      }
+
+      setIsClarifyingLoading(true);
+      setQuestions([]);
+      setAnswers({});
+      setRevealedIdx(-1);
+
+      try {
+        const data = await fetchWithTimeout('/api/buyer/clarify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: qClean }),
+        });
+
+        if (data.needs_clarification && data.questions && data.questions.length > 0) {
+          setQuestions(data.questions.map((item: string) => sanitizeChatInput(item)));
+          setFlowState('CLARIFYING');
+        } else {
+          triggerFinalSearch(qClean);
+        }
+      } catch {
+        triggerFinalSearch(qClean);
+      } finally {
+        setIsClarifyingLoading(false);
+      }
+    },
+    [disabled, triggerFinalSearch]
+  );
+
   useEffect(() => {
     if (initialQuery && initialQuery.trim() !== '') {
       setQuery(initialQuery);
       triggerClarify(initialQuery);
     }
-  }, [initialQuery]);
+  }, [initialQuery, triggerClarify]);
 
   async function handleInitialSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -145,40 +192,6 @@ export function ChatFlow({
     if (!clean) return;
     setQuery(clean);
     triggerClarify(clean);
-  }
-
-  async function triggerClarify(q: string) {
-    const qClean = sanitizeChatInput(q);
-    if (!qClean || disabled) return;
-
-    if (VS_PATTERN.test(qClean)) {
-      triggerFinalSearch(qClean);
-      return;
-    }
-
-    setIsClarifyingLoading(true);
-    setQuestions([]);
-    setAnswers({});
-    setRevealedIdx(-1);
-
-    try {
-      const data = await fetchWithTimeout('/api/buyer/clarify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: qClean }),
-      });
-
-      if (data.needs_clarification && data.questions && data.questions.length > 0) {
-        setQuestions(data.questions.map((item: string) => sanitizeChatInput(item)));
-        setFlowState('CLARIFYING');
-      } else {
-        triggerFinalSearch(qClean);
-      }
-    } catch {
-      triggerFinalSearch(qClean);
-    } finally {
-      setIsClarifyingLoading(false);
-    }
   }
 
   async function handleEnrichSearch(e: React.FormEvent) {
@@ -205,13 +218,6 @@ export function ChatFlow({
     } finally {
       setIsEnriching(false);
     }
-  }
-
-  function triggerFinalSearch(q: string) {
-    const clean = sanitizeChatInput(q);
-    setEnrichedQuery(clean);
-    setFlowState('SEARCHING');
-    onSearch(clean);
   }
 
   function handleReset() {

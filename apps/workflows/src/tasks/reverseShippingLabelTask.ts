@@ -6,8 +6,8 @@ import { enhanceContext } from './types.js';
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import type { ReturnLabelInfo } from '@aegispay/shared-types';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
-const db = createDb(connectionString);
+const connectionString = process.env.DATABASE_URL;
+const db = connectionString ? createDb(connectionString) : null;
 
 export interface GenerateReturnLabelParams {
   disputeId: string;
@@ -238,18 +238,20 @@ export async function executeReverseShippingLabel(
   });
 
   // 4. Persist tracking number and label URL in PostgreSQL dispute_arbitrations table
-  try {
-    // @ts-ignore
-    await db
-      .update(disputeArbitrations)
-      .set({
-        return_tracking_id: trackingNumber,
-        return_label_url: labelUrl,
-      })
+  if (db) {
+    try {
       // @ts-ignore
-      .where(eq(disputeArbitrations.paypal_dispute_id, params.disputeId));
-  } catch (err) {
-    console.warn(`[executeReverseShippingLabel] DB update fallback for dispute ${params.disputeId}:`, err);
+      await db
+        .update(disputeArbitrations)
+        .set({
+          return_tracking_id: trackingNumber,
+          return_label_url: labelUrl,
+        })
+        // @ts-ignore
+        .where(eq(disputeArbitrations.paypal_dispute_id, params.disputeId));
+    } catch (err) {
+      console.warn(`[executeReverseShippingLabel] DB update fallback for dispute ${params.disputeId}:`, err);
+    }
   }
 
   return {

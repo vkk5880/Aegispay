@@ -110,8 +110,9 @@ export function ThoughtStreamVisualizer({
 
   useEffect(() => {
     if (!customSteps) {
+      const milestones = showTechnicalDetails ? DEFAULT_MILESTONES : USER_FRIENDLY_MILESTONES;
       setSteps(
-        activeMilestones.map((step, idx) => ({
+        milestones.map((step, idx) => ({
           ...step,
           status: idx === 0 ? 'COMPLETED' : idx === 1 ? 'ACTIVE' : 'PENDING',
         }))

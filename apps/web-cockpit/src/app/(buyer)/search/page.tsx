@@ -307,7 +307,7 @@ export function SearchContent({
           <PackageSearch className="w-12 h-12 text-slate-600 mb-3" />
           <h3 className="text-lg font-bold text-white mb-1">No Matching Offers Found</h3>
           <p className="text-xs text-slate-400 max-w-md mb-6">
-            We couldn't locate active merchant stock matching &ldquo;{activeQuery}&rdquo;. Try another search term or click one of the suggested queries above.
+            We couldn&apos;t locate active merchant stock matching &ldquo;{activeQuery}&rdquo;. Try another search term or click one of the suggested queries above.
           </p>
           <div className="flex flex-wrap gap-2 justify-center">
             {PRESET_QUERIES.map((preset) => (

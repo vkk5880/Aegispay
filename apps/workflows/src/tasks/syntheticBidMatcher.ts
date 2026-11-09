@@ -4,14 +4,23 @@ import { createDb, syntheticIntentVouchers, escrowOrders } from '@aegispay/datab
 import { eq } from 'drizzle-orm';
 import { enhanceContext } from './types.js';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
-const db = createDb(connectionString);
+const connectionString = process.env.DATABASE_URL;
+const db = connectionString ? createDb(connectionString) : null;
 
 export const syntheticBidMatcherTask = task({ name: 'syntheticBidMatcher' }, async (ctx, payload: { voucher_id: string }) => {
   const eCtx = enhanceContext(ctx);
   const voucherId = payload.voucher_id;
 
   const voucher = await eCtx.step('fetch-voucher', async () => {
+    if (!db) {
+      return {
+        voucher_id: voucherId,
+        buyer_bid_cents: 45000,
+        merchant_min_floor_cents: 42000,
+        retail_offer_cents: 49000,
+        mandate_id: 'mock_mandate',
+      };
+    }
     try {
       // @ts-ignore
       const results = await db.select().from(syntheticIntentVouchers).where(eq(syntheticIntentVouchers.voucher_id, voucherId));
@@ -25,7 +34,7 @@ export const syntheticBidMatcherTask = task({ name: 'syntheticBidMatcher' }, asy
         }
       );
     } catch (e) {
-      console.warn("DB not available, using mock voucher");
+      console.warn("DB query failed, using mock voucher");
       return {
         voucher_id: voucherId,
         buyer_bid_cents: 45000,
@@ -85,28 +94,32 @@ export const syntheticBidMatcherTask = task({ name: 'syntheticBidMatcher' }, asy
     if (counterEvaluation.auto_accepted) {
       await eCtx.step('capture-vaulted-token', async () => {
         console.log(`[syntheticBidMatcher] Counter-bid within auto-accept buffer ($${(counterEvaluation.counter_cents / 100).toFixed(2)}). Capturing vaulted token.`);
-        try {
-          const orderId = `ORD-SYN-COUNTER-${Date.now()}`;
-          // @ts-ignore
-          await db.update(syntheticIntentVouchers)
-            .set({ negotiation_status: 'ACCEPTED_AND_CAPTURED', resulting_paypal_order_id: orderId })
+        if (db) {
+          try {
+            const orderId = `ORD-SYN-COUNTER-${Date.now()}`;
             // @ts-ignore
-            .where(eq(syntheticIntentVouchers.voucher_id, voucher.voucher_id));
-        } catch (e) {
-          console.warn("DB update failed (mocking counter capture)", e);
+            await db.update(syntheticIntentVouchers)
+              .set({ negotiation_status: 'ACCEPTED_AND_CAPTURED', resulting_paypal_order_id: orderId })
+              // @ts-ignore
+              .where(eq(syntheticIntentVouchers.voucher_id, voucher.voucher_id));
+          } catch (e) {
+            console.warn("DB update failed (mocking counter capture)", e);
+          }
         }
       });
     } else {
       await eCtx.step('persist-counter-offer', async () => {
         console.log(`[syntheticBidMatcher] Counter-bid generated ($${(counterEvaluation.counter_cents / 100).toFixed(2)}). Waiting for HITL confirmation.`);
-        try {
-          // @ts-ignore
-          await db.update(syntheticIntentVouchers)
-            .set({ negotiation_status: 'COUNTERED' })
+        if (db) {
+          try {
             // @ts-ignore
-            .where(eq(syntheticIntentVouchers.voucher_id, voucher.voucher_id));
-        } catch (e) {
-          console.warn("DB update failed (mocking counter status)", e);
+            await db.update(syntheticIntentVouchers)
+              .set({ negotiation_status: 'COUNTERED' })
+              // @ts-ignore
+              .where(eq(syntheticIntentVouchers.voucher_id, voucher.voucher_id));
+          } catch (e) {
+            console.warn("DB update failed (mocking counter status)", e);
+          }
         }
       });
     }

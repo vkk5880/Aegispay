@@ -5,8 +5,8 @@ import { eq, inArray } from 'drizzle-orm';
 import { enhanceContext } from './types.js';
 import { Client, Environment, PaymentsController } from '@paypal/paypal-server-sdk';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
-const db = createDb(connectionString);
+const connectionString = process.env.DATABASE_URL;
+const db = connectionString ? createDb(connectionString) : null;
 
 class MockChannel3Client {
   async lookup(productIds: string[]) {
@@ -210,6 +210,7 @@ export const priceDropWatcherTask = task(
 
     const unitHolds = await eCtx.step('fetch-pu-holds', async () => {
       try {
+        if (!db) throw new Error('Database connection not configured');
         // Batch query all purchase unit holds using inArray to eliminate sequential N+1 query round trips
         // @ts-ignore
         const rows: any[] = await db
@@ -237,8 +238,10 @@ export const priceDropWatcherTask = task(
             hold_status: 'WATCHING_PRICE',
           };
         });
-      } catch (e) {
-        console.warn('DB not available, using mock unit holds', e);
+      } catch (e: any) {
+        if (connectionString) {
+          console.warn('DB not available, using mock unit holds', e?.message || e);
+        }
         return targetUnitIds.map((uId, idx) => ({
           id: uId,
           escrow_order_id: payload.escrow_order_id || 'mock_escrow',
@@ -298,15 +301,17 @@ export const priceDropWatcherTask = task(
           const authId = puHold.paypal_authorization_id || `MOCK_AUTH_${puHold.id}`;
           const res = await executeUnitPartialVoid({ authorizationId: authId });
 
-          try {
-            // @ts-ignore
-            await db
-              .update(purchaseUnitHolds)
-              .set({ hold_status: 'VOIDED_OUT_OF_STOCK' })
+          if (db) {
+            try {
               // @ts-ignore
-              .where(eq(purchaseUnitHolds.id, puHold.id));
-          } catch (e) {
-            console.warn('DB update failed for voided unit (mocking)', e);
+              await db
+                .update(purchaseUnitHolds)
+                .set({ hold_status: 'VOIDED_OUT_OF_STOCK' })
+                // @ts-ignore
+                .where(eq(purchaseUnitHolds.id, puHold.id));
+            } catch (e) {
+              console.warn('DB update failed for voided unit (mocking)', e);
+            }
           }
           return res;
         });
@@ -344,19 +349,21 @@ export const priceDropWatcherTask = task(
               })) as any;
 
               const captureId = res?.id || `MOCK_CAPTURE_${puHold.id}`;
-              try {
-                // @ts-ignore
-                await db
-                  .update(purchaseUnitHolds)
-                  .set({
-                    hold_status: 'CAPTURED_PRICE_DROP',
-                    final_captured_cents: currentLowestPrice,
-                    paypal_capture_id: captureId,
-                  })
+              if (db) {
+                try {
                   // @ts-ignore
-                  .where(eq(purchaseUnitHolds.id, puHold.id));
-              } catch (e) {
-                console.warn('DB update failed for locked unit capture (mocking)', e);
+                  await db
+                    .update(purchaseUnitHolds)
+                    .set({
+                      hold_status: 'CAPTURED_PRICE_DROP',
+                      final_captured_cents: currentLowestPrice,
+                      paypal_capture_id: captureId,
+                    })
+                    // @ts-ignore
+                    .where(eq(purchaseUnitHolds.id, puHold.id));
+                } catch (e) {
+                  console.warn('DB update failed for locked unit capture (mocking)', e);
+                }
               }
               return { captureId, res };
             });
@@ -390,15 +397,17 @@ export const priceDropWatcherTask = task(
           const authId = puHold.paypal_authorization_id || `MOCK_AUTH_${puHold.id}`;
           const res = await executeUnitPartialVoid({ authorizationId: authId });
 
-          try {
-            // @ts-ignore
-            await db
-              .update(purchaseUnitHolds)
-              .set({ hold_status: 'VOIDED_UNDERCUT' })
+          if (db) {
+            try {
               // @ts-ignore
-              .where(eq(purchaseUnitHolds.id, puHold.id));
-          } catch (e) {
-            console.warn('DB update failed for undercut void (mocking)', e);
+              await db
+                .update(purchaseUnitHolds)
+                .set({ hold_status: 'VOIDED_UNDERCUT' })
+                // @ts-ignore
+                .where(eq(purchaseUnitHolds.id, puHold.id));
+            } catch (e) {
+              console.warn('DB update failed for undercut void (mocking)', e);
+            }
           }
           return res;
         });
@@ -426,19 +435,21 @@ export const priceDropWatcherTask = task(
 
           const captureId = res?.id || `MOCK_CAPTURE_${puHold.id}`;
 
-          try {
-            // @ts-ignore
-            await db
-              .update(purchaseUnitHolds)
-              .set({
-                hold_status: 'CAPTURED_PRICE_DROP',
-                final_captured_cents: currentLowestPrice,
-                paypal_capture_id: captureId,
-              })
+          if (db) {
+            try {
               // @ts-ignore
-              .where(eq(purchaseUnitHolds.id, puHold.id));
-          } catch (e) {
-            console.warn('DB update failed for captured unit (mocking)', e);
+              await db
+                .update(purchaseUnitHolds)
+                .set({
+                  hold_status: 'CAPTURED_PRICE_DROP',
+                  final_captured_cents: currentLowestPrice,
+                  paypal_capture_id: captureId,
+                })
+                // @ts-ignore
+                .where(eq(purchaseUnitHolds.id, puHold.id));
+            } catch (e) {
+              console.warn('DB update failed for captured unit (mocking)', e);
+            }
           }
           return { captureId, res };
         });
@@ -477,18 +488,20 @@ export const priceDropWatcherTask = task(
         : 'AUTHORIZED';
 
       console.log(`[priceDropWatcher] Synchronizing escrow order status to: ${aggregateStatus}`);
-      try {
-        const escrowOrderId = unitHolds[0]?.escrow_order_id;
-        if (escrowOrderId && escrowOrderId !== 'mock_escrow') {
-          // @ts-ignore
-          await db
-            .update(escrowOrders)
-            .set({ order_status: aggregateStatus })
+      if (db) {
+        try {
+          const escrowOrderId = unitHolds[0]?.escrow_order_id;
+          if (escrowOrderId && escrowOrderId !== 'mock_escrow') {
             // @ts-ignore
-            .where(eq(escrowOrders.id, escrowOrderId));
+            await db
+              .update(escrowOrders)
+              .set({ order_status: aggregateStatus })
+              // @ts-ignore
+              .where(eq(escrowOrders.id, escrowOrderId));
+          }
+        } catch (e) {
+          console.warn('DB update failed for escrowOrder sync (mocking)', e);
         }
-      } catch (e) {
-        console.warn('DB update failed for escrowOrder sync (mocking)', e);
       }
     });
 

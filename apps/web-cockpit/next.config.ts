@@ -9,6 +9,47 @@ const nextConfig: NextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+  async rewrites() {
+    const rawApiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+    const orchestratorUrl = rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://')
+      ? rawApiUrl.replace(/\/+$/, '')
+      : `https://${rawApiUrl}`.replace(/\/+$/, '');
+
+    return [
+      {
+        source: '/api/buyer/history',
+        destination: `${orchestratorUrl}/api/buyer/history`,
+      },
+      {
+        source: '/api/buyer/receipts',
+        destination: `${orchestratorUrl}/api/buyer/receipts`,
+      },
+      {
+        source: '/api/buyer/watchlist',
+        destination: `${orchestratorUrl}/api/buyer/watchlist`,
+      },
+      {
+        source: '/api/buyer/watchlist/:path*',
+        destination: `${orchestratorUrl}/api/buyer/watchlist/:path*`,
+      },
+      {
+        source: '/api/buyer/escrow/:path*',
+        destination: `${orchestratorUrl}/api/buyer/escrow/:path*`,
+      },
+      {
+        source: '/api/buyer/clarify',
+        destination: `${orchestratorUrl}/api/buyer/clarify`,
+      },
+      {
+        source: '/api/buyer/enrich',
+        destination: `${orchestratorUrl}/api/buyer/enrich`,
+      },
+      {
+        source: '/api/buyer/prefs',
+        destination: `${orchestratorUrl}/api/buyer/prefs`,
+      },
+    ];
+  },
   async headers() {
     return [
       {
