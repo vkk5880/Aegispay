@@ -39,6 +39,11 @@ import {
   ACPMCPCompleteCheckoutSessionSchema,
   ACPMCPCancelCheckoutSessionSchema,
 } from './acp-manifest.js';
+import {
+  PayPalToolkitBridge,
+  registerPayPalToolkitBridgeTools,
+  type PayPalToolkitBridgeOptions,
+} from './paypal-toolkit-bridge.js';
 
 export interface MCPServerOptions {
   maxBufferSize?: number;
@@ -46,6 +51,8 @@ export interface MCPServerOptions {
   redisClient?: any;
   allowedHosts?: string[];
   allowedOrigins?: string[];
+  enableToolkitBridge?: boolean;
+  toolkitBridgeOptions?: PayPalToolkitBridgeOptions;
 }
 
 export const DEFAULT_MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB default buffer limit
@@ -662,8 +669,23 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
     }
   );
 
+  // Optional: Official PayPal Agent Toolkit Bridge Tools
+  if (options.enableToolkitBridge) {
+    const bridge = new PayPalToolkitBridge({
+      ...options.toolkitBridgeOptions,
+      redisClient: options.redisClient ?? options.toolkitBridgeOptions?.redisClient,
+    });
+    registerPayPalToolkitBridgeTools(server, bridge);
+  }
+
   return server;
 }
+
+export {
+  PayPalToolkitBridge,
+  registerPayPalToolkitBridgeTools,
+  type PayPalToolkitBridgeOptions,
+};
 
 /**
  * Server factory helper for per-request stateless web serving

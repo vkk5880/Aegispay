@@ -7,6 +7,7 @@ export * from './audit-chain.js';
 export * from './server.js';
 export * from './category-smuggling-detector.js';
 export * from './monotonic-risk-evaluator.js';
+export * from './paypal-toolkit-bridge.js';
 
 // Modular Tool Clean Exports (handlers, Zod schemas, validators, and types)
 export * from './tools/catalog-search.js';

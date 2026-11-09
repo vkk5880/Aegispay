@@ -1,10 +1,61 @@
 import { FastifyPluginAsync } from 'fastify';
+import { Redis } from 'ioredis';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 
 // Idempotency cache tracking processed webhook event IDs to prevent duplicate transaction execution
 // Uses Map to implement a true LRU cache (access moves entry to end; oldest evicted when capacity reached)
 export const MAX_PROCESSED_EVENTS = 5000;
 const processedWebhookEvents = new Map<string, { eventType: string; processedAt: number }>();
+
+// Distributed Redis Idempotency client with graceful offline fallback
+let redisClient: Redis | null = null;
+if (process.env.REDIS_URL) {
+  try {
+    redisClient = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest: 1,
+      enableOfflineQueue: false,
+      lazyConnect: true,
+    });
+    redisClient.on('error', () => {
+      // Gracefully fall back to local LRU
+    });
+  } catch {
+    redisClient = null;
+  }
+}
+
+/**
+ * Atomic idempotency lock: Uses Redis SET ... EX 259200 NX (72 hours)
+ * Falls back to in-memory LRU if Redis is absent or unreachable.
+ */
+export async function acquireWebhookIdempotency(eventId: string, eventType = 'UNKNOWN'): Promise<boolean> {
+  if (!eventId) return false;
+
+  if (redisClient) {
+    try {
+      const res = await redisClient.set(
+        `paypal:webhook:${eventId}`,
+        JSON.stringify({ eventType, processedAt: Date.now() }),
+        'EX',
+        259200,
+        'NX'
+      );
+      if (res === 'OK') {
+        recordWebhookEventProcessed(eventId, eventType);
+        return true;
+      }
+      return false;
+    } catch {
+      // Fallback to in-memory check
+    }
+  }
+
+  if (isWebhookEventProcessed(eventId)) {
+    return false;
+  }
+  recordWebhookEventProcessed(eventId, eventType);
+  return true;
+}
 
 /**
  * Checks whether a given webhook event ID has already been recorded and processed.
@@ -92,6 +143,22 @@ export function isValidPayPalCertUrl(certUrl: string): boolean {
 }
 
 export const paypalWebhooksRoutes: FastifyPluginAsync = async (fastify) => {
+  // Fastify startup hook for automated webhook registration
+  fastify.addHook('onReady', async () => {
+    const webhookUrl =
+      process.env.PAYPAL_WEBHOOK_URL ||
+      (process.env.API_BASE_URL ? `${process.env.API_BASE_URL}/api/webhooks/paypal` : undefined);
+    if (webhookUrl && defaultPayPalClient) {
+      try {
+        fastify.log.info(`Verifying/subscribing PayPal webhook subscription for ${webhookUrl}`);
+        await defaultPayPalClient.ensureWebhookSubscription(webhookUrl);
+        fastify.log.info('PayPal webhook subscription active.');
+      } catch (err: any) {
+        fastify.log.warn(`Auto webhook subscription registration skipped: ${err?.message || err}`);
+      }
+    }
+  });
+
   fastify.post('/api/webhooks/paypal', async (request, reply) => {
     try {
       const headers = request.headers;
@@ -137,8 +204,9 @@ export const paypalWebhooksRoutes: FastifyPluginAsync = async (fastify) => {
       const eventId = event?.id || `evt_${Date.now()}`;
       const eventType = event?.event_type || 'UNKNOWN';
 
-      // 2. Idempotency check per PayPal Webhooks specification
-      if (isWebhookEventProcessed(eventId)) {
+      // 2. Distributed Redis Lua atomic check-and-set idempotency check
+      const acquired = await acquireWebhookIdempotency(eventId, eventType);
+      if (!acquired) {
         fastify.log.info(`Duplicate PayPal webhook event ignored for idempotency: ${eventId} (${eventType})`);
         return reply.status(200).send({
           status: 'IDEMPOTENT_IGNORED',
@@ -148,8 +216,6 @@ export const paypalWebhooksRoutes: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      // Record in LRU idempotency cache
-      recordWebhookEventProcessed(eventId, eventType);
       fastify.log.info(`Received PayPal webhook event: ${eventType} (ID: ${eventId})`);
 
       // 3. Dispatch supported payment, subscription, and dispute lifecycle events

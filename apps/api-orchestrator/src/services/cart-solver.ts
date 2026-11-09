@@ -316,12 +316,17 @@ export class CartSolver {
       const authorizedVal = (merchant.merchant_retail_authorized_cents / 100).toFixed(2);
       const subsidyVal = (merchant.platform_subsidy_cents / 100).toFixed(2);
       const invoiceSuffix = crypto.randomUUID().slice(0, 8);
+      const payeeMerchantId = (merchant as any).paypal_merchant_id ||
+        `PPM_${merchant.merchant_domain.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 13)}`;
 
       return {
         reference_id: `PU_${merchant.merchant_domain.replace(/[^a-zA-Z0-9]/g, '_')}_${idx + 1}`,
         custom_id: `merchant:${merchant.merchant_domain}`,
         invoice_id: `INV-${Date.now()}-${invoiceSuffix}`,
         description: `Autonomous settlement for ${merchant.items.length} items from ${merchant.merchant_domain}`,
+        payee: {
+          merchant_id: payeeMerchantId,
+        },
         amount: {
           currency_code: 'USD',
           value: authorizedVal,

@@ -23,6 +23,10 @@ import {
   defaultCartSolver,
   KnapsackOptimizationResult,
 } from './cart-solver.js';
+import {
+  PayPalApimaticClient,
+  defaultPayPalClient,
+} from './paypal-apimatic.js';
 
 export function transformToProductCard(p: Channel3ProductDetail): ProductCardData {
   const inStockOffers = p.offers.filter(o => o.stock_status !== 'OUT_OF_STOCK');
@@ -375,6 +379,174 @@ export function createExecuteEscrowHoldTool(channel3Client: Channel3Client = def
         reservation_id: stockRes.reservation_id,
         failed_items: stockRes.failed_items,
         expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      };
+    },
+  });
+}
+
+/**
+ * Mastra Tool: paypal_create_invoice
+ * Creates a draft B2B invoice via PayPal Invoicing v2 with customizable line items and terms.
+ */
+export function createCreateInvoiceTool(paypalClient: PayPalApimaticClient = defaultPayPalClient) {
+  return createTool({
+    id: 'paypal_create_invoice',
+    description: 'Creates a draft B2B invoice via PayPal Invoicing v2 with customizable line items and payment terms',
+    inputSchema: z.object({
+      recipient_email: z.string().email(),
+      recipient_name: z.string().optional(),
+      business_name: z.string().optional(),
+      currency_code: z.string().default('USD'),
+      items: z.array(z.object({
+        name: z.string(),
+        quantity: z.union([z.string(), z.number()]).default('1'),
+        unit_amount_cents: z.number().int().positive(),
+        description: z.string().optional(),
+      })).min(1),
+      payment_term: z.string().default('NET_30'),
+      note: z.string().optional(),
+    }),
+    outputSchema: z.object({
+      invoice_id: z.string(),
+      status: z.string(),
+      invoice_number: z.string(),
+      amount: z.object({
+        currency_code: z.string(),
+        value: z.string(),
+      }),
+      payer_view_url: z.string().optional(),
+    }),
+    execute: async (input: any) => {
+      const args = input?.context || input;
+      const totalCents = args.items.reduce((acc: number, it: any) => {
+        const q = typeof it.quantity === 'number' ? it.quantity : parseInt(it.quantity || '1', 10);
+        return acc + it.unit_amount_cents * q;
+      }, 0);
+
+      const invoiceRes = await paypalClient.createInvoice({
+        detail: {
+          currency_code: args.currency_code || 'USD',
+          note: args.note,
+          payment_term: { term_type: args.payment_term || 'NET_30' },
+        },
+        primary_recipients: [
+          {
+            billing_info: {
+              email_address: args.recipient_email,
+              business_name: args.business_name,
+              name: args.recipient_name ? { full_name: args.recipient_name } : undefined,
+            },
+          },
+        ],
+        items: args.items.map((it: any) => ({
+          name: it.name,
+          quantity: it.quantity.toString(),
+          unit_amount: {
+            currency_code: args.currency_code || 'USD',
+            value: (it.unit_amount_cents / 100).toFixed(2),
+          },
+          description: it.description,
+        })),
+        amount: {
+          currency_code: args.currency_code || 'USD',
+          value: (totalCents / 100).toFixed(2),
+        },
+      });
+
+      const payerViewLink = (invoiceRes as any).links?.find((l: any) => l.rel === 'payer-view')?.href;
+
+      return {
+        invoice_id: invoiceRes.id,
+        status: invoiceRes.status,
+        invoice_number: invoiceRes.detail.invoice_number,
+        amount: {
+          currency_code: invoiceRes.amount?.currency_code || 'USD',
+          value: invoiceRes.amount?.value || (totalCents / 100).toFixed(2),
+        },
+        payer_view_url: payerViewLink,
+      };
+    },
+  });
+}
+
+/**
+ * Mastra Tool: paypal_send_invoice
+ * Sends a PayPal B2B invoice to the recipient email and updates status to SENT.
+ */
+export function createSendInvoiceTool(paypalClient: PayPalApimaticClient = defaultPayPalClient) {
+  return createTool({
+    id: 'paypal_send_invoice',
+    description: 'Sends a PayPal B2B invoice to the recipient email and updates status to SENT',
+    inputSchema: z.object({
+      invoice_id: z.string().min(1),
+    }),
+    outputSchema: z.object({
+      invoice_id: z.string(),
+      status: z.string(),
+      success: z.boolean(),
+    }),
+    execute: async (input: any) => {
+      const args = input?.context || input;
+      const success = await paypalClient.sendInvoice(args.invoice_id);
+      return {
+        invoice_id: args.invoice_id,
+        status: 'SENT',
+        success,
+      };
+    },
+  });
+}
+
+/**
+ * Mastra Tool: paypal_generate_invoice_qr
+ * Generates a payment QR code (Base64 PNG data URI) for an existing PayPal invoice.
+ */
+export function createGenerateInvoiceQrCodeTool(paypalClient: PayPalApimaticClient = defaultPayPalClient) {
+  return createTool({
+    id: 'paypal_generate_invoice_qr',
+    description: 'Generates a payment QR code (Base64 PNG data URI) for an existing PayPal invoice',
+    inputSchema: z.object({
+      invoice_id: z.string().min(1),
+    }),
+    outputSchema: z.object({
+      invoice_id: z.string(),
+      qr_code: z.string(),
+    }),
+    execute: async (input: any) => {
+      const args = input?.context || input;
+      const qrCode = await paypalClient.generateInvoiceQrCode(args.invoice_id);
+      return {
+        invoice_id: args.invoice_id,
+        qr_code: qrCode,
+      };
+    },
+  });
+}
+
+/**
+ * Mastra Tool: paypal_send_invoice_reminder
+ * Sends an automated payment reminder to the invoice recipient.
+ */
+export function createSendInvoiceReminderTool(paypalClient: PayPalApimaticClient = defaultPayPalClient) {
+  return createTool({
+    id: 'paypal_send_invoice_reminder',
+    description: 'Sends an automated payment reminder to the invoice recipient',
+    inputSchema: z.object({
+      invoice_id: z.string().min(1),
+      note: z.string().optional(),
+    }),
+    outputSchema: z.object({
+      invoice_id: z.string(),
+      status: z.string(),
+      success: z.boolean(),
+    }),
+    execute: async (input: any) => {
+      const args = input?.context || input;
+      const success = await paypalClient.sendInvoiceReminder(args.invoice_id, args.note);
+      return {
+        invoice_id: args.invoice_id,
+        status: 'REMINDER_SENT',
+        success,
       };
     },
   });

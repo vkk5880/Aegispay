@@ -86,6 +86,14 @@ export const CHAOS_ACTIONS: ChaosAction[] = [
     expectedOutcome: 'Atomic rollback script restores buyer credit limit in <1ms without leaking funds.',
   },
   {
+    id: 'TRIGGER_MOCK_COMPLIANCE_VIOLATION',
+    title: 'COMPLIANCE_VIOLATION Header Injection & Quarantine',
+    track: 'PayPal Sandbox Fault Injection',
+    category: 'SECURITY',
+    description: 'Injects PayPal-Mock-Response header for COMPLIANCE_VIOLATION to quarantine transaction and alert compliance officer.',
+    expectedOutcome: 'HTTP 422 intercepted, transaction quarantined in ledger, 2PC stock release dispatched.',
+  },
+  {
     id: 'TRIGGER_APIMATIC_VERIFY',
     title: 'APIMatic SDK Verified Server Read-Back',
     track: 'APIMatic & REST SDK',

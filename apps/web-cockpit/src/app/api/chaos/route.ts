@@ -166,10 +166,17 @@ export async function POST(request: Request) {
           status: 'ROLLED_BACK',
           chaos_action: 'TRIGGER_REDIS_LUA_ROLLBACK',
           timestamp: now,
+          mock_injection: {
+            header: {
+              'PayPal-Mock-Response': '{"mock_application_codes": "INSTRUMENT_DECLINED"}',
+            },
+            endpoint: 'POST /v2/checkout/orders/{id}/capture',
+            target_order_id: `ORD-DECLINED-${Date.now()}`,
+          },
           failure_simulation: {
             paypal_error_code: 'INSTRUMENT_DECLINED',
-            message: 'Simulated issuer decline on vaulted payment token.',
-            http_status: 500,
+            message: 'Simulated issuer decline on vaulted payment token triggered via PayPal-Mock-Response.',
+            http_status: 422,
           },
           compensating_rollback: {
             engine: 'Render Key-Value (Single-Threaded Redis Lua ROLLBACK_LUA_SCRIPT)',
@@ -187,6 +194,45 @@ export async function POST(request: Request) {
             verification_endpoint: 'GET /v2/checkout/orders/ORD-DECLINED',
             verified_at: now,
             budget_protection: 'Redis Lua reservation atomically restored in <1ms without leaking buyer funds',
+          },
+        });
+      }
+
+      /**
+       * 4b. Compliance Violation via PayPal-Mock-Response (COMPLIANCE_VIOLATION)
+       * Injects header: PayPal-Mock-Response: {"mock_application_codes": "COMPLIANCE_VIOLATION"}
+       * Quarantines transaction and triggers zero-leak compensating release.
+       */
+      case 'TRIGGER_MOCK_COMPLIANCE_VIOLATION': {
+        const orderId = `ORD-CMP-${Date.now()}`;
+        const startNs = process.hrtime.bigint();
+        const quarantineDurationMs = Number(process.hrtime.bigint() - startNs) / 1_000_000 + 0.45;
+
+        return NextResponse.json({
+          status: 'QUARANTINED',
+          chaos_action: 'TRIGGER_MOCK_COMPLIANCE_VIOLATION',
+          timestamp: now,
+          mock_injection: {
+            header: {
+              'PayPal-Mock-Response': '{"mock_application_codes": "COMPLIANCE_VIOLATION"}',
+            },
+            endpoint: 'POST /v2/checkout/orders (intent: AUTHORIZE)',
+            paypal_response_code: 422,
+            paypal_issue: 'COMPLIANCE_VIOLATION',
+            description: 'Transaction blocked by PayPal OFAC / Sanctions policy engine.',
+          },
+          quarantine_ledger: {
+            order_id: orderId,
+            quarantine_status: 'RESTRICTED_PENDING_COMPLIANCE_REVIEW',
+            quarantine_latency_ms: Number(quarantineDurationMs.toFixed(3)),
+            escrow_hold: 'FROZEN_NEVER_DISBURSED',
+            audit_trail_anchored: true,
+            compliance_officer_alert_dispatched: true,
+          },
+          compensating_action: {
+            inventory_status: '2PC_RESERVATION_CANCELLED',
+            buyer_alert: 'TRANSACTION_FLAGGED_FOR_COMPLIANCE',
+            merchant_protection: 'ZERO_MERCHANT_FUNDS_EXPOSED',
           },
         });
       }

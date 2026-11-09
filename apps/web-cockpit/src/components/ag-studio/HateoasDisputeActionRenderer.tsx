@@ -7,13 +7,22 @@ interface HateoasDisputeActionRendererProps {
   hateoasAllowedActions: string[];
   disputeId: string;
   onActionComplete?: (action: string) => void;
+  links?: Array<{ href: string; rel: string; method?: string }>;
 }
 
 export function HateoasDisputeActionRenderer({
   hateoasAllowedActions,
   disputeId,
   onActionComplete,
+  links,
 }: HateoasDisputeActionRendererProps) {
+  const effectiveActions = React.useMemo(() => {
+    if (links && links.length > 0) {
+      const linkRels = links.map((l) => l.rel);
+      return Array.from(new Set([...hateoasAllowedActions, ...linkRels]));
+    }
+    return hateoasAllowedActions;
+  }, [hateoasAllowedActions, links]);
   // Hold-to-confirm state (2 seconds)
   const [holdingAction, setHoldingAction] = useState<string | null>(null);
   const [holdProgress, setHoldProgress] = useState(0); // 0 to 100
@@ -120,7 +129,11 @@ export function HateoasDisputeActionRenderer({
       case 'make-offer':
         return 'Offer 35% Settlement';
       case 'accept-claim':
-        return 'Accept Synthetic Bid';
+        return links && links.length > 0 ? 'Accept Claim & Avoid Fee' : 'Accept Synthetic Bid';
+      case 'appeal':
+        return 'File Appeal';
+      case 'acknowledge-return-item':
+        return 'Acknowledge Return Item';
       default:
         return action;
     }
@@ -133,7 +146,11 @@ export function HateoasDisputeActionRenderer({
       case 'make-offer':
         return '✓ 35% Offer Dispatched';
       case 'accept-claim':
-        return '✓ Bid Accepted & Captured';
+        return links && links.length > 0 ? '✓ Claim Accepted (Fee Avoided)' : '✓ Bid Accepted & Captured';
+      case 'appeal':
+        return '✓ Appeal Lodged';
+      case 'acknowledge-return-item':
+        return '✓ Return Acknowledged';
       default:
         return `✓ ${action} Executed`;
     }
@@ -142,7 +159,7 @@ export function HateoasDisputeActionRenderer({
   return (
     <div data-testid="hateoas-action-renderer" className="relative space-y-2 py-1">
       <div className="flex flex-wrap items-center gap-2">
-        {hateoasAllowedActions.includes('provide-evidence') && (
+        {effectiveActions.includes('provide-evidence') && (
           <div className="flex items-center gap-1.5">
             {/* 2-second Hold to Confirm button */}
             <button
@@ -190,7 +207,7 @@ export function HateoasDisputeActionRenderer({
           </div>
         )}
 
-        {hateoasAllowedActions.includes('make-offer') && (
+        {effectiveActions.includes('make-offer') && (
           <button
             type="button"
             data-testid="hold-btn-make-offer"
@@ -220,7 +237,7 @@ export function HateoasDisputeActionRenderer({
           </button>
         )}
 
-        {hateoasAllowedActions.includes('accept-claim') && (
+        {effectiveActions.includes('accept-claim') && (
           <button
             type="button"
             data-testid="hold-btn-accept-claim"
@@ -245,12 +262,44 @@ export function HateoasDisputeActionRenderer({
                 ? getExecutedLabel('accept-claim')
                 : pendingToastAction === 'accept-claim'
                 ? 'Pending Commit...'
+                : links && links.length > 0
+                ? 'Accept Claim & Avoid Fee (Hold 2s)'
                 : 'Accept Synthetic Bid (Hold 2s)'}
             </span>
           </button>
         )}
 
-        {hateoasAllowedActions.length === 0 && (
+        {effectiveActions.includes('appeal') && (
+          <button
+            type="button"
+            data-testid="hold-btn-appeal"
+            onMouseDown={() => handleHoldStart('appeal')}
+            onMouseUp={clearHold}
+            onMouseLeave={clearHold}
+            onTouchStart={() => handleHoldStart('appeal')}
+            onTouchEnd={clearHold}
+            disabled={executedAction !== null || pendingToastAction !== null}
+            className="relative overflow-hidden px-3 py-1.5 bg-purple-700 hover:bg-purple-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-all shadow-xs select-none"
+          >
+            {holdingAction === 'appeal' && (
+              <div
+                className="absolute inset-0 bg-purple-900/80 transition-all duration-75"
+                style={{ width: `${holdProgress}%` }}
+              />
+            )}
+            <span className="relative z-10">
+              {holdingAction === 'appeal'
+                ? `Hold 2s to Confirm (${Math.round(holdProgress)}%)`
+                : executedAction === 'appeal'
+                ? getExecutedLabel('appeal')
+                : pendingToastAction === 'appeal'
+                ? 'Pending Commit...'
+                : 'File Appeal (Hold 2s)'}
+            </span>
+          </button>
+        )}
+
+        {effectiveActions.length === 0 && (
           <span className="text-xs text-slate-400 italic">No available actions</span>
         )}
       </div>

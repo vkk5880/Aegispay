@@ -33,8 +33,15 @@ export interface EscrowHoldRecord {
   currency: string;
   initialAuthorizedCents: number;
   heldBalanceCents: number;
+  residualAuthorizedCents?: number;
   releasedCents: number;
   status: EscrowHoldStatus;
+  captures?: Array<{
+    captureId: string;
+    amountCents: number;
+    finalCapture: boolean;
+    capturedAt: number;
+  }>;
   createdAt: number;
   releasedAt?: number;
   voidedAt?: number;
@@ -180,6 +187,90 @@ export class EscrowVault {
       status: hold.status,
       releasedCents: releaseAmount,
       remainingHeldCents: hold.heldBalanceCents,
+    };
+  }
+
+  /**
+   * Partial capture tracking for Payments v2 authorizations.
+   * Tracks residual authorized cents across multiple captures until final_capture: true or balance reaches zero.
+   */
+  public capturePartialHold(
+    holdId: string,
+    amountCents: number,
+    options?: {
+      captureId?: string;
+      finalCapture?: boolean;
+      callerPrincipal?: string;
+    }
+  ): {
+    holdId: string;
+    capturedCents: number;
+    residualAuthorizedCents: number;
+    finalCapture: boolean;
+    status: EscrowHoldStatus;
+  } {
+    const hold = this.holds.get(holdId);
+    if (!hold) {
+      throw new EscrowVaultError(`Escrow hold ${holdId} not found`, 'ERR_HOLD_NOT_FOUND');
+    }
+
+    if (hold.status === 'RELEASED') {
+      throw new EscrowVaultError(
+        `Double-release prevented: hold ${holdId} has already been completely captured/released`,
+        'ERR_DOUBLE_RELEASE'
+      );
+    }
+
+    if (hold.status === 'VOIDED') {
+      throw new EscrowVaultError(`Cannot capture voided hold ${holdId}`, 'ERR_HOLD_VOIDED');
+    }
+
+    if (hold.status === 'DISPUTED') {
+      throw new EscrowVaultError(`Cannot capture hold ${holdId} while under dispute`, 'ERR_HOLD_DISPUTED');
+    }
+
+    if (amountCents <= 0 || !Number.isInteger(amountCents)) {
+      throw new EscrowVaultError(
+        `Capture amount must be a positive integer, received: ${amountCents}`,
+        'ERR_INVALID_TRANSFER_AMOUNT'
+      );
+    }
+
+    if (amountCents > hold.heldBalanceCents) {
+      throw new EscrowVaultError(
+        `Negative balance transfer prevented: requested ${amountCents} cents but only ${hold.heldBalanceCents} cents residual in vault`,
+        'ERR_INSUFFICIENT_HOLD_BALANCE'
+      );
+    }
+
+    const captureId = options?.captureId || `cap_${Date.now()}_${crypto.randomUUID().slice(0, 6)}`;
+    hold.heldBalanceCents -= amountCents;
+    hold.releasedCents += amountCents;
+    hold.residualAuthorizedCents = hold.heldBalanceCents;
+
+    const isFinal = options?.finalCapture === true || hold.heldBalanceCents === 0;
+
+    if (!hold.captures) {
+      hold.captures = [];
+    }
+    hold.captures.push({
+      captureId,
+      amountCents,
+      finalCapture: isFinal,
+      capturedAt: Date.now(),
+    });
+
+    if (isFinal) {
+      hold.status = 'RELEASED';
+      hold.releasedAt = Date.now();
+    }
+
+    return {
+      holdId: hold.holdId,
+      capturedCents: amountCents,
+      residualAuthorizedCents: hold.heldBalanceCents,
+      finalCapture: isFinal,
+      status: hold.status,
     };
   }
 

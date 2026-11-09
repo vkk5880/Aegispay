@@ -1,9 +1,18 @@
 # AegisPay 🛡️ — Autonomous Dual-Sided Agentic Commerce, Synthetic Intent Clearinghouse & Arbitration Cockpit
 
-> **Target Competition:** Build What's Next with PayPal and AI Global Hackathon
-> **Target Prize Pool ($34,500+ Combined Track Strategy):**
-> - **PayPal Core Tracks:** Grand Prize ($12,000), Best Use of PayPal + AI ($5,000), Best Use of Agentic Commerce ($5,000), Best Demo Delivery ($5,000)
-> - **Sponsor Prize Tracks:** AG Grid / AG Studio 3 ($5,000), Channel3 ($1,500), APIMatic ($1,000), Bryntum ($1,000), Render ($1,000 Credits)
+> **Target Competition:** Build What's Next with PayPal and AI Global Hackathon 2026  
+> **Target Prize Pool ($34,500+ Combined Track Strategy):**  
+> - 🏆 **Grand Prize ($12,000)**  
+> - 🤖 **Best Use of PayPal + AI ($5,000)**  
+> - ⚡ **Best Use of Agentic Commerce ($5,000)**  
+> - 🎥 **Best Demo Delivery ($5,000)**  
+> - **Sponsor Prize Tracks:** AG Grid / AG Studio 3 ($5,000), Channel3 ($1,500), APIMatic ($1,000), Bryntum ($1,000), Render ($1,000 Credits)  
+>
+> 📖 **Comprehensive Guides & Submission Deliverables:**  
+> - [📘 PayPal Developer Modernization & 18-Endpoint Integration Guide](docs/PAYPAL_INTEGRATION.md)  
+> - [🎬 3-Minute Second-by-Second Demo Video Script](docs/DEMO_VIDEO_SCRIPT.md)  
+> - [☁️ Render Cloud Infrastructure & Workflows Dossier](docs/RENDER.md)  
+> - [📐 APIMatic SDK Verification Dossier](docs/APIMATIC.md)  
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vku588050/paypal-agentic-cockpit)
 
@@ -11,25 +20,31 @@
 
 ## 1. Executive Summary & Core Moats
 
-AegisPay is a production-grade dual-sided agentic commerce platform that bridges autonomous consumer shopping agents with merchant clearinghouses, backstopped by zero-trust cryptographic spend enforcers and multi-modal dispute arbitration.
+AegisPay is a production-grade dual-sided agentic commerce platform that bridges autonomous consumer shopping agents with merchant clearinghouses, backstopped by zero-trust cryptographic spend enforcers, official `@paypal/agent-toolkit` bridges, and multi-modal dispute arbitration.
 
 ### Core Moats
-1. **Standalone Proxy MCP Server & Redis Lua Atomic Spend Enforcer (`packages/mcp-enforcer`):**
-   - Wraps `@paypal/mcp` behind an isolated zero-trust JSON-RPC/SSE proxy.
+1. **Official `@paypal/agent-toolkit` Bridge & Redis Lua Atomic Spend Enforcer (`packages/mcp-enforcer`):**
+   - Wraps PayPal's official Agent Toolkit (`PayPalAgentToolkit` / `PayPalMCPToolkit` v1.11.0) behind an isolated zero-trust JSON-RPC/SSE proxy.
    - Validates hardware WebCrypto **Ed25519 `SessionMandate` policies** and executes single-threaded **Redis Lua scripts** on Render Key-Value (`{vch_<id>}` cluster hash tags) to block adversarial prompt injection and runaway spending in `< 1ms` before PayPal APIs are touched.
-2. **Commission-Subsidized Multi-Vendor Knapsack Cart Optimizer (`apps/api-orchestrator`):**
+2. **Fastlane by PayPal 1-Click Passwordless Guest Checkout (`apps/web-cockpit`):**
+   - Integrates Fastlane accelerated buyer device authentication into the PayPal JS SDK v6 Web Components mount.
+   - Enables instant email lookup, passwordless payment method retrieval, and frictionless conversion to Vault v3 delegated spend mandates.
+3. **Commission-Subsidized Multi-Vendor Knapsack Cart Optimizer (`apps/api-orchestrator`):**
    - Discovers offers across 100M+ products via Channel3 (`/v1/search` and `/v1/lookup` with promo code `PAYPAL-HACKATHON-2026`).
-   - Solves an Integer Linear Programming (ILP) optimization balancing price, commission rebates ($\alpha = 0.75$), shipping waiver thresholds, and merchant anomaly scores into a single **PayPal Orders v2 Multi-Purchase-Unit `AUTHORIZE`** payload.
-3. **Synthetic Intent Negotiation & Vault v3 Bidding (`apps/api-orchestrator`):**
+   - Solves an Integer Linear Programming (ILP) optimization balancing price, commission rebates ($\alpha = 0.75$), shipping waiver thresholds, and merchant anomaly scores into a single **PayPal Orders v2 Multi-Purchase-Unit `AUTHORIZE`** payload with individual merchant payee routing.
+4. **Synthetic Intent Negotiation & Vault v3 Bidding (`apps/api-orchestrator`):**
    - When a desired basket exceeds budget caps by 5%–18%, the Buyer Agent mints a cryptographically bound **Synthetic Intent Voucher** anchored by a live **PayPal Vault v3 Setup Token (`/v3/vault/setup-tokens`)**.
    - Supports 2-turn bounded Dutch auction counter-bidding and 60-second real-time Human-in-the-Loop (HITL) push confirmation.
-4. **72-Hour Price-Drop Escrow via Render Workflows (`apps/workflows`):**
+5. **72-Hour Price-Drop Escrow via Render Workflows (`apps/workflows`):**
    - Durable checkpointing (`ctx.step()`) polls Channel3 `/v1/lookup` during PayPal's 72-hour authorization window. Automatically captures lower prices (`POST /v2/payments/authorizations/{id}/capture`) or splits/voids without canceling unaffected items.
-5. **12-Action Multi-Modal Dispute & Refund Arbiter (`apps/workflows`):**
-   - APIMatic-grounded coverage of PayPal Disputes v1.
+   - Extends authorization holds up to 29 days via `reauthorizeAuthorization` (`POST /v2/payments/authorizations/{id}/reauthorize`).
+6. **12-Action Multi-Modal Dispute & Refund Arbiter (`apps/workflows`):**
+   - APIMatic-grounded coverage of PayPal Disputes v1 with HATEOAS action resolution and appeals (`POST /v1/customer/disputes/{id}/appeal`).
    - Multimodal Vision comparisons (Channel3 studio `cleaned_url` vs. buyer return photo), EXIF tamper detection, and PayPal Shipment Tracking v1 (`/v1/shipping/trackers-batch`) calculate an orthogonal $(L, R) \in [0,1]^2$ Liability-Risk matrix.
    - Compiles in-memory forensic evidence dossiers via `pdf-lib` and uploads `multipart/form-data` to `/provide-evidence`. Generates automated prepaid return shipping labels with scannable QR codes for Tier 3 claims.
-6. **AG Studio 3 + Bryntum SLA Scheduler + DuckDB-WASM Cockpit (`apps/web-cockpit`):**
+7. **Live `PayPal-Mock-Response` Chaos Simulator (`apps/web-cockpit`):**
+   - Injects authentic `PayPal-Mock-Response` headers (`INSTRUMENT_DECLINED`, `COMPLIANCE_VIOLATION`) in PayPal Sandbox to verify that compensating Redis Lua rollbacks and financial ledgers handle bank declines in `< 1ms`.
+8. **AG Studio 3 + Bryntum SLA Scheduler + DuckDB-WASM Cockpit (`apps/web-cockpit`):**
    - AG Studio 3 (`@ag-grid/studio@3.0.0`) harness wiring 5 built-in agents plus custom `paypal_arbiter` specialist.
    - Sub-10ms in-browser OLAP queries via `@duckdb/duckdb-wasm`.
    - Bryntum SLA Scheduler (`@bryntum/scheduler-trial`) featuring an **"Unallocated SLA Deadline"** filter badge and urgent breach sorting.

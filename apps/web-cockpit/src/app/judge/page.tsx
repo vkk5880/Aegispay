@@ -323,6 +323,33 @@ export default function JudgeChaosPortal() {
             </button>
           </div>
 
+          {/* Fault Injection: PayPal-Mock-Response Compliance Violation */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-red-300 dark:border-red-500/40 hover:border-red-500 dark:hover:border-red-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
+            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-500/30 rounded text-[9px] font-mono font-bold">
+              FAULT INJECTION
+            </div>
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/40 flex items-center justify-center text-red-700 dark:text-red-400">
+                <ShieldAlert className="w-4 h-4" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-mono font-bold text-red-600 dark:text-red-400">MOCK</span>
+                <h3 className="font-bold text-sm text-slate-900 dark:text-red-200">Compliance Violation Quarantine</h3>
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                Injects <code>PayPal-Mock-Response: COMPLIANCE_VIOLATION</code>. Intercepts HTTP 422, freezes escrow disbursement, and triggers zero-leak compensating release.
+              </p>
+            </div>
+            <button
+              onClick={() => triggerChaos('TRIGGER_MOCK_COMPLIANCE_VIOLATION', 'PayPal-Mock-Response: COMPLIANCE_VIOLATION Quarantine')}
+              disabled={loadingAction !== null}
+              className="w-full py-2.5 px-3 bg-red-600 hover:bg-red-500 active:scale-95 disabled:opacity-50 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-red-500/20"
+            >
+              <Play className="w-3.5 h-3.5 fill-current" />
+              {loadingAction === 'TRIGGER_MOCK_COMPLIANCE_VIOLATION' ? 'Quarantining...' : 'Inject Compliance Fault'}
+            </button>
+          </div>
+
           {/* Track 6: Multi-Modal Dispute Forensics & Return Label */}
           <div className="p-5 rounded-2xl bg-white dark:bg-[#090f1e] border-2 border-teal-300 dark:border-teal-500/40 hover:border-teal-500 dark:hover:border-teal-500/80 transition-all flex flex-col justify-between space-y-4 shadow-sm dark:shadow-md relative overflow-hidden">
             <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-500/30 rounded text-[9px] font-mono font-bold">

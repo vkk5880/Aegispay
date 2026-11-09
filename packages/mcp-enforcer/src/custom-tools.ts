@@ -203,6 +203,31 @@ export const ProposeDisputeSettlementSchema = z.object({
   compromise_amount_cents: z.number().int().positive()
 });
 
+// 7. create_invoice
+export const CreateInvoiceSchema = z.object({
+  recipient_email: z.string().email(),
+  recipient_name: z.string().optional(),
+  business_name: z.string().optional(),
+  currency_code: z.string().default('USD'),
+  payment_term: z.string().default('NET_30'),
+  note: z.string().optional(),
+  items: z.array(z.object({
+    name: z.string().min(1),
+    quantity: z.number().int().positive().default(1),
+    unit_amount_cents: z.number().int().positive(),
+  })).min(1),
+});
+
+// 8. send_invoice
+export const SendInvoiceSchema = z.object({
+  invoice_id: z.string().min(1),
+});
+
+// 9. generate_invoice_qr
+export const GenerateInvoiceQrSchema = z.object({
+  invoice_id: z.string().min(1),
+});
+
 // Tool handlers interfaces
 export interface OptimizeBasketResult {
   basket_total_cents: number;
@@ -586,6 +611,39 @@ export const toolHandlers = {
       status: 'cancelled',
       cancellation_reason: args.payload?.reason || 'user_requested',
       audit_hash: auditEvent.hash,
+    };
+  },
+
+  async handleCreateInvoice(args: z.infer<typeof CreateInvoiceSchema>) {
+    console.error('[MCP Enforcer] Creating B2B invoice...', sanitizeForLogging(args));
+    const invId = `INV2-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
+    const totalCents = args.items.reduce((sum, item) => sum + item.unit_amount_cents * (item.quantity || 1), 0);
+    return {
+      invoice_id: invId,
+      status: 'DRAFT',
+      invoice_number: `INV-${Date.now()}`,
+      amount: {
+        currency_code: args.currency_code || 'USD',
+        value: (totalCents / 100).toFixed(2),
+      },
+      payer_view_url: `https://www.sandbox.paypal.com/invoice/p/#${invId}`,
+    };
+  },
+
+  async handleSendInvoice(args: z.infer<typeof SendInvoiceSchema>) {
+    console.error('[MCP Enforcer] Sending B2B invoice...', sanitizeForLogging(args));
+    return {
+      invoice_id: args.invoice_id,
+      status: 'SENT',
+      sent_at: new Date().toISOString(),
+    };
+  },
+
+  async handleGenerateInvoiceQr(args: z.infer<typeof GenerateInvoiceQrSchema>) {
+    console.error('[MCP Enforcer] Generating B2B invoice QR code...', sanitizeForLogging(args));
+    return {
+      invoice_id: args.invoice_id,
+      qr_code: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
     };
   },
 };
