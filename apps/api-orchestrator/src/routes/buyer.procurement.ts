@@ -8,6 +8,7 @@ import { defaultCounterBidEngine } from '../services/counter-bid-engine.js';
 import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
 import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 import { SpendMandateSchema } from '@aegispay/shared-types';
+import { renderWorkflowClient } from '../services/render-workflow-client.js';
 
 const KnapsackRequestSchema = z.object({
   query: z.string().optional(),
@@ -265,6 +266,12 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       // Mandatory server read-back verification
       const verifiedOrder = await defaultPayPalClient.getOrder(orderId);
 
+      // Trigger Render Workflows 72h Price Drop Watcher
+      const workflowDispatch = await renderWorkflowClient.triggerPriceDropWatcher({
+        escrowOrderId: orderId,
+        purchaseUnitIds: purchase_units.map((pu: any, i: number) => pu.reference_id || `pu_${i}`),
+      });
+
       return reply.send({
         status: 'AUTHORIZED',
         mandate_id,
@@ -273,6 +280,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         authorization_id: `AUTH-${orderId}`,
         stock_reservation_status: 'HELD_2PC',
         readback_verified: true,
+        workflow_dispatch: workflowDispatch,
         order: verifiedOrder,
       });
     } catch (err: any) {
@@ -307,9 +315,13 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       const evaluation = await defaultSyntheticIntentEngine.processSyntheticBid(parseResult.data);
+      const voucherId = (evaluation as any)?.voucher_id || (evaluation as any)?.voucher?.voucher_id || `vch_${Date.now()}`;
+      const workflowDispatch = await renderWorkflowClient.triggerSyntheticBidMatcher({ voucher_id: voucherId });
+
       return reply.send({
         status: 'PROCESSED',
         evaluation,
+        workflow_dispatch: workflowDispatch,
       });
     } catch (err: any) {
       fastify.log.error(err);

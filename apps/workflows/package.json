@@ -12,7 +12,7 @@
     "@aegispay/database": "workspace:*",
     "@aegispay/shared-types": "workspace:*",
     "@paypal/paypal-server-sdk": "^2.5.0",
-    "@renderinc/sdk": "^1.6.0",
+    "@renderinc/sdk": "^1.8.0",
     "dotenv": "^16.4.5",
     "drizzle-orm": "0.30.10",
     "exifreader": "^4.23.3",

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { defaultDisputeForensicsService } from '../services/dispute-forensics.js';
 import { defaultDisputeMatrixService } from '../services/dispute-matrix.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
+import { renderWorkflowClient } from '../services/render-workflow-client.js';
 
 const DisputeParamsSchema = z.object({
   id: z.string().min(1, 'Dispute ID is required'),
@@ -305,7 +306,14 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     const result = defaultDisputeForensicsService.analyzeDispute(parseResult.data);
-    return reply.status(200).send(result);
+    const disputeId = (parseResult.data as any).dispute_id || `disp_${Date.now()}`;
+    const workflowDispatch = await renderWorkflowClient.triggerDisputeForensics({
+      paypal_dispute_id: disputeId,
+    });
+    return reply.status(200).send({
+      ...result,
+      workflow_dispatch: workflowDispatch,
+    });
   });
 
   /**

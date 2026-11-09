@@ -1,26 +1,67 @@
+import http from 'http';
 import { startTaskServer } from '@renderinc/sdk/workflows';
 
-// Import tasks so they register themselves
+// Import flows & tasks so they register themselves with Render Workflows runtime
 import './tasks/priceDropWatcher.js';
 import './tasks/syntheticBidMatcher.js';
 import './tasks/disputeForensicsTask.js';
 import './tasks/reverseShippingLabelTask.js';
 import './tasks/fulfillmentWatcherTask.js';
 
-async function main() {
-  console.log('Starting AegisPay Render Workflows...');
-  
-  if (!process.env.RENDER_SDK_SOCKET_PATH) {
-    console.log('[Workflows] Standalone simulation mode: RENDER_SDK_SOCKET_PATH not present in free container. Tasks available via API orchestrator.');
-    return;
-  }
+export const REGISTERED_FLOWS = [
+  'priceDropWatcherFlow',
+  'disputeForensicsFlow',
+  'syntheticBidMatcherFlow',
+  'fulfillmentWatcherFlow',
+  'reverseShippingLabelFlow',
+] as const;
 
-  try {
-    await startTaskServer();
-    console.log('Task server started successfully.');
-  } catch (error) {
-    console.error('Failed to start task server:', error);
-    process.exit(1);
+async function main() {
+  console.log('[Workflows] Initializing AegisPay Render Workflows Engine (@renderinc/sdk v1.8.0)...');
+
+  if (process.env.RENDER_SDK_SOCKET_PATH) {
+    try {
+      await startTaskServer();
+      console.log('[Workflows] Render Workflows Task Server started successfully on socket:', process.env.RENDER_SDK_SOCKET_PATH);
+    } catch (error) {
+      console.error('[Workflows] Failed to start Render Task Server:', error);
+      process.exit(1);
+    }
+  } else {
+    // Local / container simulation: run lightweight HTTP listener to keep process active and provide health probes
+    const port = parseInt(process.env.PORT || '4001', 10);
+    const server = http.createServer((req, res) => {
+      if (req.url === '/health' || req.url === '/' || req.url === '/api/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          service: 'aegispay-workflows',
+          status: 'SIMULATION_ACTIVE',
+          engine: 'Render Workflows SDK v1.8.0',
+          execution_model: 'Durable Checkpointing (flow & ctx.step)',
+          registered_flows: REGISTERED_FLOWS,
+          uptime_seconds: process.uptime(),
+          timestamp: new Date().toISOString(),
+        }));
+      } else {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not Found' }));
+      }
+    });
+
+    server.listen(port, '0.0.0.0', () => {
+      console.log(`[Workflows] Local simulation server listening on http://0.0.0.0:${port}`);
+    });
+
+    // Graceful shutdown
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      process.on(signal, () => {
+        console.log(`[Workflows] Received ${signal}, closing simulation server...`);
+        server.close(() => {
+          console.log('[Workflows] Simulation server closed cleanly.');
+          process.exit(0);
+        });
+      });
+    }
   }
 }
 

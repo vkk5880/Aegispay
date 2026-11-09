@@ -1,15 +1,64 @@
+# ==============================================================================
+# AegisPay Render Blueprint IaC Specification (2026 Production Standard)
+# Target: PayPal AI Global Hackathon — Render Sponsor Prize Track ($1,000)
+# ==============================================================================
+
+previews:
+  generation: automatic
+  expireAfterDays: 3
+
+envVarGroups:
+  - name: aegispay-common
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: MASTRA_TELEMETRY_DISABLED
+        value: "true"
+
+  - name: aegispay-ai-config
+    envVars:
+      - key: COMMERCE_AGENT_MODEL
+        value: google/gemini-2.5-flash
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+
+  - name: aegispay-paypal-creds
+    envVars:
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: CHANNEL3_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: HTTP402_HMAC_SECRET
+        sync: false
+      - key: RENDER_API_KEY
+        sync: false
+
 services:
   # 1. Next.js 15 Dual-Sided Cockpit (Buyer Portal + AG Studio 3 + Bryntum + /app/judge)
   - type: web
     name: aegispay-web-cockpit
     runtime: node
     plan: standard
+    region: oregon
     buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/web-cockpit build
     startCommand: pnpm --filter @aegispay/web-cockpit start
     healthCheckPath: /api/health
     envVars:
-      - key: NODE_VERSION
-        value: 22
+      - fromGroup: aegispay-common
       - key: NEXT_PUBLIC_API_URL
         fromService:
           type: web
@@ -20,17 +69,21 @@ services:
       - key: NEXT_PUBLIC_AG_GRID_LICENSE_KEY
         sync: false
 
-  # 2. Fastify Financial Orchestrator + Proxy MCP Enforcer Host
+  # 2. Fastify Financial Orchestrator + Proxy MCP Enforcer Gateway
   - type: web
     name: aegispay-api-orchestrator
     runtime: node
     plan: standard
+    region: oregon
     buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/api-orchestrator build
+    preDeployCommand: pnpm --filter @aegispay/database build && pnpm --filter @aegispay/database db:push
+    initialDeployHook: pnpm --filter @aegispay/database run db:seed
     startCommand: pnpm --filter @aegispay/api-orchestrator start
     healthCheckPath: /api/integrations/verify
     envVars:
-      - key: NODE_VERSION
-        value: 22
+      - fromGroup: aegispay-common
+      - fromGroup: aegispay-ai-config
+      - fromGroup: aegispay-paypal-creds
       - key: DATABASE_URL
         fromDatabase:
           name: aegispay-postgres
@@ -40,39 +93,18 @@ services:
           type: keyvalue
           name: aegispay-redis
           property: connectionString
-      - key: PAYPAL_CLIENT_ID
-        sync: false
-      - key: PAYPAL_CLIENT_SECRET
-        sync: false
-      - key: PAYPAL_WEBHOOK_ID
-        sync: false
-      - key: CHANNEL3_API_KEY
-        sync: false
-      - key: COMMERCE_AGENT_MODEL
-        value: google/gemini-2.5-flash
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: HTTP402_HMAC_SECRET
-        sync: false
-      - key: MASTRA_TELEMETRY_DISABLED
-        value: "true"
 
-  # 3. Render Workflows Service (72h Price-Drop Watcher, Vision Arbiter & Synthetic Bid Matcher)
-  - type: worker
+  # 3. Native Render Workflows Service (72h Price-Drop Watcher, Vision Arbiter & Synthetic Matcher)
+  - type: workflow
     name: aegispay-workflows
     runtime: node
-    plan: starter
+    region: oregon
     buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/workflows build
     startCommand: pnpm --filter @aegispay/workflows start
     envVars:
-      - key: NODE_VERSION
-        value: 22
+      - fromGroup: aegispay-common
+      - fromGroup: aegispay-ai-config
+      - fromGroup: aegispay-paypal-creds
       - key: DATABASE_URL
         fromDatabase:
           name: aegispay-postgres
@@ -82,34 +114,43 @@ services:
           type: keyvalue
           name: aegispay-redis
           property: connectionString
-      - key: PAYPAL_CLIENT_ID
-        sync: false
-      - key: PAYPAL_CLIENT_SECRET
-        sync: false
-      - key: CHANNEL3_API_KEY
-        sync: false
-      - key: COMMERCE_AGENT_MODEL
-        value: google/gemini-2.5-flash
-      - key: GEMINI_MODEL
-        value: gemini-2.5-flash
-      - key: GEMINI_API_KEY
-        sync: false
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: MASTRA_TELEMETRY_DISABLED
-        value: "true"
 
-  # 4. Render Key-Value (Redis) for Atomic Lua Spend Enforcer
-  # Empty ipAllowList enforces zero-trust: ingress rejected from public internet, accessible strictly via Render internal private network CIDR
+  # 4. Scheduled Ledger Reconciliation & Dutch Auction Voucher Pruning Engine
+  - type: cron
+    name: aegispay-cron-reconciler
+    runtime: node
+    plan: starter
+    region: oregon
+    schedule: "0 */6 * * *"
+    buildCommand: pnpm install --frozen-lockfile --prod=false && pnpm --filter @aegispay/api-orchestrator build
+    startCommand: node apps/api-orchestrator/dist/jobs/reconcile-ledger.js
+    envVars:
+      - fromGroup: aegispay-common
+      - fromGroup: aegispay-paypal-creds
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aegispay-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: aegispay-redis
+          property: connectionString
+
+  # 5. Render Key-Value (Redis) for Atomic Lua Spend Enforcer
   - type: keyvalue
     name: aegispay-redis
     plan: starter
+    region: oregon
+    maxmemoryPolicy: noeviction
     ipAllowList: []
 
 databases:
-  # 5. Render Managed PostgreSQL 16 Ledger
+  # 6. Render Managed PostgreSQL 16 Ledger
   - name: aegispay-postgres
     plan: basic-1gb
+    region: oregon
     postgresMajorVersion: "16"
+    databaseName: aegispay
+    user: aegispay_admin
+    ipAllowList: []

@@ -1,4 +1,4 @@
-import { task } from '@renderinc/sdk/workflows';
+import { task, flow, type FlowContext } from '@renderinc/sdk/workflows';
 import { createDb, purchaseUnitHolds, escrowOrders } from '@aegispay/database';
 // @ts-ignore
 import { eq, inArray } from 'drizzle-orm';
@@ -200,9 +200,13 @@ export async function executeUnitPartialVoid(params: {
   }
 }
 
-export const priceDropWatcherTask = task(
-  { name: 'priceDropWatcher' },
-  async (ctx, payload: PriceDropWatcherPayload) => {
+export const priceDropWatcherFlow = flow(
+  {
+    name: 'priceDropWatcherFlow',
+    timeoutSeconds: 900,
+    plan: 'flex',
+  },
+  async (ctx: FlowContext, payload: PriceDropWatcherPayload) => {
     const eCtx = enhanceContext(ctx);
 
     // Fetch unit holds either by list of IDs or single ID
@@ -510,4 +514,9 @@ export const priceDropWatcherTask = task(
       resolutions,
     };
   }
+);
+
+export const priceDropWatcherTask = task(
+  { name: 'priceDropWatcher' },
+  priceDropWatcherFlow.func as any
 );

@@ -1255,6 +1255,39 @@ export class PayPalApimaticClient {
   }
 
   /**
+   * Shipment Tracking v1: GET /v1/shipping/trackers/{tracker_id}
+   */
+  async getShipmentTracker(trackerId: string) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || trackerId.startsWith('MOCK_')) {
+      return {
+        transaction_id: `TX-${trackerId}`,
+        tracking_number: trackerId,
+        status: trackerId.includes('DELIVERED') ? 'DELIVERED' : 'SHIPPED',
+        carrier: 'USPS',
+      };
+    }
+
+    const token = await this.getAccessToken();
+    const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v1/shipping/trackers/${encodeURIComponent(trackerId)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Failed to get shipment tracking: ${res.status} ${errText}`);
+    }
+    return await res.json();
+  }
+
+  async getShipmentTracking(trackerId: string) {
+    return this.getShipmentTracker(trackerId);
+  }
+
+  /**
    * Webhook signature verification (POST /v1/notifications/verify-webhook-signature)
    */
   async verifyWebhookSignature(params: {

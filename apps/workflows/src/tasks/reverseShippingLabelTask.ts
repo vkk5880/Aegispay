@@ -1,4 +1,4 @@
-import { task } from '@renderinc/sdk/workflows';
+import { task, flow, type FlowContext } from '@renderinc/sdk/workflows';
 import { createDb, disputeArbitrations } from '@aegispay/database';
 // @ts-ignore
 import { eq } from 'drizzle-orm';
@@ -342,9 +342,13 @@ export async function syncTrackingToPayPal(tracker: {
   };
 }
 
-export const reverseShippingLabelTask = task(
-  { name: 'reverseShippingLabelTask' },
-  async (ctx, payload: GenerateReturnLabelParams) => {
+export const reverseShippingLabelFlow = flow(
+  {
+    name: 'reverseShippingLabelFlow',
+    timeoutSeconds: 300,
+    plan: 'flex',
+  },
+  async (ctx: FlowContext, payload: GenerateReturnLabelParams) => {
     const eCtx = enhanceContext(ctx);
 
     return await eCtx.step('generate-return-shipping-label', async () => {
@@ -352,4 +356,9 @@ export const reverseShippingLabelTask = task(
       return await executeReverseShippingLabel(payload);
     });
   }
+);
+
+export const reverseShippingLabelTask = task(
+  { name: 'reverseShippingLabelTask' },
+  reverseShippingLabelFlow.func as any
 );

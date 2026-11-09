@@ -1,4 +1,4 @@
-import { task } from '@renderinc/sdk/workflows';
+import { task, flow, type FlowContext } from '@renderinc/sdk/workflows';
 import { createDb, syntheticIntentVouchers, escrowOrders } from '@aegispay/database';
 // @ts-ignore
 import { eq } from 'drizzle-orm';
@@ -7,8 +7,14 @@ import { enhanceContext } from './types.js';
 const connectionString = process.env.DATABASE_URL;
 const db = connectionString ? createDb(connectionString) : null;
 
-export const syntheticBidMatcherTask = task({ name: 'syntheticBidMatcher' }, async (ctx, payload: { voucher_id: string }) => {
-  const eCtx = enhanceContext(ctx);
+export const syntheticBidMatcherFlow = flow(
+  {
+    name: 'syntheticBidMatcherFlow',
+    timeoutSeconds: 300,
+    plan: 'flex',
+  },
+  async (ctx: FlowContext, payload: { voucher_id: string }) => {
+    const eCtx = enhanceContext(ctx);
   const voucherId = payload.voucher_id;
 
   const voucher = await eCtx.step('fetch-voucher', async () => {
@@ -125,3 +131,8 @@ export const syntheticBidMatcherTask = task({ name: 'syntheticBidMatcher' }, asy
     }
   }
 });
+
+export const syntheticBidMatcherTask = task(
+  { name: 'syntheticBidMatcher' },
+  syntheticBidMatcherFlow.func as any
+);

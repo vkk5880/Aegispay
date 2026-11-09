@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { priceDropWatcherTask, executeUnitPartialCapture, executeUnitPartialVoid } from './tasks/priceDropWatcher.js';
-import { syntheticBidMatcherTask } from './tasks/syntheticBidMatcher.js';
-import { executeReverseShippingLabel, reverseShippingLabelTask } from './tasks/reverseShippingLabelTask.js';
-import { disputeForensicsTask } from './tasks/disputeForensicsTask.js';
+import { priceDropWatcherTask, priceDropWatcherFlow, executeUnitPartialCapture, executeUnitPartialVoid } from './tasks/priceDropWatcher.js';
+import { syntheticBidMatcherTask, syntheticBidMatcherFlow } from './tasks/syntheticBidMatcher.js';
+import { executeReverseShippingLabel, reverseShippingLabelTask, reverseShippingLabelFlow } from './tasks/reverseShippingLabelTask.js';
+import { disputeForensicsTask, disputeForensicsFlow } from './tasks/disputeForensicsTask.js';
+import { fulfillmentWatcherTask, fulfillmentWatcherFlow } from './tasks/fulfillmentWatcherTask.js';
+import { REGISTERED_FLOWS } from './index.js';
 
 test('priceDropWatcher: executes independent unit partial capture / void split without collapsing order', async () => {
   // Test unit partial capture helper
@@ -120,4 +122,28 @@ test('disputeForensicsTask: wires Tier 3 dispute trigger directly to return labe
   assert.ok(result.buyer_response.return_tracking_number);
   assert.equal(result.buyer_response.offer_type, 'REFUND_WITH_RETURN');
   assert.equal(result.buyer_response.return_carrier, 'USPS');
+});
+
+test('Render Workflows v1.8.0: exports first-class flow definitions with FlowContext', async () => {
+  assert.equal(priceDropWatcherFlow.name, 'priceDropWatcherFlow');
+  assert.equal(priceDropWatcherFlow.flow, true);
+  assert.equal(typeof priceDropWatcherFlow.func, 'function');
+
+  assert.equal(disputeForensicsFlow.name, 'disputeForensicsFlow');
+  assert.equal(disputeForensicsFlow.flow, true);
+  assert.equal(typeof disputeForensicsFlow.func, 'function');
+
+  assert.equal(syntheticBidMatcherFlow.name, 'syntheticBidMatcherFlow');
+  assert.equal(syntheticBidMatcherFlow.flow, true);
+
+  assert.equal(fulfillmentWatcherFlow.name, 'fulfillmentWatcherFlow');
+  assert.equal(fulfillmentWatcherFlow.flow, true);
+
+  assert.equal(reverseShippingLabelFlow.name, 'reverseShippingLabelFlow');
+  assert.equal(reverseShippingLabelFlow.flow, true);
+
+  assert.equal(REGISTERED_FLOWS.length, 5);
+  assert.ok(REGISTERED_FLOWS.includes('priceDropWatcherFlow'));
+  assert.ok(REGISTERED_FLOWS.includes('disputeForensicsFlow'));
+  assert.ok(REGISTERED_FLOWS.includes('syntheticBidMatcherFlow'));
 });

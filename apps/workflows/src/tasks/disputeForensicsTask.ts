@@ -1,4 +1,4 @@
-import { task } from '@renderinc/sdk/workflows';
+import { task, flow, type FlowContext } from '@renderinc/sdk/workflows';
 import { createDb, disputeArbitrations, purchaseUnitHolds } from '@aegispay/database';
 // @ts-ignore
 import { eq } from 'drizzle-orm';
@@ -249,8 +249,14 @@ export function isActiveDispute(disputeId?: string): boolean {
   return true;
 }
 
-export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async (ctx, payload: DisputeForensicsPayload): Promise<DisputeForensicsResponse> => {
-  const eCtx = enhanceContext(ctx);
+export const disputeForensicsFlow = flow(
+  {
+    name: 'disputeForensicsFlow',
+    timeoutSeconds: 900,
+    plan: 'flex',
+  },
+  async (ctx: FlowContext, payload: DisputeForensicsPayload): Promise<DisputeForensicsResponse> => {
+    const eCtx = enhanceContext(ctx);
   const disputeId = payload.paypal_dispute_id;
   const autonomyMode: AutonomyDialMode = payload.autonomy_mode || 'SUPERVISED';
 
@@ -470,3 +476,8 @@ export const disputeForensicsTask = task({ name: 'disputeForensicsTask' }, async
     buyer_response: buyerResponse,
   };
 });
+
+export const disputeForensicsTask = task(
+  { name: 'disputeForensicsTask' },
+  disputeForensicsFlow.func as any
+);

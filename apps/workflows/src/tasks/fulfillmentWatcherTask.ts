@@ -1,4 +1,4 @@
-import { task } from '@renderinc/sdk/workflows';
+import { task, flow, type FlowContext } from '@renderinc/sdk/workflows';
 import { enhanceContext } from './types.js';
 import { executeReverseShippingLabel } from './reverseShippingLabelTask.js';
 import type { ReturnLabelInfo } from '@aegispay/shared-types';
@@ -100,14 +100,23 @@ export async function processFulfillmentException(
   };
 }
 
-export const fulfillmentWatcherTask = task(
+export const fulfillmentWatcherFlow = flow(
   {
-    name: 'fulfillmentWatcherTask',
+    name: 'fulfillmentWatcherFlow',
+    timeoutSeconds: 300,
+    plan: 'flex',
   },
-  async (ctx, event: FulfillmentEvent) => {
+  async (ctx: FlowContext, event: FulfillmentEvent) => {
     const eCtx = enhanceContext(ctx);
     return await eCtx.step('process-fulfillment-event', async () => {
       return await processFulfillmentException(event);
     });
   }
+);
+
+export const fulfillmentWatcherTask = task(
+  {
+    name: 'fulfillmentWatcherTask',
+  },
+  fulfillmentWatcherFlow.func as any
 );

@@ -5,6 +5,8 @@
 > - **PayPal Core Tracks:** Grand Prize ($12,000), Best Use of PayPal + AI ($5,000), Best Use of Agentic Commerce ($5,000), Best Demo Delivery ($5,000)
 > - **Sponsor Prize Tracks:** AG Grid / AG Studio 3 ($5,000), Channel3 ($1,500), APIMatic ($1,000), Bryntum ($1,000), Render ($1,000 Credits)
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vku588050/paypal-agentic-cockpit)
+
 ---
 
 ## 1. Executive Summary & Core Moats
@@ -43,7 +45,22 @@ AegisPay is a production-grade dual-sided agentic commerce platform that bridges
 | **Channel3** | $1,500 | Multimodal product discovery (`/v1/search` with text, image, category ID, and hex palette), promo code `PAYPAL-HACKATHON-2026`, commission rebate subsidy solver, Two-Phase Commit (2PC) inventory pre-check, and 72-hour price-drop polling. |
 | **APIMatic** | $1,000 | Grounded `@paypal/paypal-server-sdk` initialization, full schema validation, fault injection headers, idempotency tokens (`PayPal-Request-Id`), and comprehensive audit documentation in `docs/APIMATIC.md`. |
 | **Bryntum** | $1,000 | `@bryntum/scheduler-trial` embedded in Merchant Cockpit with prominent **"Unallocated SLA Deadline"** badge, color-coded urgency indicators (Red <6h, Yellow vision triage, Green submitted), and 1-click **"Imminent Breach"** filter. |
-| **Render** | $1,000 | Declarative multi-service Infrastructure-as-Code (`render.yaml`), Render Workflows durable task execution (`@renderinc/sdk`), Render Key-Value (Redis) Lua spend enforcer, and Render Managed PostgreSQL 16. |
+| **Render** | $1,000 | Declarative multi-service Infrastructure-as-Code (`render.yaml`), Render Workflows durable task execution (`@renderinc/sdk` v1.8.0), Zero-Trust Key-Value (Redis) with `noeviction` Lua spend enforcer, Managed PostgreSQL 16 with `preDeployCommand` / `initialDeployHook`, and scheduled 6-hour cron reconciler. See [`docs/RENDER.md`](docs/RENDER.md). |
+
+### 2.1 ☁️ Render Cloud Infrastructure & Workflows Deep-Dive
+
+AegisPay is engineered as a cloud-native, multi-service deployment orchestrating AI agents, atomic financial ledgers, and durable background workflows on **Render**:
+
+| Render Primitive | Service / Datastore | Purpose & Moat Rationale |
+| :--- | :--- | :--- |
+| **Render Workflows** | `aegispay-workflows` (`type: workflow`) | Durable execution engine built on `@renderinc/sdk` v1.8.0. Checkpoints (`ctx.step()`) long-running 72h price-drop polling, multimodal vision forensics, and Dutch auction synthetic bid matching with automatic retry backoff. |
+| **Render Key-Value** | `aegispay-redis` (`type: keyvalue`) | Zero-trust private memory store (`ipAllowList: []`, `maxmemoryPolicy: noeviction`). Executes atomic single-threaded Redis Lua scripts (`{vch_<id>}`) enforcing buyer budget caps in $< 1\text{ms}$ before PayPal REST calls. |
+| **Managed PostgreSQL 16** | `aegispay-postgres` (`databases`) | Double-entry financial ledger housing escrow orders and dispute forensics. Configured with automated `preDeployCommand` migrations and `initialDeployHook` seeding 1,000 sandbox records. |
+| **Render Web Services** | `aegispay-api-orchestrator`<br/>`aegispay-web-cockpit` | High-availability Node 22 services running Fastify 4 (MCP Gateway & APIMatic client) and Next.js 15 (Dual-Sided Merchant/Buyer Cockpit + AG Studio 3). |
+| **Render Cron** | `aegispay-cron-reconciler` (`type: cron`) | Scheduled periodic clearing engine (`0 */6 * * *`) pruning expired Dutch auction vouchers and reconciling pending holds against carrier APIs. |
+| **Render Blueprint IaC** | `render.yaml` | Declarative Infrastructure-as-Code linking all 5 services with shared `envVarGroups` and automatic PR preview environments (`previews.generation: automatic`). |
+
+> Complete sponsor compliance dossier and verification procedures: [`docs/RENDER.md`](docs/RENDER.md)
 
 ---
 
