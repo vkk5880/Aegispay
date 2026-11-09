@@ -5,7 +5,7 @@ import { LayoutShell } from '@/components/common/LayoutShell';
 import { ChatFlow } from '@/components/buyer/ChatFlow';
 import { KnapsackCartView } from '@/components/knapsack-cart-view';
 import { DisputeMatrixViewer } from '@/components/dispute-matrix';
-import { ShieldCheck, Activity, Cpu, Layers, Terminal } from 'lucide-react';
+import { Activity, Cpu } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
 
 export default function CockpitTelemetryPage() {
