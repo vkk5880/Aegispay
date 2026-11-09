@@ -38,6 +38,7 @@ import {
   AcpPaymentHandlerResponseSchema,
   AcpDiscountExtensionSchema,
   X402PaymentContractSchema,
+  X402ChallengeResponseSchema,
   X402PaymentReceiptSchema,
   PaymentReceiptSchema,
   McpToolCallSchema,
@@ -95,6 +96,31 @@ import {
   RouteConfigurationError,
   RouteValidationError,
   ResponseBodyTooLargeError,
+  ConstitutionModeSchema,
+  UnknownVendorPolicySchema,
+  TrustedVendorSchema,
+  SpendPolicySchema,
+  InjectionVectorTypeSchema,
+  InjectionScanResultSchema,
+  ContradictionCodeSchema,
+  LedgerFindingSchema,
+  CrossExamResultSchema,
+  FirewallVerdictTypeSchema,
+  EvidenceDiffCardSchema,
+  FirewallEvaluationSchema,
+  McpToolArgsSchema,
+  usdCents,
+  toCents,
+  parseStrictUsdDollar,
+  parseStrictPercentage,
+  PayPalInvoiceLineItemSchema,
+  PayPalInvoiceRecordSchema,
+  PayPalOrderRecordSchema,
+  PayPalTransactionRecordSchema,
+  PayPalTrackingRecordSchema,
+  PayPalDisputeRecordSchema,
+  PayPalSubscriptionRecordSchema,
+  PayPalSandboxStateSchema,
 } from './index.js';
 
 test('SpendMandateSchema: validates valid mandate and enforces cap refinement', () => {
@@ -2740,4 +2766,226 @@ test('Section 01 Audit: DisputeArbitrationSchema and DisputeAnalysisResultSchema
   };
   assert.equal(StrictEIP3009AuthorizationSchema.safeParse(validStrictAuth).success, true);
   assert.equal(StrictEIP3009AuthorizationSchema.safeParse({ ...validStrictAuth, from: 'invalid_evm_addr' }).success, false);
+});
+
+test('X402ChallengeResponseSchema: validates standard 402 challenge contract response payloads', () => {
+  const validContract = {
+    x402Version: 2,
+    payment_contract_id: 'ct_402_test_999',
+    pay_to: 'payto://paypal/merchant@aegispay.dev',
+    vault_setup_url: 'https://www.sandbox.paypal.com/v3/vault/setup-tokens',
+    accepted_headers: ['X-Payment-Receipt'],
+  };
+
+  const validChallengeResponse = {
+    status: 402 as const,
+    message: 'Payment Required',
+    contract: validContract,
+    pay_to: 'payto://paypal/merchant@aegispay.dev',
+    payment_contract_id: 'ct_402_test_999',
+    challenge_token: 'chk_tok_12345',
+  };
+
+  const parsed = X402ChallengeResponseSchema.safeParse(validChallengeResponse);
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.status, 402);
+    assert.equal(parsed.data.message, 'Payment Required');
+    assert.equal(parsed.data.contract.payment_contract_id, 'ct_402_test_999');
+  }
+
+  // Status must be 402
+  assert.equal(X402ChallengeResponseSchema.safeParse({ ...validChallengeResponse, status: 200 as any }).success, false);
+  // Missing required contract must fail
+  assert.equal(X402ChallengeResponseSchema.safeParse({ status: 402, message: 'Missing contract' }).success, false);
+});
+
+test('AllowAgent Constitutional Firewall & SpendPolicy schemas and utilities verification', () => {
+  // 1. Currency & percentage parser utilities
+  assert.equal(parseStrictUsdDollar('$40.00 USD'), 40.0);
+  assert.equal(parseStrictUsdDollar('150.50'), 150.5);
+  assert.equal(parseStrictUsdDollar('0', true), null); // rejectZero
+  assert.equal(parseStrictUsdDollar('-10.00'), null);
+  assert.equal(parseStrictPercentage('10%'), 10);
+  assert.equal(parseStrictPercentage('25.5'), 25.5);
+  assert.equal(parseStrictPercentage('-5'), null);
+  assert.equal(toCents(40.50), 4050);
+  assert.equal(usdCents(4050), '$40.50');
+
+  // 2. SpendPolicySchema and ConstitutionModeSchema
+  const validPolicy = {
+    mode: 'PERSONAL' as const,
+    maxAutoPayUsd: 40.0,
+    dailySpendCapUsd: 150.0,
+    maxAutoRefundUsd: 25.0,
+    priceCreepTolerancePercent: 10,
+    requireHistoricalInvoiceCheck: true,
+    unknownVendorPolicy: 'PAUSE_FOR_APPROVAL' as const,
+    requireNonDeliveryForRefundOrDispute: true,
+    blockPromptInjection: 'STRICT' as const,
+    allowedTools: ['pay_order', 'record_payment_for_invoice'],
+    trustedVendors: [{ name: 'Metro Fiber', email: 'autopay@metrofiber.com' }],
+    parseWarnings: [],
+    isFailClosed: false,
+  };
+  assert.equal(SpendPolicySchema.safeParse(validPolicy).success, true);
+  assert.equal(ConstitutionModeSchema.safeParse('BUSINESS').success, true);
+  assert.equal(ConstitutionModeSchema.safeParse('UNKNOWN').success, false);
+  assert.equal(UnknownVendorPolicySchema.safeParse('HARD_BLOCK').success, true);
+  assert.equal(TrustedVendorSchema.safeParse({ name: 'Vendor', email: 'valid@vendor.com' }).success, true);
+  assert.equal(TrustedVendorSchema.safeParse({ name: 'Vendor', email: 'not-an-email' }).success, false);
+
+  // 3. Injection and Contradiction codes
+  assert.equal(InjectionVectorTypeSchema.safeParse('ROLE_OVERRIDE').success, true);
+  assert.equal(InjectionVectorTypeSchema.safeParse('INVALID_VECTOR').success, false);
+
+  const scanResult = {
+    detected: true,
+    vectors: ['TOOL_SMUGGLING' as const],
+    flaggedQuotes: ['Ignore previous instructions'],
+    explanation: 'Adversarial instruction detected in untrusted invoice note',
+  };
+  assert.equal(InjectionScanResultSchema.safeParse(scanResult).success, true);
+
+  assert.equal(ContradictionCodeSchema.safeParse('PRICE_CREEP_DETECTED').success, true);
+  assert.equal(ContradictionCodeSchema.safeParse('DOUBLE_REFUND_DETECTED').success, true);
+  assert.equal(ContradictionCodeSchema.safeParse('DELIVERED_REFUND_CONFLICT').success, true);
+
+  const ledgerFinding = {
+    code: 'PRICE_CREEP_DETECTED' as const,
+    severity: 'WARNING' as const,
+    title: 'Recurring Subscription Price Spike',
+    agentClaim: '$120 requested',
+    ledgerFact: 'Historical baseline is $80',
+    readToolUsed: 'get_invoice',
+  };
+  assert.equal(LedgerFindingSchema.safeParse(ledgerFinding).success, true);
+
+  // 4. CrossExamResultSchema & EvidenceDiffCardSchema
+  const crossExam = {
+    readToolsInvoked: ['get_invoice', 'list_transactions'],
+    findings: [ledgerFinding],
+    verifiedFactsComplete: true,
+    addedLineItems: [],
+    verifiedBaselineUsd: 80,
+  };
+  assert.equal(CrossExamResultSchema.safeParse(crossExam).success, true);
+
+  const diffCard = {
+    payloadHash: 'hash_abc_123',
+    requestedAmountUsd: 120,
+    baselineAmountUsd: 80,
+    deltaUsd: 40,
+    percentageIncrease: 50,
+    findings: [ledgerFinding],
+    reasons: ['Price increase exceeds 10% tolerance'],
+    severity: 'WARNING' as const,
+    recommendedAction: 'ESCALATE' as const,
+  };
+  assert.equal(EvidenceDiffCardSchema.safeParse(diffCard).success, true);
+
+  // 5. FirewallVerdictTypeSchema & FirewallEvaluationSchema
+  assert.equal(FirewallVerdictTypeSchema.safeParse('AUTO_EXECUTE').success, true);
+  assert.equal(FirewallVerdictTypeSchema.safeParse('PAUSE_FOR_APPROVAL').success, true);
+  assert.equal(FirewallVerdictTypeSchema.safeParse('HARD_BLOCK').success, true);
+
+  const firewallEval = {
+    call: { toolName: 'pay_order', args: { orderId: 'ord_123' } },
+    injectionScan: { detected: false, vectors: [], flaggedQuotes: [], explanation: 'Clean' },
+    crossExam,
+    verdict: 'PAUSE_FOR_APPROVAL' as const,
+    triggeredRule: 'Rule: Price creep exceeds constitutional threshold',
+    payloadHash: 'hash_abc_123',
+    diffCard,
+    executionStatus: 'PAUSED' as const,
+    timestampIso: new Date().toISOString(),
+  };
+  assert.equal(FirewallEvaluationSchema.safeParse(firewallEval).success, true);
+
+  // 6. McpToolArgsSchema
+  const mcpArgs = {
+    orderId: 'ord_123',
+    amountUsd: 49.99,
+    currency: 'USD',
+  };
+  assert.equal(McpToolArgsSchema.safeParse(mcpArgs).success, true);
+
+  // 7. PayPal Sandbox Records & State
+  const lineItem = { name: 'Item A', quantity: 1, unitAmountUsd: 50, totalUsd: 50 };
+  assert.equal(PayPalInvoiceLineItemSchema.safeParse(lineItem).success, true);
+
+  const invoiceRecord = {
+    id: 'inv_001',
+    invoiceNumber: 'INV-2026-001',
+    merchantName: 'Metro Fiber',
+    merchantEmail: 'billing@metrofiber.com',
+    amountUsd: 50,
+    currency: 'USD',
+    status: 'SENT' as const,
+    items: [lineItem],
+  };
+  assert.equal(PayPalInvoiceRecordSchema.safeParse(invoiceRecord).success, true);
+
+  const orderRecord = {
+    id: 'ord_001',
+    merchantName: 'Metro Fiber',
+    merchantEmail: 'billing@metrofiber.com',
+    amountUsd: 50,
+    status: 'CREATED' as const,
+    intent: 'CAPTURE' as const,
+  };
+  assert.equal(PayPalOrderRecordSchema.safeParse(orderRecord).success, true);
+
+  const txnRecord = {
+    id: 'txn_001',
+    counterpartyName: 'Metro Fiber',
+    counterpartyEmail: 'billing@metrofiber.com',
+    direction: 'OUTBOUND' as const,
+    amountUsd: 50,
+    currency: 'USD',
+    timestampIso: new Date().toISOString(),
+    status: 'SUCCESS' as const,
+    type: 'PAYMENT' as const,
+  };
+  assert.equal(PayPalTransactionRecordSchema.safeParse(txnRecord).success, true);
+
+  const trackingRecord = {
+    trackingNumber: '1Z9999999999999999',
+    carrier: 'UPS',
+    status: 'DELIVERED' as const,
+    orderId: 'ord_001',
+  };
+  assert.equal(PayPalTrackingRecordSchema.safeParse(trackingRecord).success, true);
+
+  const disputeRecord = {
+    id: 'disp_001',
+    orderId: 'ord_001',
+    buyerEmail: 'buyer@example.com',
+    disputedAmountUsd: 50,
+    reason: 'MERCHANDISE_NOT_RECEIVED',
+    status: 'OPEN' as const,
+    buyerDeliveredConfirmed: false,
+  };
+  assert.equal(PayPalDisputeRecordSchema.safeParse(disputeRecord).success, true);
+
+  const subRecord = {
+    id: 'sub_001',
+    planName: 'Gigabit Internet',
+    merchantName: 'Metro Fiber',
+    monthlyAmountUsd: 79.99,
+    status: 'ACTIVE' as const,
+    lastBilledIso: new Date().toISOString(),
+  };
+  assert.equal(PayPalSubscriptionRecordSchema.safeParse(subRecord).success, true);
+
+  const sandboxState = {
+    invoices: [invoiceRecord],
+    orders: [orderRecord],
+    transactions: [txnRecord],
+    tracking: [trackingRecord],
+    disputes: [disputeRecord],
+    subscriptions: [subRecord],
+    dailySpendAccumulatorUsd: 50,
+  };
+  assert.equal(PayPalSandboxStateSchema.safeParse(sandboxState).success, true);
 });

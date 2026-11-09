@@ -1070,6 +1070,21 @@ export const X402PaymentContractSchema = z.object({
 
 export type X402PaymentContract = z.infer<typeof X402PaymentContractSchema>;
 
+/**
+ * x402 Challenge Response Schema (HTTP 402 Payment Required)
+ * Interoperable with RFC/L402 challenge response payload specifications
+ */
+export const X402ChallengeResponseSchema = z.object({
+  status: z.literal(402).default(402),
+  message: z.string().default('Payment Required'),
+  contract: X402PaymentContractSchema,
+  pay_to: z.string().optional(),
+  payment_contract_id: z.string().optional(),
+  challenge_token: z.string().optional(),
+});
+
+export type X402ChallengeResponse = z.infer<typeof X402ChallengeResponseSchema>;
+
 export const X402PaymentReceiptSchema = z.object({
   contractId: z.string().trim().min(1, 'contractId is required').max(128),
   amountCents: z.number({
@@ -4716,3 +4731,267 @@ export type UniversalBuyerFacets = z.infer<typeof UniversalBuyerFacetsSchema>;
 export type DomainFacet = z.infer<typeof DomainFacetSchema>;
 export type DynamicBuyerProfile = z.infer<typeof DynamicBuyerProfileSchema>;
 
+
+// ============================================================================
+// AllowAgent Constitutional Firewall & PayPal Agent Schemas & Utilities
+// ============================================================================
+
+export const ConstitutionModeSchema = z.enum(['PERSONAL', 'BUSINESS']);
+export type ConstitutionMode = z.infer<typeof ConstitutionModeSchema>;
+
+export const UnknownVendorPolicySchema = z.enum(['PAUSE_FOR_APPROVAL', 'HARD_BLOCK']);
+export type UnknownVendorPolicy = z.infer<typeof UnknownVendorPolicySchema>;
+
+export const TrustedVendorSchema = z.object({
+  name: z.string(),
+  email: z.string().email(),
+});
+export type TrustedVendor = z.infer<typeof TrustedVendorSchema>;
+
+export const SpendPolicySchema = z.object({
+  mode: ConstitutionModeSchema,
+  maxAutoPayUsd: z.number().nonnegative(),
+  dailySpendCapUsd: z.number().nonnegative(),
+  maxAutoRefundUsd: z.number().nonnegative(),
+  priceCreepTolerancePercent: z.number().nonnegative(),
+  requireHistoricalInvoiceCheck: z.boolean(),
+  unknownVendorPolicy: UnknownVendorPolicySchema,
+  requireNonDeliveryForRefundOrDispute: z.boolean(),
+  blockPromptInjection: z.enum(['STRICT', 'WARN']),
+  allowedTools: z.array(z.string()),
+  trustedVendors: z.array(TrustedVendorSchema),
+  parseWarnings: z.array(z.string()),
+  isFailClosed: z.boolean(),
+});
+export type SpendPolicy = z.infer<typeof SpendPolicySchema>;
+
+export const InjectionVectorTypeSchema = z.enum([
+  'ROLE_OVERRIDE',
+  'TOOL_SMUGGLING',
+  'AUTHORITY_COERCION',
+]);
+export type InjectionVectorType = z.infer<typeof InjectionVectorTypeSchema>;
+
+export const InjectionScanResultSchema = z.object({
+  detected: z.boolean(),
+  vectors: z.array(InjectionVectorTypeSchema),
+  flaggedQuotes: z.array(z.string()),
+  explanation: z.string(),
+});
+export type InjectionScanResult = z.infer<typeof InjectionScanResultSchema>;
+
+export const ContradictionCodeSchema = z.enum([
+  'INVALID_TOOL_ARGUMENTS',
+  'MISSING_OR_INVALID_RESOURCE',
+  'TOOL_NOT_IN_CONSTITUTION',
+  'SPOOFED_VENDOR_DOMAIN',
+  'NEW_UNVERIFIED_VENDOR',
+  'PRICE_CREEP_DETECTED',
+  'MAX_AUTOPAY_EXCEEDED',
+  'DAILY_CAP_EXCEEDED',
+  'DOUBLE_REFUND_DETECTED',
+  'DELIVERED_REFUND_CONFLICT',
+  'DELIVERED_DISPUTE_SURRENDER',
+  'SUBSCRIPTION_PRICE_SPIKE',
+]);
+export type ContradictionCode = z.infer<typeof ContradictionCodeSchema>;
+
+export const LedgerFindingSchema = z.object({
+  code: ContradictionCodeSchema,
+  severity: z.enum(['WARNING', 'CRITICAL']),
+  title: z.string(),
+  agentClaim: z.string(),
+  ledgerFact: z.string(),
+  readToolUsed: z.string(),
+});
+export type LedgerFinding = z.infer<typeof LedgerFindingSchema>;
+
+export const CrossExamResultSchema = z.object({
+  readToolsInvoked: z.array(z.string()),
+  findings: z.array(LedgerFindingSchema),
+  verifiedFactsComplete: z.boolean(),
+  addedLineItems: z.array(z.any()).optional().default([]),
+  verifiedBaselineUsd: z.number().optional(),
+  ledgerUntrustedText: z.string().optional(),
+  ledgerCitations: z.array(z.string()).optional().default([]),
+});
+export type CrossExamResult = z.infer<typeof CrossExamResultSchema>;
+
+export const FirewallVerdictTypeSchema = z.enum([
+  'AUTO_EXECUTE',
+  'PAUSE_FOR_APPROVAL',
+  'HARD_BLOCK',
+]);
+export type FirewallVerdictType = z.infer<typeof FirewallVerdictTypeSchema>;
+
+export const EvidenceDiffCardSchema = z.object({
+  payloadHash: z.string(),
+  requestedAmountUsd: z.number(),
+  baselineAmountUsd: z.number().optional(),
+  deltaUsd: z.number().optional(),
+  percentageIncrease: z.number().optional(),
+  findings: z.array(LedgerFindingSchema),
+  reasons: z.array(z.string()),
+  severity: z.enum(['WARNING', 'CRITICAL']),
+  recommendedAction: z.enum(['APPROVE', 'REJECT', 'ESCALATE']),
+});
+export type EvidenceDiffCard = z.infer<typeof EvidenceDiffCardSchema>;
+
+export const FirewallEvaluationSchema = z.object({
+  call: z.any(),
+  injectionScan: InjectionScanResultSchema,
+  crossExam: CrossExamResultSchema,
+  verdict: FirewallVerdictTypeSchema,
+  triggeredRule: z.string(),
+  payloadHash: z.string(),
+  diffCard: EvidenceDiffCardSchema.optional(),
+  executionStatus: z.enum(['NOT_EXECUTED', 'PAUSED', 'BLOCKED', 'EXECUTED']),
+  timestampIso: z.string(),
+});
+export type FirewallEvaluation = z.infer<typeof FirewallEvaluationSchema>;
+
+export type PayPalMcpWriteTool =
+  | 'pay_order'
+  | 'record_payment_for_invoice'
+  | 'create_order'
+  | 'create_refund'
+  | 'accept_dispute_claim'
+  | 'update_subscription'
+  | 'cancel_subscription';
+
+export type PayPalMcpReadTool =
+  | 'get_order'
+  | 'get_invoice'
+  | 'get_dispute'
+  | 'get_subscription'
+  | 'list_transactions'
+  | 'list_invoices'
+  | 'list_orders';
+
+export const McpToolArgsSchema = z.object({
+  orderId: z.string().optional(),
+  invoiceId: z.string().optional(),
+  disputeId: z.string().optional(),
+  subscriptionId: z.string().optional(),
+  recipientName: z.string().optional(),
+  recipientEmail: z.string().optional(),
+  amountUsd: z.number().optional(),
+  currency: z.string().optional(),
+  reason: z.string().optional(),
+  customId: z.string().optional(),
+});
+export type McpToolArgs = z.infer<typeof McpToolArgsSchema>;
+
+export function usdCents(cents: number): string {
+  const dollars = (cents / 100).toFixed(2);
+  return `$${dollars}`;
+}
+
+export function toCents(usd: number): number {
+  return Math.round(usd * 100);
+}
+
+export function parseStrictUsdDollar(raw: string, rejectZero: boolean = false): number | null {
+  const trimmed = raw.trim();
+  const m = trimmed.match(/^\$?([0-9]+(?:\.[0-9]{1,2})?)\s*(?:usd)?$/i);
+  if (!m || !m[1]) return null;
+  const val = parseFloat(m[1]);
+  if (!Number.isFinite(val) || val < 0) return null;
+  if (rejectZero && val === 0) return null;
+  return Math.round(val * 100) / 100;
+}
+
+export function parseStrictPercentage(raw: string): number | null {
+  const trimmed = raw.trim();
+  const m = trimmed.match(/^([0-9]+(?:\.[0-9]+)?)\s*%?$/);
+  if (!m || !m[1]) return null;
+  const val = parseFloat(m[1]);
+  if (!Number.isFinite(val) || val < 0 || val > 1000) return null;
+  return Math.round(val * 100) / 100;
+}
+
+export const PayPalInvoiceLineItemSchema = z.object({
+  name: z.string(),
+  quantity: z.number(),
+  unitAmountUsd: z.number(),
+  totalUsd: z.number(),
+});
+export type PayPalInvoiceLineItem = z.infer<typeof PayPalInvoiceLineItemSchema>;
+
+export const PayPalInvoiceRecordSchema = z.object({
+  id: z.string(),
+  invoiceNumber: z.string(),
+  merchantName: z.string(),
+  merchantEmail: z.string(),
+  amountUsd: z.number(),
+  currency: z.string().default('USD'),
+  status: z.enum(['DRAFT', 'SENT', 'PAID', 'CANCELLED']),
+  items: z.array(PayPalInvoiceLineItemSchema).default([]),
+  note: z.string().optional(),
+});
+export type PayPalInvoiceRecord = z.infer<typeof PayPalInvoiceRecordSchema>;
+
+export const PayPalOrderRecordSchema = z.object({
+  id: z.string(),
+  merchantName: z.string(),
+  merchantEmail: z.string(),
+  amountUsd: z.number(),
+  currency: z.string().default('USD'),
+  status: z.enum(['CREATED', 'SAVED', 'APPROVED', 'VOIDED', 'COMPLETED']),
+  intent: z.enum(['CAPTURE', 'AUTHORIZE']),
+});
+export type PayPalOrderRecord = z.infer<typeof PayPalOrderRecordSchema>;
+
+export const PayPalTransactionRecordSchema = z.object({
+  id: z.string(),
+  counterpartyName: z.string(),
+  counterpartyEmail: z.string(),
+  direction: z.enum(['INBOUND', 'OUTBOUND']),
+  amountUsd: z.number(),
+  currency: z.string().default('USD'),
+  timestampIso: z.string(),
+  status: z.enum(['SUCCESS', 'PENDING', 'DENIED', 'REVERSED']),
+  note: z.string().optional(),
+  type: z.enum(['PAYMENT', 'INVOICE_SETTLEMENT', 'REFUND', 'DISPUTE_PAYOUT', 'SUBSCRIPTION']),
+});
+export type PayPalTransactionRecord = z.infer<typeof PayPalTransactionRecordSchema>;
+
+export const PayPalTrackingRecordSchema = z.object({
+  trackingNumber: z.string(),
+  carrier: z.string(),
+  status: z.enum(['SHIPPED', 'IN_TRANSIT', 'DELIVERED', 'RETURNED']),
+  orderId: z.string(),
+});
+export type PayPalTrackingRecord = z.infer<typeof PayPalTrackingRecordSchema>;
+
+export const PayPalDisputeRecordSchema = z.object({
+  id: z.string(),
+  orderId: z.string(),
+  buyerEmail: z.string(),
+  disputedAmountUsd: z.number(),
+  reason: z.string(),
+  status: z.enum(['OPEN', 'UNDER_REVIEW', 'RESOLVED', 'CLOSED']),
+  buyerDeliveredConfirmed: z.boolean(),
+});
+export type PayPalDisputeRecord = z.infer<typeof PayPalDisputeRecordSchema>;
+
+export const PayPalSubscriptionRecordSchema = z.object({
+  id: z.string(),
+  planName: z.string(),
+  merchantName: z.string(),
+  monthlyAmountUsd: z.number(),
+  status: z.enum(['ACTIVE', 'SUSPENDED', 'CANCELLED']),
+  lastBilledIso: z.string(),
+});
+export type PayPalSubscriptionRecord = z.infer<typeof PayPalSubscriptionRecordSchema>;
+
+export const PayPalSandboxStateSchema = z.object({
+  invoices: z.array(PayPalInvoiceRecordSchema),
+  orders: z.array(PayPalOrderRecordSchema),
+  transactions: z.array(PayPalTransactionRecordSchema),
+  tracking: z.array(PayPalTrackingRecordSchema),
+  disputes: z.array(PayPalDisputeRecordSchema),
+  subscriptions: z.array(PayPalSubscriptionRecordSchema),
+  dailySpendAccumulatorUsd: z.number().default(0),
+});
+export type PayPalSandboxState = z.infer<typeof PayPalSandboxStateSchema>;
