@@ -831,12 +831,13 @@ export class PayPalApimaticClient {
       return response.result;
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
+        const mockTokenId = `vault_setup_mock_${Date.now()}`;
         return {
-          id: `mock_setup_token_${Date.now()}`,
+          id: mockTokenId,
           status: 'CREATED',
           customer: params.customer,
           links: [
-            { href: `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/mock_setup_token_${Date.now()}`, rel: 'approve', method: 'GET' },
+            { href: `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${mockTokenId}`, rel: 'approve', method: 'GET' },
           ],
         };
       }

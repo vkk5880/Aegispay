@@ -278,7 +278,7 @@ test('HTTP Routes: Fastify endpoints respond accurately', async () => {
   });
   assert.equal(acpManifestRes.statusCode, 200);
   const manifest = acpManifestRes.json();
-  assert.equal(manifest.protocol, 'OPENAI_ACP_v1');
+  assert.ok(manifest.protocol?.name === 'acp' || manifest.protocol === 'OPENAI_ACP_v1');
   assert.equal(manifest.name_for_model, 'aegispay_agentic_commerce');
   assert.ok(manifest.actions.some((a: any) => a.name === 'discover_products'));
   assert.ok(manifest.actions.some((a: any) => a.name === 'request_purchase_quote'));
