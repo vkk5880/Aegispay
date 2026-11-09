@@ -23,6 +23,7 @@ import {
 import type { ProductCardData } from '@aegispay/shared-types';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
+import { useUiMode } from '@/context/UiModeContext';
 
 const PRESET_QUERIES = [
   'Noise canceling studio headphones under $350',
@@ -130,6 +131,7 @@ export function SearchContent({
   const searchParams = useSearchParams();
   const router = useRouter();
   const mounted = useMounted();
+  const { showTechnicalDetails } = useUiMode();
   const queryParam = searchParams?.get('q') || '';
 
   const [query, setQuery] = useState<string>(queryParam);
@@ -206,13 +208,21 @@ export function SearchContent({
       <div className="mb-8 text-center flex flex-col items-center">
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3.5 py-1 text-xs font-semibold text-cyan-400">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>Mastra Workflow 4-Step DAG Search & Knapsack Solver</span>
+          <span>
+            {showTechnicalDetails
+              ? 'Mastra Workflow 4-Step DAG Search & Knapsack Solver'
+              : 'Smart Multi-Store Search & Savings Finder'}
+          </span>
         </div>
         <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white font-display mb-3">
-          Autonomous Product Search & Comparison
+          {showTechnicalDetails
+            ? 'Autonomous Product Search & Comparison'
+            : 'Product Search & Price Comparison'}
         </h1>
         <p className="max-w-xl text-sm sm:text-base text-slate-400 font-medium">
-          Deterministic 0-hallucination multi-merchant product discovery backstopped by PayPal Vault v3 and Ed25519 Spend Mandates.
+          {showTechnicalDetails
+            ? 'Deterministic 0-hallucination multi-merchant product discovery backstopped by PayPal Vault v3 and Ed25519 Spend Mandates.'
+            : 'Find the best deals across verified stores with automatic coupon savings and PayPal purchase protection.'}
         </p>
 
         {/* Search Input Bar */}
@@ -231,7 +241,7 @@ export function SearchContent({
               disabled={isSearching}
               className="absolute right-2 px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer"
             >
-              {isSearching ? 'Solving...' : 'Search'}
+              {isSearching ? (showTechnicalDetails ? 'Solving...' : 'Searching...') : 'Search'}
             </button>
           </div>
 
@@ -261,11 +271,13 @@ export function SearchContent({
         <div className="flex items-center gap-3">
           <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
           <span className="text-slate-300">
-            Query: <strong className="text-white">&ldquo;{activeQuery}&rdquo;</strong>
+            {showTechnicalDetails ? 'Query:' : 'Looking for:'} <strong className="text-white">&ldquo;{activeQuery}&rdquo;</strong>
           </span>
           <span className="text-slate-600">|</span>
           <span className="text-cyan-400">
-            {results.length} Verified Offers Ranked by Deterministic Composite Score
+            {showTechnicalDetails
+              ? `${results.length} Verified Offers Ranked by Deterministic Composite Score`
+              : `${results.length} Verified Best Value Offers Found`}
           </span>
         </div>
 
@@ -276,12 +288,14 @@ export function SearchContent({
           {copiedShare ? (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400 font-bold">Share Dossier Copied!</span>
+              <span className="text-emerald-400 font-bold">
+                {showTechnicalDetails ? 'Share Dossier Copied!' : 'Comparison Link Copied!'}
+              </span>
             </>
           ) : (
             <>
               <Share2 className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Share Comparison Dossier</span>
+              <span>{showTechnicalDetails ? 'Share Comparison Dossier' : 'Share Comparison'}</span>
             </>
           )}
         </button>
@@ -384,7 +398,9 @@ export function SearchContent({
 
                   {product.commission_rebate_cents && product.commission_rebate_cents > 0 && (
                     <div className="mb-3 text-[11px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-800/40 px-2 py-1 rounded">
-                      Rebate Savings: +{formatPrice(product.commission_rebate_cents)}
+                      {showTechnicalDetails
+                        ? `Rebate Savings: +${formatPrice(product.commission_rebate_cents)}`
+                        : `Instant Cashback: ${formatPrice(product.commission_rebate_cents)}`}
                     </div>
                   )}
 
@@ -393,7 +409,7 @@ export function SearchContent({
                       href="/"
                       className="flex-1 text-center py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/50"
                     >
-                      1-Click Buy in Cockpit
+                      {showTechnicalDetails ? '1-Click Buy in Cockpit' : '1-Click Buy with PayPal'}
                     </Link>
                     <Link
                       href={`/share?product=${encodeURIComponent(product.product_id)}`}

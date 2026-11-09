@@ -20,6 +20,7 @@ import {
   EyeOff,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface UserSettings {
   // Delivery Address
@@ -73,19 +74,24 @@ export function UserSettingsDrawer({
   maxBudgetCents = 50000,
   onSave,
 }: UserSettingsDrawerProps) {
+  const { isProduction, showTechnicalDetails, setShowTechnicalDetails } = useUiMode();
   const [formData, setFormData] = useState<UserSettings>(initialSettings);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
 
   useEffect(() => {
-    setFormData(initialSettings);
-  }, [initialSettings, isOpen]);
+    setFormData({
+      ...initialSettings,
+      developerModeEnabled: initialSettings.developerModeEnabled || showTechnicalDetails,
+    });
+  }, [initialSettings, isOpen, showTechnicalDetails]);
 
   if (!isOpen) return null;
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(formData);
+    setShowTechnicalDetails(formData.developerModeEnabled);
     setSavedSuccess(true);
     setTimeout(() => {
       setSavedSuccess(false);
@@ -112,7 +118,7 @@ export function UserSettingsDrawer({
             <div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <Sliders className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                <span>Buyer Procurement Settings</span>
+                <span>{showTechnicalDetails ? 'Buyer Procurement Settings' : 'Shopping & Delivery Settings'}</span>
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Configure delivery destination, price-drop protection & spend rules
@@ -423,170 +429,174 @@ export function UserSettingsDrawer({
             </div>
 
             {/* Section 5: Advanced / Developer AI Controls (BYOK & Model Override) */}
-            <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800/80">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Code className="w-4 h-4 text-amber-500" />
-                  <div>
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Developer & Judge Mode
-                    </span>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Override agent model & supply personal user-scoped key (BYOK)
-                    </p>
-                  </div>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formData.developerModeEnabled}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        developerModeEnabled: e.target.checked,
-                        aiModel: e.target.checked
-                          ? formData.aiModel || 'google/gemini-2.5-flash'
-                          : '',
-                      })
-                    }
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
-                </label>
-              </div>
-
-              {!formData.developerModeEnabled ? (
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-2">
-                  <Sparkles className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
-                  <span>
-                    Standard shoppers automatically use the platform deployment model (<code className="text-cyan-600 dark:text-cyan-400 font-mono">COMMERCE_AGENT_MODEL</code>). Toggle on to test alternative reasoning engines or supply custom tokens.
-                  </span>
-                </div>
-              ) : (
-                <div className="space-y-4 pt-1 animate-fade-in">
-                  {/* User-Scoped Isolation Callout */}
-                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300 space-y-1">
-                    <div className="flex items-center gap-1.5 font-bold">
-                      <Lock className="w-3.5 h-3.5 text-amber-500" />
-                      <span>User-Scoped Isolation Guarantee</span>
+            {!isProduction && (
+              <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800/80">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Code className="w-4 h-4 text-amber-500" />
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Developer & Judge Mode
+                      </span>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Override agent model & supply personal user-scoped key (BYOK)
+                      </p>
                     </div>
-                    <p className="text-[10px] leading-relaxed text-slate-600 dark:text-slate-400">
-                      Your model preference and API key are strictly personal to your browser session and ephemeral requests. Keys are <strong>never</strong> saved to database, Redis, or platform logs, and never shared with other users.
-                    </p>
                   </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.developerModeEnabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setFormData({
+                          ...formData,
+                          developerModeEnabled: checked,
+                          aiModel: checked
+                            ? formData.aiModel || 'google/gemini-2.5-flash'
+                            : '',
+                        });
+                        setShowTechnicalDetails(checked);
+                      }}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-300 dark:bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-500"></div>
+                  </label>
+                </div>
 
-                  {/* Model Selection */}
-                  <div className="space-y-2">
-                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Bot className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Select LLM Reasoning Engine</span>
-                      </span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800/60">
-                        {formData.aiModel ? formData.aiModel.split('/')[1] || formData.aiModel : 'Default'}
-                      </span>
-                    </label>
+                {!formData.developerModeEnabled ? (
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-2">
+                    <Sparkles className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
+                    <span>
+                      Standard shoppers automatically use the platform deployment model (<code className="text-cyan-600 dark:text-cyan-400 font-mono">COMMERCE_AGENT_MODEL</code>). Toggle on to test alternative reasoning engines or supply custom tokens.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-4 pt-1 animate-fade-in">
+                    {/* User-Scoped Isolation Callout */}
+                    <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300 space-y-1">
+                      <div className="flex items-center gap-1.5 font-bold">
+                        <Lock className="w-3.5 h-3.5 text-amber-500" />
+                        <span>User-Scoped Isolation Guarantee</span>
+                      </div>
+                      <p className="text-[10px] leading-relaxed text-slate-600 dark:text-slate-400">
+                        Your model preference and API key are strictly personal to your browser session and ephemeral requests. Keys are <strong>never</strong> saved to database, Redis, or platform logs, and never shared with other users.
+                      </p>
+                    </div>
 
+                    {/* Model Selection */}
                     <div className="space-y-2">
-                      {[
-                        {
-                          id: 'google/gemini-2.5-flash',
-                          name: 'Gemini 2.5 Flash',
-                          badge: 'Fast & Default',
-                          desc: 'Ultra-fast sub-second tool execution with 1M context window.',
-                        },
-                        {
-                          id: 'google/gemini-1.5-pro',
-                          name: 'Gemini 1.5 Pro',
-                          badge: 'Deep Multimodal',
-                          desc: 'Complex 2M token reasoning over huge multi-vendor catalogs.',
-                        },
-                        {
-                          id: 'anthropic/claude-3-5-sonnet',
-                          name: 'Claude 3.5 Sonnet',
-                          badge: 'Superior Synthesis',
-                          desc: 'Advanced schema verification and deterministic step synthesis.',
-                        },
-                        {
-                          id: 'openai/gpt-4o',
-                          name: 'GPT-4o',
-                          badge: 'Omni Reasoning',
-                          desc: 'Omni-channel reasoning with flexible tool use.',
-                        },
-                      ].map((m) => (
-                        <div
-                          key={m.id}
-                          onClick={() => setFormData({ ...formData, aiModel: m.id })}
-                          className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                            formData.aiModel === m.id
-                              ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/30 ring-1 ring-amber-500/40 shadow-xs'
-                              : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={`w-2 h-2 rounded-full ${
-                                  formData.aiModel === m.id
-                                    ? 'bg-amber-500 ring-4 ring-amber-500/20'
-                                    : 'bg-slate-300 dark:bg-slate-700'
-                                }`}
-                              />
-                              <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                {m.name}
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Bot className="w-3.5 h-3.5 text-amber-500" />
+                          <span>Select LLM Reasoning Engine</span>
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800/60">
+                          {formData.aiModel ? formData.aiModel.split('/')[1] || formData.aiModel : 'Default'}
+                        </span>
+                      </label>
+
+                      <div className="space-y-2">
+                        {[
+                          {
+                            id: 'google/gemini-2.5-flash',
+                            name: 'Gemini 2.5 Flash',
+                            badge: 'Fast & Default',
+                            desc: 'Ultra-fast sub-second tool execution with 1M context window.',
+                          },
+                          {
+                            id: 'google/gemini-1.5-pro',
+                            name: 'Gemini 1.5 Pro',
+                            badge: 'Deep Multimodal',
+                            desc: 'Complex 2M token reasoning over huge multi-vendor catalogs.',
+                          },
+                          {
+                            id: 'anthropic/claude-3-5-sonnet',
+                            name: 'Claude 3.5 Sonnet',
+                            badge: 'Superior Synthesis',
+                            desc: 'Advanced schema verification and deterministic step synthesis.',
+                          },
+                          {
+                            id: 'openai/gpt-4o',
+                            name: 'GPT-4o',
+                            badge: 'Omni Reasoning',
+                            desc: 'Omni-channel reasoning with flexible tool use.',
+                          },
+                        ].map((m) => (
+                          <div
+                            key={m.id}
+                            onClick={() => setFormData({ ...formData, aiModel: m.id })}
+                            className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                              formData.aiModel === m.id
+                                ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/30 ring-1 ring-amber-500/40 shadow-xs'
+                                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`w-2 h-2 rounded-full ${
+                                    formData.aiModel === m.id
+                                      ? 'bg-amber-500 ring-4 ring-amber-500/20'
+                                      : 'bg-slate-300 dark:bg-slate-700'
+                                  }`}
+                                />
+                                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                  {m.name}
+                                </span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                                {m.badge}
                               </span>
                             </div>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                              {m.badge}
-                            </span>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                              {m.desc}
+                            </p>
                           </div>
-                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
-                            {m.desc}
-                          </p>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* User-Scoped API Key (BYOK) */}
-                  <div className="space-y-1.5">
-                    <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <Key className="w-3.5 h-3.5 text-amber-500" />
-                        <span>User-Scoped Personal API Key (BYOK)</span>
-                      </span>
-                      <span className="text-[10px] text-slate-400">Optional</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showApiKey ? 'text' : 'password'}
-                        value={formData.userApiKey || ''}
-                        onChange={(e) =>
-                          setFormData({ ...formData, userApiKey: e.target.value })
-                        }
-                        placeholder="sk-... or AIzaSy..."
-                        className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-                        autoComplete="off"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowApiKey(!showApiKey)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                      >
-                        {showApiKey ? (
-                          <EyeOff className="w-3.5 h-3.5" />
-                        ) : (
-                          <Eye className="w-3.5 h-3.5" />
-                        )}
-                      </button>
+                    {/* User-Scoped API Key (BYOK) */}
+                    <div className="space-y-1.5">
+                      <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Key className="w-3.5 h-3.5 text-amber-500" />
+                          <span>User-Scoped Personal API Key (BYOK)</span>
+                        </span>
+                        <span className="text-[10px] text-slate-400">Optional</span>
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showApiKey ? 'text' : 'password'}
+                          value={formData.userApiKey || ''}
+                          onChange={(e) =>
+                            setFormData({ ...formData, userApiKey: e.target.value })
+                          }
+                          placeholder="sk-... or AIzaSy..."
+                          className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                          autoComplete="off"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey(!showApiKey)}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        >
+                          {showApiKey ? (
+                            <EyeOff className="w-3.5 h-3.5" />
+                          ) : (
+                            <Eye className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Used strictly for your requests without consuming platform quota. Discarded when session ends.
+                      </p>
                     </div>
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                      Used strictly for your requests without consuming platform quota. Discarded when session ends.
-                    </p>
                   </div>
-                </div>
-              )}
-            </div>
+                )}
+              </div>
+            )}
           </form>
 
           {/* Footer Actions */}

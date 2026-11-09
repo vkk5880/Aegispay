@@ -8,6 +8,7 @@ import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceCompara
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
 import { DashboardReports } from '@/components/merchant/DashboardReports';
 import { Store, Database, ArrowLeft, Bot, Sparkles } from 'lucide-react';
+import { useUiMode } from '@/context/UiModeContext';
 
 const DisputeSlaScheduler = dynamic(
   () => import('@/components/bryntum/DisputeSlaScheduler').then((mod) => mod.DisputeSlaScheduler),
@@ -22,6 +23,8 @@ const DisputeSlaScheduler = dynamic(
 );
 
 export default function MerchantCockpitPage() {
+  const { showTechnicalDetails } = useUiMode();
+
   return (
     <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full transition-colors">
       {/* Header Banner */}
@@ -32,13 +35,17 @@ export default function MerchantCockpitPage() {
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
-              Merchant Arbitration Cockpit
-              <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
-                Layer 6
-              </span>
+              {showTechnicalDetails ? 'Merchant Arbitration Cockpit' : 'Seller Resolution Center'}
+              {showTechnicalDetails && (
+                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
+                  Layer 6
+                </span>
+              )}
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-              AG Studio 3 multi-agent harness, DuckDB-WASM analytics & Bryntum SLA scheduler
+              {showTechnicalDetails
+                ? 'AG Studio 3 multi-agent harness, DuckDB-WASM analytics & Bryntum SLA scheduler'
+                : 'Automated return inspection, customer dispute resolution, and settlement analytics'}
             </p>
           </div>
         </div>
@@ -53,7 +60,7 @@ export default function MerchantCockpitPage() {
           </Link>
           <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-400 rounded-lg text-xs font-mono font-bold border border-emerald-300 dark:border-emerald-500/40">
             <Database className="w-3.5 h-3.5" />
-            DuckDB-WASM: Ready
+            {showTechnicalDetails ? 'DuckDB-WASM: Ready' : 'Analytics Engine: Active'}
           </span>
         </div>
       </div>
@@ -72,10 +79,12 @@ export default function MerchantCockpitPage() {
             <div className="bg-slate-50 dark:bg-[#080d19] border-b border-slate-200 dark:border-slate-800 px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 text-sm flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <Bot className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                AG Studio 3 Canvas (Arbiter Agent Console)
+                {showTechnicalDetails
+                  ? 'AG Studio 3 Canvas (Arbiter Agent Console)'
+                  : 'Automated Dispute Resolution Canvas'}
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
-                Studio v3.0
+                {showTechnicalDetails ? 'Studio v3.0' : 'Active'}
               </span>
             </div>
 
@@ -85,15 +94,26 @@ export default function MerchantCockpitPage() {
                 <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/40 mx-auto flex items-center justify-center text-cyan-400 mb-3 shadow-lg">
                   <Sparkles className="w-6 h-6 animate-pulse" />
                 </div>
-                <div className="text-slate-400 mb-2 font-mono text-xs">
-                  <code>studio.registerToolRunner(&apos;paypal_arbiter&apos;)</code>
-                </div>
+                {showTechnicalDetails && (
+                  <div className="text-slate-400 mb-2 font-mono text-xs">
+                    <code>studio.registerToolRunner(&apos;paypal_arbiter&apos;)</code>
+                  </div>
+                )}
                 <h2 className="text-lg font-bold text-white mb-2">
-                  Multi-Agent Arbitration Cockpit Connected
+                  {showTechnicalDetails
+                    ? 'Multi-Agent Arbitration Cockpit Connected'
+                    : 'Automated Dispute Intelligence Connected'}
                 </h2>
                 <p className="text-slate-400 text-xs leading-relaxed">
-                  Streaming cross-filtered insights via <code>api.defineAiCommand(&apos;isolate_high_risk_disputes&apos;)</code>
-                  and computing <code>Net_Retained_Margin</code> inline across 1,000 seeded sandbox disputes.
+                  {showTechnicalDetails ? (
+                    <>
+                      Streaming cross-filtered insights via{' '}
+                      <code>api.defineAiCommand(&apos;isolate_high_risk_disputes&apos;)</code> and computing{' '}
+                      <code>Net_Retained_Margin</code> inline across 1,000 seeded sandbox disputes.
+                    </>
+                  ) : (
+                    'AI-assisted return inspection, fraud defense, and instant PayPal claim resolution are actively protecting your store margins.'
+                  )}
                 </p>
               </div>
             </div>
@@ -119,14 +139,20 @@ export default function MerchantCockpitPage() {
           {/* HATEOAS Action Resolution */}
           <div className="bg-white dark:bg-[#0b1324] rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
             <div className="bg-slate-50 dark:bg-[#080d19] border-b border-slate-200 dark:border-slate-800 px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 text-sm flex items-center justify-between">
-              <span>HATEOAS Action Resolution</span>
-              <span className="text-[10px] font-mono text-slate-500">RFC 5988 Links</span>
+              <span>{showTechnicalDetails ? 'HATEOAS Action Resolution' : 'One-Click Dispute Actions'}</span>
+              <span className="text-[10px] font-mono text-slate-500">
+                {showTechnicalDetails ? 'RFC 5988 Links' : 'Live PayPal Actions'}
+              </span>
             </div>
 
             <div className="p-4 space-y-3.5">
               <div className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                <div className="text-[11px] font-mono text-slate-500">Dispute ID: PP-D-1002</div>
-                <div className="font-bold text-xs text-rose-600 dark:text-rose-400">High Abuse Risk Detected (R=0.82)</div>
+                <div className="text-[11px] font-mono text-slate-500">
+                  {showTechnicalDetails ? 'Dispute ID: PP-D-1002' : 'Case: PP-D-1002'}
+                </div>
+                <div className="font-bold text-xs text-rose-600 dark:text-rose-400">
+                  {showTechnicalDetails ? 'High Abuse Risk Detected (R=0.82)' : 'High Risk of Fraud Detected'}
+                </div>
                 <HateoasDisputeActionRenderer
                   disputeId="PP-D-1002"
                   hateoasAllowedActions={['provide-evidence']}
@@ -134,8 +160,12 @@ export default function MerchantCockpitPage() {
               </div>
 
               <div className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                <div className="text-[11px] font-mono text-slate-500">Dispute ID: PP-D-1003</div>
-                <div className="font-bold text-xs text-amber-600 dark:text-amber-400">Cosmetic Defect Claim (L=0.45)</div>
+                <div className="text-[11px] font-mono text-slate-500">
+                  {showTechnicalDetails ? 'Dispute ID: PP-D-1003' : 'Case: PP-D-1003'}
+                </div>
+                <div className="font-bold text-xs text-amber-600 dark:text-amber-400">
+                  {showTechnicalDetails ? 'Cosmetic Defect Claim (L=0.45)' : 'Cosmetic Defect Claim'}
+                </div>
                 <HateoasDisputeActionRenderer
                   disputeId="PP-D-1003"
                   hateoasAllowedActions={['make-offer']}
@@ -143,8 +173,12 @@ export default function MerchantCockpitPage() {
               </div>
 
               <div className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                <div className="text-[11px] font-mono text-slate-500">Synthetic Intent Bid: SYN-B-999</div>
-                <div className="font-bold text-xs text-emerald-600 dark:text-emerald-400">Vault Token Reserve Floor Matched</div>
+                <div className="text-[11px] font-mono text-slate-500">
+                  {showTechnicalDetails ? 'Synthetic Intent Bid: SYN-B-999' : 'Price Match Offer: #999'}
+                </div>
+                <div className="font-bold text-xs text-emerald-600 dark:text-emerald-400">
+                  {showTechnicalDetails ? 'Vault Token Reserve Floor Matched' : 'Customer Price Match Target Met'}
+                </div>
                 <HateoasDisputeActionRenderer
                   disputeId="SYN-B-999"
                   hateoasAllowedActions={['accept-claim']}

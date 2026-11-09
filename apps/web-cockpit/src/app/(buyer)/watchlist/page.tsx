@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface WatchlistItem {
   id: string;
@@ -88,6 +89,7 @@ export function WatchlistContent({
   initialItems?: WatchlistItem[];
 }) {
   const mounted = useMounted();
+  const { showTechnicalDetails } = useUiMode();
   const [items, setItems] = useState<WatchlistItem[]>(initialItems);
   const [loading, setLoading] = useState<boolean>(true);
   const [isChecking, setIsChecking] = useState<boolean>(false);
@@ -225,13 +227,19 @@ export function WatchlistContent({
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3.5 py-1 text-xs font-semibold text-cyan-400">
             <Bookmark className="w-3.5 h-3.5" />
-            <span>Autonomous Price-Drop Watchlist & 72h Escrow Auto-Buy</span>
+            <span>
+              {showTechnicalDetails
+                ? 'Autonomous Price-Drop Watchlist & 72h Escrow Auto-Buy'
+                : 'Price-Drop Watchlist & Instant Deal Alerts'}
+            </span>
           </div>
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white font-display">
             Price-Drop Watchlist
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Agents continuously poll Channel3 & merchant catalogs. Auto-capture fires instantly when your target is reached.
+            {showTechnicalDetails
+              ? 'Agents continuously poll Channel3 & merchant catalogs. Auto-capture fires instantly when your target is reached.'
+              : 'Track items you love. We monitor store prices 24/7 and alert you the second prices drop.'}
           </p>
         </div>
 
@@ -242,7 +250,15 @@ export function WatchlistContent({
             className="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl border border-slate-700 transition-all cursor-pointer disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isChecking ? 'animate-spin' : ''}`} />
-            <span>{isChecking ? 'Scanning Catalogs...' : 'Trigger Price Check'}</span>
+            <span>
+              {isChecking
+                ? showTechnicalDetails
+                  ? 'Scanning Catalogs...'
+                  : 'Checking Stores...'
+                : showTechnicalDetails
+                ? 'Trigger Price Check'
+                : 'Check Prices Now'}
+            </span>
           </button>
           <button
             onClick={() => setIsAddOpen(true)}
@@ -401,7 +417,7 @@ export function WatchlistContent({
                       className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
                     >
                       <ShoppingBag className="w-3.5 h-3.5" />
-                      <span>Auto-Buy Now</span>
+                      <span>{showTechnicalDetails ? 'Auto-Buy Now' : 'Buy at Target Price'}</span>
                     </Link>
                   )}
 

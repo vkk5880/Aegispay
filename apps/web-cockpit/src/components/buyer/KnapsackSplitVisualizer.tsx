@@ -3,6 +3,7 @@
 import React from 'react';
 import { ShoppingBag, Truck, CheckCircle, Percent, ArrowRight, Store, AlertTriangle, Calendar, Clock } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface KnapsackItem {
   product_id: string;
@@ -51,6 +52,7 @@ export function KnapsackSplitVisualizer({
   onProceedToAuthorize,
   onTriggerSyntheticBid,
 }: KnapsackSplitVisualizerProps) {
+  const { showTechnicalDetails } = useUiMode();
   const defaultData: KnapsackOptimizationData = {
     assigned_merchants: [
       {
@@ -136,13 +138,15 @@ export function KnapsackSplitVisualizer({
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-wide flex items-center gap-2">
-              Commission-Subsidized Knapsack Cart
+              {showTechnicalDetails ? 'Commission-Subsidized Knapsack Cart' : 'Smart Multi-Store Basket'}
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30">
-                Unified Delivery Windows
+                {showTechnicalDetails ? 'Unified Delivery Windows' : 'Coordinated Delivery'}
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Multi-merchant optimization with line-item commission rebates & coordinated shipping windows
+              {showTechnicalDetails
+                ? 'Multi-merchant optimization with line-item commission rebates & coordinated shipping windows'
+                : 'Optimized across trusted stores with coordinated shipping and instant cashback'}
             </p>
           </div>
         </div>
@@ -150,7 +154,9 @@ export function KnapsackSplitVisualizer({
         {/* Global Summary Badge */}
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <span className="text-[10px] text-slate-500 dark:text-slate-400 block uppercase font-mono">Net Optimized Spend</span>
+            <span className="text-[10px] text-slate-500 dark:text-slate-400 block uppercase font-mono">
+              {showTechnicalDetails ? 'Net Optimized Spend' : 'Total Order Price'}
+            </span>
             <span className="text-xl font-bold font-mono text-cyan-600 dark:text-cyan-400">
               {formatCents(data.net_buyer_expenditure_cents)}
             </span>
@@ -192,7 +198,7 @@ export function KnapsackSplitVisualizer({
                     {merchant.merchant_domain}
                   </span>
                   <span className="text-[10px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                    Unit #{idx + 1}
+                    {showTechnicalDetails ? `Unit #${idx + 1}` : `Store #${idx + 1}`}
                   </span>
                 </div>
               </div>
@@ -228,7 +234,9 @@ export function KnapsackSplitVisualizer({
                             <span>Qty: {item.quantity}</span>
                             <span>•</span>
                             <span className="text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-500/30">
-                              Instant Rebate: -{formatCents(itemRebateCents)} ({(item.commission_rate * 100).toFixed(0)}% rate)
+                              {showTechnicalDetails
+                                ? `Instant Rebate: -${formatCents(itemRebateCents)} (${(item.commission_rate * 100).toFixed(0)}% rate)`
+                                : `Cashback: -${formatCents(itemRebateCents)}`}
                             </span>
                           </div>
                         </div>
@@ -309,18 +317,20 @@ export function KnapsackSplitVisualizer({
           {data.is_within_budget ? (
             <button
               onClick={onProceedToAuthorize}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-cyan-500/20 active:scale-95"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-cyan-500/20 active:scale-95 cursor-pointer"
             >
-              Stage Multi-Unit Authorize Order
+              {showTechnicalDetails ? 'Stage Multi-Unit Authorize Order' : 'Checkout with PayPal'}
               <ArrowRight className="w-4 h-4" />
             </button>
           ) : (
             <button
               onClick={onTriggerSyntheticBid}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-amber-500/20 active:scale-95"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-amber-500/20 active:scale-95 cursor-pointer"
             >
               <AlertTriangle className="w-4 h-4" />
-              Budget Overage ({data.overage_percentage}%) • Mint Synthetic Bid
+              {showTechnicalDetails
+                ? `Budget Overage (${data.overage_percentage}%) • Mint Synthetic Bid`
+                : `Over Budget (${data.overage_percentage}%) • Auto-Negotiate with Store`}
             </button>
           )}
         </div>

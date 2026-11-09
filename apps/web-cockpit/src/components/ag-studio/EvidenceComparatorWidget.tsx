@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Truck, ShieldAlert, ShieldCheck, Crosshair, Award } from 'lucide-react';
+import { useUiMode } from '@/context/UiModeContext';
 
 interface BoundingBox {
   ymin: number;
@@ -36,6 +37,7 @@ export function EvidenceComparatorWidget({
   abuseRiskScoreR,
   rationale,
 }: EvidenceComparatorWidgetProps) {
+  const { showTechnicalDetails } = useUiMode();
   // Generate high-fidelity default rationale if not provided
   const carrierMatch =
     rationale?.carrierMatch ||
@@ -73,9 +75,13 @@ export function EvidenceComparatorWidget({
       className="flex flex-col gap-4 p-4 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50 dark:bg-[#080d19] text-slate-900 dark:text-slate-100 transition-colors"
     >
       <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center justify-between">
-        <span>Evidence Comparator (Gemini 3.8 Flash Vision)</span>
+        <span>
+          {showTechnicalDetails
+            ? 'Evidence Comparator (Gemini 3.8 Flash Vision)'
+            : 'Return Evidence & Photo Verification'}
+        </span>
         <span className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400 font-semibold bg-cyan-100 dark:bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-300 dark:border-cyan-800">
-          Liability-Risk Matrix (L, R)
+          {showTechnicalDetails ? 'Liability-Risk Matrix (L, R)' : 'AI Return Verification'}
         </span>
       </h3>
 
@@ -86,7 +92,7 @@ export function EvidenceComparatorWidget({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Merchant Liability (L):
+                {showTechnicalDetails ? 'Merchant Liability (L):' : 'Return Validity:'}
               </span>
               <span className="text-xs font-mono font-bold text-blue-600 dark:text-blue-400">
                 {(liabilityScoreL * 100).toFixed(1)}%
@@ -103,7 +109,7 @@ export function EvidenceComparatorWidget({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Buyer Abuse Risk (R):
+                {showTechnicalDetails ? 'Buyer Abuse Risk (R):' : 'Fraud & Tampering Risk:'}
               </span>
               <span className="text-xs font-mono font-bold text-rose-600 dark:text-rose-400">
                 {(abuseRiskScoreR * 100).toFixed(1)}%

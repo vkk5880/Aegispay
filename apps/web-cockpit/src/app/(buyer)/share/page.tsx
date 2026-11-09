@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface SharedProduct {
   title: string;
@@ -62,6 +63,7 @@ export function ShareContent({
 }) {
   const searchParams = useSearchParams();
   const mounted = useMounted();
+  const { showTechnicalDetails } = useUiMode();
   const [copied, setCopied] = useState<boolean>(false);
   const [winner, setWinner] = useState<SharedProduct | null>(initialWinner);
   const [runnerUp, setRunnerUp] = useState<SharedProduct | null>(initialRunnerUp);
@@ -122,13 +124,27 @@ export function ShareContent({
       <div className="mb-10 text-center flex flex-col items-center">
         <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3.5 py-1 text-xs font-semibold text-cyan-400">
           <Trophy className="w-3.5 h-3.5 text-amber-400" />
-          <span>AegisPay Shared Decision Dossier · Referee Battle Verdict</span>
+          <span>
+            {showTechnicalDetails
+              ? 'AegisPay Shared Decision Dossier · Referee Battle Verdict'
+              : 'AegisPay Smart Comparison · Best Value Pick'}
+          </span>
         </div>
         <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white font-display mb-3">
           AI Shopping Recommendation
         </h1>
         <p className="max-w-xl text-sm sm:text-base text-slate-400 font-medium">
-          Deterministic head-to-head referee comparison for: <strong className="text-white">&ldquo;{query}&rdquo;</strong>
+          {showTechnicalDetails ? (
+            <>
+              Deterministic head-to-head referee comparison for:{' '}
+              <strong className="text-white">&ldquo;{query}&rdquo;</strong>
+            </>
+          ) : (
+            <>
+              Side-by-side deal comparison for:{' '}
+              <strong className="text-white">&ldquo;{query}&rdquo;</strong>
+            </>
+          )}
         </p>
 
         {/* Copy Share Button */}
@@ -146,7 +162,7 @@ export function ShareContent({
               ) : (
                 <>
                   <Share2 className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Share Decision Link</span>
+                  <span>{showTechnicalDetails ? 'Share Decision Link' : 'Share Comparison'}</span>
                 </>
               )}
             </button>
@@ -177,7 +193,7 @@ export function ShareContent({
             <div className="p-7 rounded-3xl bg-slate-900/80 border-2 border-cyan-500 shadow-2xl shadow-cyan-950/60 flex flex-col justify-between relative card-hover">
               <div className="absolute -top-3.5 left-8 px-4 py-1 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black text-xs uppercase tracking-wider shadow-lg flex items-center gap-1.5">
                 <Trophy className="w-3.5 h-3.5 text-amber-300" />
-                <span>Referee Winner</span>
+                <span>{showTechnicalDetails ? 'Referee Winner' : 'Top Recommendation'}</span>
               </div>
 
               <div>
@@ -237,7 +253,11 @@ export function ShareContent({
                   className="w-full py-3 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-extrabold uppercase tracking-wider rounded-xl transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <ShoppingBag className="w-4 h-4" />
-                  <span>1-Click Buy in AegisPay Cockpit</span>
+                  <span>
+                    {showTechnicalDetails
+                      ? '1-Click Buy in AegisPay Cockpit'
+                      : '1-Click Buy with PayPal'}
+                  </span>
                 </Link>
               </div>
             </div>
@@ -247,7 +267,7 @@ export function ShareContent({
           {runnerUp && (
             <div className="p-7 rounded-3xl bg-slate-900/50 border border-slate-800 flex flex-col justify-between relative card-hover opacity-90">
               <div className="absolute -top-3.5 left-8 px-4 py-1 rounded-full bg-slate-800 text-slate-300 font-bold text-xs uppercase tracking-wider border border-slate-700 flex items-center gap-1.5">
-                <span>Runner Up Contender</span>
+                <span>{showTechnicalDetails ? 'Runner Up Contender' : 'Runner-Up Alternative'}</span>
               </div>
 
               <div>
@@ -302,7 +322,7 @@ export function ShareContent({
                   href="/"
                   className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold uppercase tracking-wider rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <span>Inspect in Cockpit</span>
+                  <span>{showTechnicalDetails ? 'Inspect in Cockpit' : 'View in Shop'}</span>
                 </Link>
               </div>
             </div>

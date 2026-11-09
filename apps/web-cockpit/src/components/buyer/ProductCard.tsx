@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface ProductCardProps {
   product: ProductCardData;
@@ -28,6 +29,7 @@ export function ProductCard({
   onInstantBuy,
   className = '',
 }: ProductCardProps) {
+  const { showTechnicalDetails } = useUiMode();
   const [added, setAdded] = useState(false);
   const [imgError, setImgError] = useState(false);
 
@@ -85,7 +87,7 @@ export function ProductCard({
       {isWinner && (
         <div className="absolute -top-3 left-6 px-3 py-0.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black text-[10px] uppercase tracking-wider shadow-lg flex items-center gap-1">
           <Sparkles className="w-3 h-3 text-amber-300" />
-          <span>Top Algorithmic Pick</span>
+          <span>{showTechnicalDetails ? 'Top Algorithmic Pick' : 'Top Pick'}</span>
         </div>
       )}
 
@@ -117,11 +119,11 @@ export function ProductCard({
             <span>{scorePct}% Match</span>
           </div>
 
-          {/* 2PC Stock Verified Indicator */}
+          {/* Stock Verified Indicator */}
           {product.stock_status && (
             <div className="absolute bottom-2.5 left-2.5 px-2 py-0.5 rounded-md bg-slate-900/90 backdrop-blur-md border border-slate-700 text-[10px] font-mono text-emerald-400 flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              <span>2PC Stock Verified</span>
+              <span>{showTechnicalDetails ? '2PC Stock Verified' : 'In Stock & Verified'}</span>
             </div>
           )}
         </div>
@@ -183,7 +185,9 @@ export function ProductCard({
           </span>
           {product.commission_rebate_cents && product.commission_rebate_cents > 0 && (
             <span className="text-emerald-400 font-bold">
-              +{formatPrice(product.commission_rebate_cents)} Rebate
+              {showTechnicalDetails
+                ? `+${formatPrice(product.commission_rebate_cents)} Rebate`
+                : `Cashback: ${formatPrice(product.commission_rebate_cents)}`}
             </span>
           )}
         </div>
@@ -233,7 +237,7 @@ export function ProductCard({
             )}
           </div>
           <span className="text-[11px] font-mono text-cyan-400">
-            Escrow Protected
+            {showTechnicalDetails ? 'Escrow Protected' : 'Purchase Protected'}
           </span>
         </div>
 

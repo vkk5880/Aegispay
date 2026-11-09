@@ -12,6 +12,7 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { useUiMode } from '@/context/UiModeContext';
 
 interface SpendAllowanceHeaderProps {
   maxBudgetCents: number;
@@ -32,6 +33,7 @@ export function SpendAllowanceHeader({
   onConnectPayPal,
   onOpenCart,
 }: SpendAllowanceHeaderProps) {
+  const { showTechnicalDetails } = useUiMode();
   const availableCents = Math.max(0, maxBudgetCents - spentCents);
   const spentPercent = Math.min(100, Math.round((spentCents / (maxBudgetCents || 1)) * 100));
 
@@ -46,10 +48,14 @@ export function SpendAllowanceHeader({
             </div>
             <div>
               <h4 className="text-sm font-bold text-slate-900 dark:text-white">
-                Connect PayPal to set your autonomous shopping allowance (One-Time Setup)
+                {showTechnicalDetails
+                  ? 'Connect PayPal to set your autonomous shopping allowance (One-Time Setup)'
+                  : 'Set your shopping budget and connect PayPal (One-Time Setup)'}
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-400">
-                Authorize your agent with an Ed25519-signed spend mandate and one-time PayPal Vault v3 setup token.
+                {showTechnicalDetails
+                  ? 'Authorize your agent with an Ed25519-signed spend mandate and one-time PayPal Vault v3 setup token.'
+                  : 'Set a secure maximum spending limit and connect PayPal for fast, protected purchases.'}
               </p>
             </div>
           </div>
@@ -60,7 +66,7 @@ export function SpendAllowanceHeader({
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs shadow-md shadow-amber-600/20 transition-all flex items-center gap-1.5 shrink-0"
           >
             <CreditCard className="w-3.5 h-3.5" />
-            <span>Connect PayPal Vault</span>
+            <span>{showTechnicalDetails ? 'Connect PayPal Vault' : 'Connect PayPal'}</span>
           </button>
         </div>
       )}
@@ -76,7 +82,7 @@ export function SpendAllowanceHeader({
               </div>
               <div>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
-                  Max Spend Allowance
+                  {showTechnicalDetails ? 'Max Spend Allowance' : 'Spending Limit'}
                 </span>
                 <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
                   {formatCents(maxBudgetCents)}
@@ -88,7 +94,7 @@ export function SpendAllowanceHeader({
 
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
-                Spent / Authorized
+                {showTechnicalDetails ? 'Spent / Authorized' : 'Spent So Far'}
               </span>
               <span className="text-base sm:text-lg font-bold text-amber-600 dark:text-amber-400 tracking-tight">
                 {formatCents(spentCents)}
@@ -99,7 +105,7 @@ export function SpendAllowanceHeader({
 
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
-                Available Balance
+                {showTechnicalDetails ? 'Available Balance' : 'Remaining Budget'}
               </span>
               <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
                 {formatCents(availableCents)}

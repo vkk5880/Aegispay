@@ -12,14 +12,18 @@ import {
   Receipt,
   Menu,
   X,
+  ShieldCheck,
 } from 'lucide-react';
 import NavbarLogo from './NavbarLogo';
 import { ThemeToggle } from './ThemeToggle';
+import { DevModeToggle } from './DevModeToggle';
+import { useUiMode } from '@/context/UiModeContext';
 
 export function Navbar() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const { isProduction, isDevEnvironment, showTechnicalDetails } = useUiMode();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -29,19 +33,38 @@ export function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const isDevTools = process.env.NEXT_PUBLIC_DEV_TOOLS === 'true';
-
   const baseNavLinks = [
-    { href: '/', label: 'Cockpit', icon: ShoppingBag },
-    { href: '/search', label: 'AI Search', icon: Search },
-    { href: '/watchlist', label: 'Watchlist', icon: Bookmark },
-    { href: '/history', label: 'Audit History', icon: Receipt },
-    { href: '/merchant', label: 'Merchant Console', icon: Store },
+    {
+      href: '/',
+      label: showTechnicalDetails ? 'Cockpit' : 'Shop',
+      icon: ShoppingBag,
+    },
+    {
+      href: '/search',
+      label: showTechnicalDetails ? 'AI Search' : 'Search',
+      icon: Search,
+    },
+    {
+      href: '/watchlist',
+      label: showTechnicalDetails ? 'Watchlist' : 'Saved Items',
+      icon: Bookmark,
+    },
+    {
+      href: '/history',
+      label: showTechnicalDetails ? 'Audit History' : 'Orders & Receipts',
+      icon: Receipt,
+    },
+    {
+      href: '/merchant',
+      label: showTechnicalDetails ? 'Merchant Console' : 'Seller Portal',
+      icon: Store,
+    },
   ];
 
-  const navLinks = isDevTools
-    ? [...baseNavLinks, { href: '/judge', label: 'Judge Chaos Lab', icon: Zap }]
-    : baseNavLinks;
+  const navLinks =
+    !isProduction && isDevEnvironment && showTechnicalDetails
+      ? [...baseNavLinks, { href: '/judge', label: 'Judge Chaos Lab', icon: Zap }]
+      : baseNavLinks;
 
   return (
     <header
@@ -60,7 +83,7 @@ export function Navbar() {
               AEGIS<span className="text-cyan-600 dark:text-cyan-400">PAY</span>
             </span>
             <span className="text-[10px] font-mono block text-slate-500 dark:text-slate-400">
-              Autonomous Commerce Cockpit
+              {showTechnicalDetails ? 'Autonomous Commerce Cockpit' : 'Smart Shopping & Savings'}
             </span>
           </div>
         </Link>
@@ -91,15 +114,16 @@ export function Navbar() {
           })}
         </nav>
 
-        {/* Right Section: Status Indicator, ThemeToggle, Mobile Hamburger */}
+        {/* Right Section: Status Indicator, DevModeToggle, ThemeToggle, Mobile Hamburger */}
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="hidden sm:flex items-center gap-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-2.5 py-1 rounded-lg">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400 font-medium">
-              Sandbox Live
+              {showTechnicalDetails ? 'Sandbox Live' : 'PayPal Protected'}
             </span>
           </div>
 
+          <DevModeToggle />
           <ThemeToggle />
 
           {/* Mobile Menu Toggle Button */}
@@ -139,6 +163,10 @@ export function Navbar() {
               </Link>
             );
           })}
+          <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <span className="text-xs text-slate-500 font-medium">Developer Options</span>
+            <DevModeToggle />
+          </div>
         </div>
       )}
     </header>

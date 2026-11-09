@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import type { SessionMandate } from '@aegispay/shared-types';
 import { ShieldCheck, RefreshCw, Key, Copy, CheckCircle2, ChevronDown, Lock } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { useUiMode } from '@/context/UiModeContext';
 
 interface CryptographicMandateSignerProps {
   onMandateGenerated?: (mandate: SessionMandate) => void;
@@ -14,6 +15,7 @@ export function CryptographicMandateSigner({
   onMandateGenerated,
   externalBudgetCents,
 }: CryptographicMandateSignerProps) {
+  const { showTechnicalDetails } = useUiMode();
   const [totalBudgetCents, setTotalBudgetCents] = useState<number>(externalBudgetCents || 50000); // $500.00
   const [singleMerchantCapCents, setSingleMerchantCapCents] = useState<number>(25000); // $250.00
   const [allowedCategories, setAllowedCategories] = useState<string[]>([
@@ -126,7 +128,7 @@ export function CryptographicMandateSigner({
       {/* Circuit accent glow */}
       <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Visual Cryptographic Vault Lock Shield Banner */}
+      {/* Visual Spend Protection Shield Banner */}
       <div className="p-4 rounded-xl bg-gradient-to-r from-emerald-50 via-teal-50/50 to-cyan-50 dark:from-emerald-950/30 dark:via-[#091520] dark:to-cyan-950/30 border border-emerald-300 dark:border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 shadow-xs">
         <div className="flex items-center gap-3.5">
           <div className="p-3 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl text-white shadow-md shadow-emerald-500/20 flex-shrink-0">
@@ -135,14 +137,15 @@ export function CryptographicMandateSigner({
           <div>
             <div className="flex items-center gap-2">
               <span className="font-bold text-sm tracking-wide text-slate-900 dark:text-white uppercase font-sans">
-                Cryptographic Vault Lock Active
+                {showTechnicalDetails ? 'Cryptographic Vault Lock Active' : 'Spending Limit Protection Active'}
               </span>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/40">
-                FIPS WebCrypto
+                {showTechnicalDetails ? 'FIPS WebCrypto' : 'Protected'}
               </span>
             </div>
             <p className="text-xs text-emerald-900/90 dark:text-emerald-200/90 font-medium mt-0.5">
-              Hardware-Signed Spend Cap: <strong className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">{formatCents(totalBudgetCents)}</strong> (Active for {validityMinutes}m)
+              {showTechnicalDetails ? 'Hardware-Signed Spend Cap: ' : 'Active Budget Limit: '}
+              <strong className="font-mono text-emerald-700 dark:text-emerald-400 font-bold">{formatCents(totalBudgetCents)}</strong> (Active for {validityMinutes}m)
             </p>
           </div>
         </div>
@@ -150,10 +153,10 @@ export function CryptographicMandateSigner({
         <button
           onClick={generateAndSignMandate}
           disabled={isGenerating}
-          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition-colors disabled:opacity-50 self-start sm:self-center"
+          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-slate-900/80 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-300 dark:border-slate-700 shadow-xs transition-colors disabled:opacity-50 self-start sm:self-center cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 ${isGenerating ? 'animate-spin' : ''}`} />
-          <span>Re-Sign Mandate</span>
+          <span>{showTechnicalDetails ? 'Re-Sign Mandate' : 'Update Spending Limit'}</span>
         </button>
       </div>
 
@@ -164,7 +167,9 @@ export function CryptographicMandateSigner({
           {/* Total Budget Slider */}
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-700 dark:text-slate-300 font-medium">Session Total Budget Cap:</span>
+              <span className="text-slate-700 dark:text-slate-300 font-medium">
+                {showTechnicalDetails ? 'Session Total Budget Cap:' : 'Shopping Budget Limit:'}
+              </span>
               <span className="text-emerald-600 dark:text-emerald-400 font-mono font-bold text-sm">{formatCents(totalBudgetCents)}</span>
             </div>
             <input
@@ -192,7 +197,9 @@ export function CryptographicMandateSigner({
           {/* Single-Merchant Cap Slider */}
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
-              <span className="text-slate-700 dark:text-slate-300 font-medium">Single-Merchant Exposure Cap:</span>
+              <span className="text-slate-700 dark:text-slate-300 font-medium">
+                {showTechnicalDetails ? 'Single-Merchant Exposure Cap:' : 'Max Limit Per Store:'}
+              </span>
               <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold text-sm">{formatCents(singleMerchantCapCents)}</span>
             </div>
             <input
@@ -269,17 +276,21 @@ export function CryptographicMandateSigner({
         </div>
       </div>
 
-      {/* Collapsible Progressive Disclosure Drawer for Judges & Auditors */}
+      {/* Collapsible Progressive Disclosure Drawer */}
       <div className="mt-6 pt-4 border-t border-slate-200 dark:border-slate-800/80">
         <details className="group">
           <summary className="flex items-center justify-between cursor-pointer list-none py-2 px-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 dark:bg-[#070d18] dark:hover:bg-slate-900/60 border border-slate-200 dark:border-slate-800 transition-colors">
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
               <Key className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-              <span>Inspect Cryptographic Proof & Signature (Ed25519) — For Judges & Auditors</span>
+              <span>
+                {showTechnicalDetails
+                  ? 'Inspect Cryptographic Proof & Signature (Ed25519) — For Judges & Auditors'
+                  : 'View Security & Hardware Spending Protection Details'}
+              </span>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30">
-                Verified Valid
+                Verified Active
               </span>
               <ChevronDown className="w-4 h-4 text-slate-400 group-open:rotate-180 transition-transform duration-200" />
             </div>

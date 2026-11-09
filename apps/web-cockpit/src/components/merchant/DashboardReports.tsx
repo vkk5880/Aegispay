@@ -3,6 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Package, Repeat, FileText, Wallet, ArrowLeftRight, TrendingUp, ShieldCheck } from 'lucide-react';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface DashboardReportMetrics {
   totalProducts?: number;
@@ -13,6 +14,7 @@ export interface DashboardReportMetrics {
 }
 
 export function DashboardReports({ metrics = {} }: { metrics?: DashboardReportMetrics }) {
+  const { showTechnicalDetails } = useUiMode();
   const cards = [
     {
       title: 'Catalog Products',
@@ -62,15 +64,19 @@ export function DashboardReports({ metrics = {} }: { metrics?: DashboardReportMe
         <div>
           <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-cyan-500" />
-            PayPal APIMatic & AG Grid Enterprise Reporting
+            {showTechnicalDetails
+              ? 'PayPal APIMatic & AG Grid Enterprise Reporting'
+              : 'Merchant Business & Financial Overview'}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Real-time merchant financial reconciliation, catalog synchronisation, and payment auditing.
+            {showTechnicalDetails
+              ? 'Real-time merchant financial reconciliation, catalog synchronisation, and payment auditing.'
+              : 'Real-time overview of products, recurring plans, customer invoices, and settled balances.'}
           </p>
         </div>
         <div className="flex items-center gap-2 px-3 py-1 bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 rounded-lg text-xs font-mono text-cyan-700 dark:text-cyan-300">
           <ShieldCheck className="w-3.5 h-3.5" />
-          APIMatic Verified
+          {showTechnicalDetails ? 'APIMatic Verified' : 'Live Verified'}
         </div>
       </div>
 

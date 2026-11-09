@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { UiModeProvider } from '@/context/UiModeContext';
 import { Navbar } from '@/components/Navbar';
 
 export const metadata: Metadata = {
-  title: 'AegisPay — Autonomous Dual-Sided Commerce Cockpit',
-  description: 'Cryptographic Spend Mandates, Knapsack Cart Optimizer & Synthetic Intent Clearinghouse',
+  title: 'AegisPay — Smart Shopping Assistant & Savings',
+  description: 'Smart Multi-Store Shopping, Instant Cashback & Verified Purchases Protected by PayPal',
   icons: {
     icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>',
   },
@@ -39,10 +40,12 @@ export default function RootLayout({
       </head>
       <body className="bg-slate-50 dark:bg-[#060b14] text-slate-900 dark:text-slate-100 antialiased min-h-screen flex flex-col transition-colors duration-200">
         <ThemeProvider>
-          <Navbar />
-          <div className="flex-1 flex flex-col">
-            {children}
-          </div>
+          <UiModeProvider>
+            <Navbar />
+            <div className="flex-1 flex flex-col">
+              {children}
+            </div>
+          </UiModeProvider>
         </ThemeProvider>
       </body>
     </html>

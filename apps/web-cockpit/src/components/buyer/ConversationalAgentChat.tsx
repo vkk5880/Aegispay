@@ -31,6 +31,7 @@ import {
   Key,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface ChatMessage {
   id: string;
@@ -70,16 +71,20 @@ export function ConversationalAgentChat({
   onPurchaseConfirmed,
   budgetCapCents = 50000,
   zipCode = '94016',
-  developerModeEnabled = false,
+  developerModeEnabled: devProp = false,
   selectedModel,
   userApiKey,
 }: ConversationalAgentChatProps) {
+  const { showTechnicalDetails } = useUiMode();
+  const developerModeEnabled = devProp || showTechnicalDetails;
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome-1',
       role: 'assistant',
-      content:
-        'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.',
+      content: showTechnicalDetails
+        ? 'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.'
+        : 'Hello! I am your AegisPay Shopping Assistant. I can discover products across verified stores, compare features side-by-side, calculate instant cashback savings, and verify live stock before you purchase.',
       timestamp: new Date(),
       follow_up_suggestions: [
         'Find me wireless noise-cancelling headphones under $350',
@@ -211,14 +216,15 @@ export function ConversationalAgentChat({
           <div>
             <div className="flex items-center gap-2">
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                AegisPay Shopping Concierge
+                {showTechnicalDetails ? 'AegisPay Shopping Concierge' : 'AegisPay Shopping Assistant'}
               </h3>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/15 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
-                Channel3 Vector Grounded
+                {showTechnicalDetails ? 'Channel3 Vector Grounded' : 'Live Store Search'}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Promo code: <code className="text-cyan-600 dark:text-cyan-400 font-bold">PAYPAL-HACKATHON-2026</code> • 2PC Stock Verified
+              Promo code: <code className="text-cyan-600 dark:text-cyan-400 font-bold">PAYPAL-HACKATHON-2026</code> •{' '}
+              {showTechnicalDetails ? '2PC Stock Verified' : 'Verified In-Stock'}
             </p>
           </div>
         </div>
@@ -236,12 +242,12 @@ export function ConversationalAgentChat({
           ) : (
             <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-sans text-[11px] font-medium">
               <Sparkles className="w-3 h-3 text-cyan-500" />
-              <span>Autonomous Assistant</span>
+              <span>Smart Assistant</span>
             </div>
           )}
           <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 text-xs">
             <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>Escrow Protected</span>
+            <span>{showTechnicalDetails ? 'Escrow Protected' : 'Purchase Protected'}</span>
           </div>
         </div>
       </div>
@@ -289,7 +295,15 @@ export function ConversationalAgentChat({
                       className="flex items-center gap-1.5 text-[11px] font-mono text-cyan-700 dark:text-cyan-400 hover:underline cursor-pointer"
                     >
                       <Sparkles className="w-3 h-3" />
-                      <span>{expandedTraceId === msg.id ? 'Hide Agent Thought Trace' : 'View Agent Thought Trace'}</span>
+                      <span>
+                        {showTechnicalDetails
+                          ? expandedTraceId === msg.id
+                            ? 'Hide Agent Thought Trace'
+                            : 'View Agent Thought Trace'
+                          : expandedTraceId === msg.id
+                          ? 'Hide recommendation steps'
+                          : 'How we found this recommendation'}
+                      </span>
                       {expandedTraceId === msg.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     </button>
 

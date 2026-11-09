@@ -24,8 +24,10 @@ import {
   MessageSquare,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { useUiMode } from '@/context/UiModeContext';
 
 export default function BuyerPortalPage() {
+  const { showTechnicalDetails } = useUiMode();
   const [activeMandate, setActiveMandate] = useState<SessionMandate | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
@@ -176,11 +178,13 @@ export default function BuyerPortalPage() {
           <div className="flex items-center gap-3">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-              AegisPay Autonomous Consumer Portal
+              {showTechnicalDetails ? 'AegisPay Autonomous Consumer Portal' : 'AegisPay Smart Shopping'}
             </span>
             <span className="text-slate-300 dark:text-slate-700">|</span>
             <span className="text-xs text-slate-600 dark:text-slate-400">
-              One-Time Vault v3 Onboarded • Decoupled Platform Rebates
+              {showTechnicalDetails
+                ? 'One-Time Vault v3 Onboarded • Decoupled Platform Rebates'
+                : '1-Click PayPal Checkout • Instant Cashback & Savings'}
             </span>
           </div>
 
@@ -190,11 +194,13 @@ export default function BuyerPortalPage() {
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 font-bold hover:bg-cyan-500/25 transition-all cursor-pointer"
             >
               <ShoppingBag className="w-3.5 h-3.5 text-cyan-500" />
-              <span>Multi-Vendor Cart ({cartItemCount})</span>
+              <span>
+                {showTechnicalDetails ? 'Multi-Vendor Cart' : 'Multi-Store Cart'} ({cartItemCount})
+              </span>
             </button>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-              Atomic Spend Enforcer Active
+              {showTechnicalDetails ? 'Atomic Spend Enforcer Active' : 'Budget Protection Active'}
             </span>
           </div>
         </div>
@@ -245,16 +251,22 @@ export default function BuyerPortalPage() {
           />
         </section>
 
-        {/* Cryptographic Mandate & Proof Drawer (Collapsible) */}
+        {/* Spending Limits & Protection Drawer (Collapsible) */}
         <div className="pt-2">
           <details className="group border border-slate-200 dark:border-slate-800 rounded-2xl bg-white/70 dark:bg-[#070e1c]/70 p-4 transition-colors">
             <summary className="cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between list-none">
               <span className="flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                <span>▾ Inspect Cryptographic Proofs & Hardware Spend Signer (Ed25519) — For Auditors</span>
+                <span>
+                  {showTechnicalDetails
+                    ? '▾ Inspect Cryptographic Proofs & Hardware Spend Signer (Ed25519) — For Auditors'
+                    : '▾ Spending Limit & Security Settings'}
+                </span>
               </span>
               <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
-                {activeMandate?.mandate_id || 'Active Hardware Key'}
+                {showTechnicalDetails
+                  ? (activeMandate?.mandate_id || 'Active Hardware Key')
+                  : 'Protected by PayPal'}
               </span>
             </summary>
             <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
@@ -279,7 +291,7 @@ export default function BuyerPortalPage() {
         }}
       />
 
-      {/* Explainable Multi-Vendor Cart Drawer */}
+      {/* Multi-Store Cart Drawer */}
       <UnifiedCartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -287,13 +299,15 @@ export default function BuyerPortalPage() {
         zipCode={userSettings.zipCode}
         onProceedToCheckout={() => {
           setIsCartOpen(false);
-          showNotification('1-Click PayPal Vault v3 Authorization initialized!');
+          showNotification('1-Click PayPal Authorization initialized!');
         }}
       />
 
       {/* Footer */}
       <footer className="border-t border-slate-200 dark:border-slate-800 py-6 bg-slate-100 dark:bg-[#080d19]/80 text-center text-xs text-slate-600 dark:text-slate-400 font-mono transition-colors">
-        AegisPay Architecture • Autonomous Dual-Sided Agentic Commerce Platform • Build What&apos;s Next with PayPal 2026
+        {showTechnicalDetails
+          ? 'AegisPay Architecture • Autonomous Dual-Sided Agentic Commerce Platform • Build What\'s Next with PayPal 2026'
+          : 'AegisPay • Smart Shopping Assistant & Cashback • Protected by PayPal 2026'}
       </footer>
     </div>
   );

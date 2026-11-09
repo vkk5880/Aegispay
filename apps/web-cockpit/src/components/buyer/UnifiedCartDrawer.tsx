@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import type { KnapsackOptimizationData } from './KnapsackSplitVisualizer';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface UnifiedCartDrawerProps {
   isOpen: boolean;
@@ -88,6 +89,7 @@ export function UnifiedCartDrawer({
   zipCode = '94016',
   onProceedToCheckout,
 }: UnifiedCartDrawerProps) {
+  const { showTechnicalDetails } = useUiMode();
   if (!isOpen) return null;
 
   // Fallback default sample cart if none passed
@@ -184,14 +186,16 @@ export function UnifiedCartDrawer({
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-slate-900 dark:text-white text-base">
-                  Explainable Multi-Vendor Cart
+                  {showTechnicalDetails ? 'Multi-Merchant Knapsack Cart' : 'Smart Multi-Store Cart'}
                 </h3>
                 <span className="px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 font-mono text-xs font-semibold">
                   {totalItemsCount} item{totalItemsCount !== 1 ? 's' : ''}
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Split across {activeCart.assigned_merchants.length} partner merchants with automated subsidies
+                {showTechnicalDetails
+                  ? `Split across ${activeCart.assigned_merchants.length} partner merchants with automated subsidies`
+                  : `Coordinated across ${activeCart.assigned_merchants.length} stores with instant discounts`}
               </p>
             </div>
           </div>
@@ -211,7 +215,7 @@ export function UnifiedCartDrawer({
           <div className="p-4 rounded-xl bg-gradient-to-r from-cyan-500/10 via-blue-500/10 to-transparent border border-cyan-500/30 space-y-2">
             <div className="flex items-center gap-2 text-cyan-700 dark:text-cyan-300 text-xs font-bold uppercase tracking-wider">
               <Sparkles className="w-4 h-4 text-cyan-500" />
-              <span>AI Bundling & Split Rationale</span>
+              <span>{showTechnicalDetails ? 'AI Bundling & Split Rationale' : 'How We Saved You Money'}</span>
             </div>
             <p className="text-xs text-slate-700 dark:text-slate-200 leading-relaxed font-sans font-medium">
               &ldquo;{explanation}&rdquo;
@@ -306,12 +310,14 @@ export function UnifiedCartDrawer({
           {/* Cost Summary Breakdown */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#070d18] border border-slate-200 dark:border-slate-800 space-y-2.5">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-              Settlement Cost Summary
+              {showTechnicalDetails ? 'Settlement Cost Summary' : 'Order Cost Summary'}
             </h4>
 
             {/* Retail Subtotal */}
             <div className="flex justify-between items-center text-xs">
-              <span className="text-slate-600 dark:text-slate-400">Retail Subtotal</span>
+              <span className="text-slate-600 dark:text-slate-400">
+                {showTechnicalDetails ? 'Retail Subtotal' : 'Item Total'}
+              </span>
               <span className="font-mono font-medium text-slate-900 dark:text-white">
                 {formatCents(grossSubtotalCents)}
               </span>
@@ -321,7 +327,7 @@ export function UnifiedCartDrawer({
             <div className="flex justify-between items-center text-xs">
               <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1 font-medium">
                 <Percent className="w-3 h-3" />
-                Platform Subsidy (Commission Rebate)
+                {showTechnicalDetails ? 'Platform Subsidy (Commission Rebate)' : 'Instant Cashback Savings'}
               </span>
               <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
                 -{formatCents(platformSubsidyCents)}
@@ -355,9 +361,13 @@ export function UnifiedCartDrawer({
             {/* Net Total */}
             <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex justify-between items-baseline">
               <div>
-                <span className="font-bold text-slate-900 dark:text-white text-sm">Net Total</span>
+                <span className="font-bold text-slate-900 dark:text-white text-sm">
+                  {showTechnicalDetails ? 'Net Total' : 'Total You Pay'}
+                </span>
                 <span className="block text-[10px] text-slate-500 font-sans">
-                  Decoupled settlement: merchants receive 100% full retail authorization
+                  {showTechnicalDetails
+                    ? 'Decoupled settlement: merchants receive 100% full retail authorization'
+                    : 'Includes PayPal purchase protection & verified delivery'}
                 </span>
               </div>
               <span className="text-lg font-black font-mono text-cyan-600 dark:text-cyan-400">
@@ -379,13 +389,21 @@ export function UnifiedCartDrawer({
             className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
           >
             <CreditCard className="w-4 h-4" />
-            <span>Proceed to Vault Authorization • {formatCents(netTotalCents)}</span>
+            <span>
+              {showTechnicalDetails
+                ? `Proceed to Vault Authorization • ${formatCents(netTotalCents)}`
+                : `Authorize Purchase with PayPal • ${formatCents(netTotalCents)}`}
+            </span>
             <ArrowRight className="w-4 h-4" />
           </button>
 
           <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>AegisPay Escrow • 72-Hour Price Drop Guarantee Included</span>
+            <span>
+              {showTechnicalDetails
+                ? 'AegisPay Escrow • 72-Hour Price Drop Guarantee Included'
+                : 'PayPal Protected Checkout • 72-Hour Price Drop Guarantee Included'}
+            </span>
           </div>
         </div>
       </div>

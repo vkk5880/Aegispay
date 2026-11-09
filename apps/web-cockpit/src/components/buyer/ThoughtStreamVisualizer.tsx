@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Cpu, CheckCircle2, Clock, Sparkles, ChevronRight, Play, RotateCcw } from 'lucide-react';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface ThoughtStep {
   id: string;
@@ -54,26 +55,75 @@ const DEFAULT_MILESTONES: Omit<ThoughtStep, 'status'>[] = [
   },
 ];
 
+const USER_FRIENDLY_MILESTONES: Omit<ThoughtStep, 'status'>[] = [
+  {
+    id: 'step_1',
+    timestamp: '0.12s',
+    title: 'Understanding Shopping Intent',
+    detail: 'Analyzed your preferences, style requirements, and design specifications.',
+    badge: 'Preferences Matched',
+    badgeColor: 'purple',
+  },
+  {
+    id: 'step_2',
+    timestamp: '0.34s',
+    title: 'Searching Verified Store Catalogs',
+    detail: 'Checked 14 offers across 3 trusted stores and confirmed live stock availability.',
+    badge: '14 Offers / 3 Stores',
+    badgeColor: 'blue',
+  },
+  {
+    id: 'step_3',
+    timestamp: '0.61s',
+    title: 'Maximizing Savings & Free Shipping',
+    detail: 'Combined store shipments to unlock free delivery and instant cashback savings ($24.50 saved).',
+    badge: 'Saved $24.50',
+    badgeColor: 'emerald',
+  },
+  {
+    id: 'step_4',
+    timestamp: '0.82s',
+    title: 'Budget & Security Confirmed',
+    detail: 'Verified total order stays within your approved limit with PayPal purchase protection.',
+    badge: 'Protected',
+    badgeColor: 'cyan',
+  },
+];
+
 export function ThoughtStreamVisualizer({
   isRunning = false,
   onComplete,
   customSteps,
 }: ThoughtStreamVisualizerProps) {
+  const { showTechnicalDetails } = useUiMode();
   const [activeStepIndex, setActiveStepIndex] = useState<number>(0);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
 
-  const initialSteps: ThoughtStep[] = (customSteps || DEFAULT_MILESTONES).map((step, idx) => ({
+  const activeMilestones = showTechnicalDetails ? DEFAULT_MILESTONES : USER_FRIENDLY_MILESTONES;
+
+  const initialSteps: ThoughtStep[] = (customSteps || activeMilestones).map((step, idx) => ({
     ...step,
     status: idx === 0 ? 'COMPLETED' : idx === 1 ? 'ACTIVE' : 'PENDING',
   }));
 
   const [steps, setSteps] = useState<ThoughtStep[]>(initialSteps);
 
+  useEffect(() => {
+    if (!customSteps) {
+      setSteps(
+        activeMilestones.map((step, idx) => ({
+          ...step,
+          status: idx === 0 ? 'COMPLETED' : idx === 1 ? 'ACTIVE' : 'PENDING',
+        }))
+      );
+    }
+  }, [showTechnicalDetails, customSteps]);
+
   const runSimulation = () => {
     setIsExecuting(true);
     setActiveStepIndex(0);
 
-    const resetSteps = (customSteps || DEFAULT_MILESTONES).map((step, idx) => ({
+    const resetSteps = (customSteps || activeMilestones).map((step, idx) => ({
       ...step,
       status: (idx === 0 ? 'ACTIVE' : 'PENDING') as ThoughtStep['status'],
     }));
@@ -123,14 +173,16 @@ export function ThoughtStreamVisualizer({
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-wide flex items-center gap-2">
-              Streaming Agent Reasoning Trace
+              {showTechnicalDetails ? 'Streaming Agent Reasoning Trace' : 'Shopping Assistant Live Steps'}
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-500/30 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-cyan-500" />
-                Live Execution
+                {showTechnicalDetails ? 'Live Execution' : 'Active'}
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Autonomous cognitive trace of multi-merchant discovery, knapsack ILP solver, and cryptographic vault gating
+              {showTechnicalDetails
+                ? 'Autonomous cognitive trace of multi-merchant discovery, knapsack ILP solver, and cryptographic vault gating'
+                : 'Live steps showing product discovery, price optimization, and purchase protection.'}
             </p>
           </div>
         </div>
@@ -139,17 +191,17 @@ export function ThoughtStreamVisualizer({
           <button
             onClick={runSimulation}
             disabled={isExecuting}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors disabled:opacity-50 cursor-pointer"
           >
             {isExecuting ? (
               <>
                 <RotateCcw className="w-3.5 h-3.5 animate-spin text-cyan-500" />
-                <span>Tracing...</span>
+                <span>{showTechnicalDetails ? 'Tracing...' : 'Checking...'}</span>
               </>
             ) : (
               <>
                 <Play className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                <span>Re-run Trace</span>
+                <span>{showTechnicalDetails ? 'Re-run Trace' : 'Replay Steps'}</span>
               </>
             )}
           </button>

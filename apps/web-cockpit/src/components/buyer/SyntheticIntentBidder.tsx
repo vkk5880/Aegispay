@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Gavel, ShieldAlert, Award, CheckCircle2, Zap, Clock, ShieldCheck } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import type { SessionMandate } from '@aegispay/shared-types';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface SyntheticIntentBidderProps {
   mandate?: SessionMandate | null;
@@ -18,6 +19,7 @@ export function SyntheticIntentBidder({
   budgetCapCents = 45000,   // $450.00 (8.16% overage)
   onBidAccepted,
 }: SyntheticIntentBidderProps) {
+  const { showTechnicalDetails } = useUiMode();
   const [isMinting, setIsMinting] = useState<boolean>(false);
   const [bidSubmitted, setBidSubmitted] = useState<boolean>(false);
   const [bidResult, setBidResult] = useState<any>(null);
@@ -113,13 +115,15 @@ export function SyntheticIntentBidder({
           </div>
           <div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-wide flex items-center gap-2">
-              Synthetic Intent Negotiation Clearinghouse
+              {showTechnicalDetails ? 'Synthetic Intent Negotiation Clearinghouse' : 'Automated Price Match & Deal Negotiator'}
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-500/30">
-                PayPal Vault v3
+                {showTechnicalDetails ? 'PayPal Vault v3' : 'PayPal Protected'}
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Autonomous Buyer-to-Merchant Bidding when basket exceeds budget cap by 5%–18%
+              {showTechnicalDetails
+                ? 'Autonomous Buyer-to-Merchant Bidding when basket exceeds budget cap by 5%–18%'
+                : 'Automatically asks the store to match your budget when slightly over limit'}
             </p>
           </div>
         </div>
@@ -127,7 +131,7 @@ export function SyntheticIntentBidder({
         {/* Binding Guarantee Badge */}
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-100 dark:bg-cyan-950/40 border border-cyan-300 dark:border-cyan-500/40 text-cyan-800 dark:text-cyan-300 text-xs font-mono font-semibold">
           <Award className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-          Binding Cryptographic Guarantee
+          {showTechnicalDetails ? 'Binding Cryptographic Guarantee' : 'Zero-Risk Price Match Guarantee'}
         </div>
       </div>
 
@@ -168,21 +172,25 @@ export function SyntheticIntentBidder({
             <button
               onClick={handleMintVaultBid}
               disabled={isMinting || !isEligible}
-              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95"
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-semibold text-xs tracking-wider uppercase transition-all shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 disabled:opacity-50 active:scale-95 cursor-pointer"
             >
               {isMinting ? (
-                <>Minting Vault v3 Token...</>
+                <>Submitting Price Offer...</>
               ) : (
                 <>
                   <Award className="w-4 h-4" />
-                  Mint Binding Vault v3 Bid ({formatCents(budgetCapCents)})
+                  {showTechnicalDetails
+                    ? `Mint Binding Vault v3 Bid (${formatCents(budgetCapCents)})`
+                    : `Send Price Match Request (${formatCents(budgetCapCents)})`}
                 </>
               )}
             </button>
           ) : (
             <div className="p-3 rounded-xl bg-emerald-100 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-400 text-xs font-semibold flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-              Bid dispatched & cleared against merchant floor!
+              {showTechnicalDetails
+                ? 'Bid dispatched & cleared against merchant floor!'
+                : 'Offer accepted by store! Order created at your requested price.'}
             </div>
           )}
         </div>
@@ -193,7 +201,7 @@ export function SyntheticIntentBidder({
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
               <span className="text-slate-600 dark:text-slate-400 font-sans font-semibold flex items-center gap-1.5">
                 <ShieldAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                Synthetic Intent Voucher
+                {showTechnicalDetails ? 'Synthetic Intent Voucher' : 'Negotiation Offer Status'}
               </span>
               <span
                 className={`px-2 py-0.5 rounded text-[10px] border flex items-center gap-1 ${
@@ -202,7 +210,13 @@ export function SyntheticIntentBidder({
                     : 'bg-amber-100 dark:bg-amber-500/10 text-amber-800 dark:text-amber-400 border-amber-300 dark:border-amber-500/30'
                 }`}
               >
-                {bidSubmitted ? 'ACCEPTED & CAPTURED' : 'READY TO MINT'}
+                {bidSubmitted
+                  ? showTechnicalDetails
+                    ? 'ACCEPTED & CAPTURED'
+                    : 'OFFER ACCEPTED'
+                  : showTechnicalDetails
+                  ? 'READY TO MINT'
+                  : 'READY TO SEND'}
               </span>
             </div>
 
