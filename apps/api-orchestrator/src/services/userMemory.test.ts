@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   UniversalBuyerFacetsSchema,
@@ -8,8 +8,11 @@ import {
 } from '@aegispay/shared-types';
 import {
   loadDynamicBuyerProfile,
+  loadDynamicBuyerProfileSync,
   saveDynamicBuyerProfile,
+  persistDynamicBuyerProfile,
   compactBuyerMemoryFromSession,
+  compactBuyerMemoryFromSessionAsync,
   applyDynamicUserRules,
   loadUserPreferences,
   saveUserPreference,
@@ -17,6 +20,8 @@ import {
   logPurchase,
   getPurchaseHistory,
   checkWatchlistItem,
+  clearDynamicBuyerProfilesStore,
+  setUserMemoryDb,
 } from './user-memory.js';
 
 describe('Phase 1: Dynamic Multi-Domain AI Buyer Memory Engine', () => {
@@ -58,9 +63,9 @@ describe('Phase 1: Dynamic Multi-Domain AI Buyer Memory Engine', () => {
     assert.equal(parsed.purchase_velocity.lifetime_spend_cents, 45000);
   });
 
-  it('compactBuyerMemoryFromSession extracts domain facets, bumps confidence and increments spend velocity', () => {
+  it('compactBuyerMemoryFromSession extracts domain facets, bumps confidence and increments spend velocity', async () => {
     const testUserId = `usr_compact_${Date.now()}`;
-    const initialProfile = loadDynamicBuyerProfile(testUserId);
+    const initialProfile = await loadDynamicBuyerProfile(testUserId);
     assert.equal(initialProfile.purchase_velocity.total_orders_completed, 0);
 
     const updated = compactBuyerMemoryFromSession(
@@ -96,9 +101,9 @@ describe('Phase 1: Dynamic Multi-Domain AI Buyer Memory Engine', () => {
     assert.ok(audioFacet.confidence_score >= 0.85);
   });
 
-  it('applyDynamicUserRules filters avoided brands and merchants below minimum credibility score', () => {
+  it('applyDynamicUserRules filters avoided brands and merchants below minimum credibility score', async () => {
     const testUserId = `usr_rules_${Date.now()}`;
-    const profile = loadDynamicBuyerProfile(testUserId);
+    const profile = await loadDynamicBuyerProfile(testUserId);
     profile.universal.avoided_brands = ['UntrustedCo'];
     profile.universal.merchant_minimum_trust_score = 75;
 
@@ -211,3 +216,171 @@ describe('Phase 1: Dynamic Multi-Domain AI Buyer Memory Engine', () => {
     assert.equal(watchlistEval.saving_cents, 7000);
   });
 });
+
+describe('Phase A: Durable PostgreSQL Persistence for Dynamic AI Memory', () => {
+  const mockDbRecords = new Map<string, any>();
+  let lastUpsertPayload: any = null;
+
+  const testMockDb = {
+    select: () => ({
+      from: () => ({
+        where: (condition: any) => ({
+          limit: async (limitCount: number) => {
+            const userId = condition?.value ?? condition?.right?.value ?? Array.from(mockDbRecords.keys())[0];
+            const record = mockDbRecords.get(userId);
+            return record ? [record] : [];
+          },
+        }),
+      }),
+    }),
+    insert: (_table: any) => ({
+      values: (valuesObj: any) => ({
+        onConflictDoUpdate: async (conflictOpts: any) => {
+          lastUpsertPayload = { values: valuesObj, conflict: conflictOpts };
+          mockDbRecords.set(valuesObj.userId, {
+            userId: valuesObj.userId,
+            universal: valuesObj.universal,
+            domainFacets: valuesObj.domainFacets,
+            purchaseVelocity: valuesObj.purchaseVelocity,
+            updatedAt: valuesObj.updatedAt,
+          });
+          return { rowCount: 1 };
+        },
+      }),
+    }),
+  };
+
+  beforeEach(() => {
+    clearDynamicBuyerProfilesStore();
+    mockDbRecords.clear();
+    lastUpsertPayload = null;
+    setUserMemoryDb(testMockDb as any);
+  });
+
+  afterEach(() => {
+    clearDynamicBuyerProfilesStore();
+    mockDbRecords.clear();
+    lastUpsertPayload = null;
+    setUserMemoryDb(null);
+  });
+
+  it('L1 Cache: checks memory cache first and avoids database query on cache hit', async () => {
+    const userId = 'usr_l1_test';
+    // Prime L1 cache
+    const initial = loadDynamicBuyerProfileSync(userId);
+    initial.purchase_velocity.lifetime_spend_cents = 77700;
+    saveDynamicBuyerProfile(initial);
+
+    // Call loadDynamicBuyerProfile - should return from L1 cache without DB query
+    let dbQueried = false;
+    setUserMemoryDb({
+      select: () => {
+        dbQueried = true;
+        throw new Error('Database should not be queried when L1 cache hits');
+      },
+    } as any);
+
+    const loaded = await loadDynamicBuyerProfile(userId);
+    assert.equal(loaded.purchase_velocity.lifetime_spend_cents, 77700);
+    assert.equal(dbQueried, false, 'L1 cache hit must prevent L2 DB query');
+  });
+
+  it('L2 Persistence: on cache miss, queries PostgreSQL via Drizzle and caches in L1', async () => {
+    const userId = 'usr_l2_test';
+    // Seed database directly
+    mockDbRecords.set(userId, {
+      userId,
+      universal: {
+        userId,
+        budget_elasticity: {
+          target_price_sensory: 'premium_first',
+          max_spontaneous_spend_cents: 50000,
+          requires_approval_above_cents: 100000,
+        },
+        preferred_brands: ['Apple', 'Bose'],
+        avoided_brands: [],
+        preferred_fulfillment: 'express_shipping',
+        merchant_minimum_trust_score: 90,
+      },
+      domainFacets: {
+        computing: {
+          category: 'computing',
+          attributes: { ram_gb: 64, cpu: 'M3 Max' },
+          confidence_score: 0.99,
+          source_order_ids: ['ord_mac_01'],
+          last_updated: new Date().toISOString(),
+        },
+      },
+      purchaseVelocity: {
+        total_orders_completed: 5,
+        lifetime_spend_cents: 350000,
+        dispute_count: 0,
+      },
+      updatedAt: new Date(),
+    });
+
+    // Ensure L1 is empty
+    clearDynamicBuyerProfilesStore();
+
+    // Query should hit L2 database
+    const loaded = await loadDynamicBuyerProfile(userId);
+    assert.equal(loaded.userId, userId);
+    assert.equal(loaded.purchase_velocity.lifetime_spend_cents, 350000);
+    assert.equal(loaded.universal.budget_elasticity.target_price_sensory, 'premium_first');
+    assert.equal(loaded.domain_facets['computing'].attributes['ram_gb'], 64);
+
+    // Verify L1 is now populated
+    const syncL1 = loadDynamicBuyerProfileSync(userId);
+    assert.equal(syncL1.purchase_velocity.lifetime_spend_cents, 350000);
+  });
+
+  it('Fallback: falls back to createDefaultDynamicBuyerProfile when uninitialized in L1 and L2', async () => {
+    const userId = 'usr_uninitialized_new';
+    clearDynamicBuyerProfilesStore();
+
+    const loaded = await loadDynamicBuyerProfile(userId);
+    assert.equal(loaded.userId, userId);
+    assert.equal(loaded.purchase_velocity.total_orders_completed, 0);
+    assert.equal(loaded.purchase_velocity.lifetime_spend_cents, 0);
+    assert.deepEqual(loaded.universal.preferred_brands, ['Sony', 'Apple', 'Bose', 'Anker']);
+  });
+
+  it('Atomic Upsert: saveDynamicBuyerProfile & compactBuyerMemoryFromSession persist using ON CONFLICT DO UPDATE', async () => {
+    const userId = 'usr_upsert_test';
+    const profile = await loadDynamicBuyerProfile(userId);
+    profile.purchase_velocity.lifetime_spend_cents = 25000;
+    profile.universal.preferred_brands.push('Sennheiser');
+
+    // Asynchronously save & await persistence
+    saveDynamicBuyerProfile(profile);
+    await persistDynamicBuyerProfile(profile);
+
+    assert.ok(lastUpsertPayload, 'Persistence payload should be recorded');
+    assert.equal(lastUpsertPayload.values.userId, userId);
+    assert.equal(lastUpsertPayload.values.purchaseVelocity.lifetime_spend_cents, 25000);
+    assert.ok(lastUpsertPayload.conflict.target, 'ON CONFLICT target should be defined');
+    assert.ok(lastUpsertPayload.conflict.set, 'ON CONFLICT DO UPDATE set should be defined');
+
+    // Test session compaction persistence
+    const compacted = await compactBuyerMemoryFromSessionAsync(
+      userId,
+      {
+        order_id: 'ord_upsert_02',
+        total_cents: 12000,
+        items: [
+          {
+            title: 'Sennheiser HD 600',
+            brand: 'Sennheiser',
+            category: 'audio',
+            unit_price_cents: 12000,
+            attributes: { open_back: true },
+          },
+        ],
+      }
+    );
+
+    assert.equal(compacted.purchase_velocity.lifetime_spend_cents, 37000);
+    assert.equal(mockDbRecords.get(userId).purchaseVelocity.lifetime_spend_cents, 37000);
+  });
+});
+

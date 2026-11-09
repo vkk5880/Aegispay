@@ -24,6 +24,8 @@ export function createDb(
 
 // Re-export PostgreSQL schemas
 export * from './schema.js';
+export { eq, sql } from 'drizzle-orm';
+
 
 // Export SQLite schemas
 export * from './schema/spend-mandates.js';

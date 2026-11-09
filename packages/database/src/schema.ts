@@ -179,3 +179,6 @@ export const disputeArbitrations = pgTable(
     ),
   })
 );
+
+export * from './schema/user-memories.js';
+

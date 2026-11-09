@@ -16,6 +16,8 @@ import {
   UniversalBuyerFacets,
   DomainFacet,
 } from '@aegispay/shared-types';
+import { createDb, userMemoriesTable, eq } from '@aegispay/database';
+
 
 export interface UserPreferences {
   preferred_brands: string[];
@@ -457,6 +459,29 @@ export function stopWatchlistScheduler(): boolean {
 
 const dynamicBuyerProfilesStore = new Map<string, DynamicBuyerProfile>();
 
+export function clearDynamicBuyerProfilesStore(): void {
+  dynamicBuyerProfilesStore.clear();
+}
+
+let dbClient: ReturnType<typeof createDb> | null = null;
+
+export function getUserMemoryDb(): ReturnType<typeof createDb> | null {
+  if (!dbClient) {
+    try {
+      const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/aegispay';
+      dbClient = createDb(connectionString);
+    } catch (err) {
+      console.warn('[user-memory] Failed to initialize PostgreSQL client:', err);
+      dbClient = null;
+    }
+  }
+  return dbClient;
+}
+
+export function setUserMemoryDb(db: ReturnType<typeof createDb> | null): void {
+  dbClient = db;
+}
+
 export function createDefaultDynamicBuyerProfile(userId: string): DynamicBuyerProfile {
   const safeId = sanitizeUserId(userId);
   return {
@@ -483,7 +508,92 @@ export function createDefaultDynamicBuyerProfile(userId: string): DynamicBuyerPr
   };
 }
 
-export function loadDynamicBuyerProfile(userId: string = 'demo'): DynamicBuyerProfile {
+/**
+ * Persists dynamic buyer profile to PostgreSQL using an atomic upsert:
+ * INSERT INTO user_memories (user_id, universal, domain_facets, purchase_velocity, updated_at)
+ * VALUES (...)
+ * ON CONFLICT (user_id) DO UPDATE SET ...
+ */
+export async function persistDynamicBuyerProfile(profile: DynamicBuyerProfile): Promise<void> {
+  const safeId = sanitizeUserId(profile.userId);
+  try {
+    const db = getUserMemoryDb();
+    if (!db) return;
+
+    await db
+      .insert(userMemoriesTable)
+      .values({
+        userId: safeId,
+        universal: profile.universal,
+        domainFacets: profile.domain_facets,
+        purchaseVelocity: profile.purchase_velocity,
+        updatedAt: new Date(profile.updated_at),
+      })
+      .onConflictDoUpdate({
+        target: userMemoriesTable.userId,
+        set: {
+          universal: profile.universal,
+          domainFacets: profile.domain_facets,
+          purchaseVelocity: profile.purchase_velocity,
+          updatedAt: new Date(profile.updated_at),
+        },
+      });
+  } catch (err) {
+    console.warn(`[user-memory] PostgreSQL persist failed for user ${safeId}:`, err);
+  }
+}
+
+/**
+ * Loads dynamic buyer profile:
+ * 1. Checks memory cache first (L1).
+ * 2. On cache miss, queries PostgreSQL via Drizzle (L2).
+ * 3. Falls back to createDefaultDynamicBuyerProfile(userId) if uninitialized.
+ */
+export async function loadDynamicBuyerProfile(userId: string = 'demo'): Promise<DynamicBuyerProfile> {
+  const safeId = sanitizeUserId(userId);
+
+  // L1: In-memory cache check
+  if (dynamicBuyerProfilesStore.has(safeId)) {
+    return { ...dynamicBuyerProfilesStore.get(safeId)! };
+  }
+
+  // L2: PostgreSQL via Drizzle query on cache miss
+  try {
+    const db = getUserMemoryDb();
+    if (db) {
+      const rows = await db
+        .select()
+        .from(userMemoriesTable)
+        .where(eq(userMemoriesTable.userId, safeId))
+        .limit(1);
+
+      if (rows && rows.length > 0 && rows[0]) {
+        const row = rows[0];
+        const loaded: DynamicBuyerProfile = {
+          userId: row.userId,
+          universal: row.universal as any,
+          domain_facets: (row.domainFacets as any) || {},
+          purchase_velocity: row.purchaseVelocity as any,
+          updated_at: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
+        };
+        dynamicBuyerProfilesStore.set(safeId, loaded);
+        return { ...loaded };
+      }
+    }
+  } catch (err) {
+    console.warn(`[user-memory] PostgreSQL query failed for user ${safeId}:`, err);
+  }
+
+  // Fallback to default if uninitialized
+  const defaultProfile = createDefaultDynamicBuyerProfile(safeId);
+  dynamicBuyerProfilesStore.set(safeId, defaultProfile);
+  return { ...defaultProfile };
+}
+
+/**
+ * Synchronous L1 cache reader backfilling defaults if uninitialized.
+ */
+export function loadDynamicBuyerProfileSync(userId: string = 'demo'): DynamicBuyerProfile {
   const safeId = sanitizeUserId(userId);
   if (!dynamicBuyerProfilesStore.has(safeId)) {
     dynamicBuyerProfilesStore.set(safeId, createDefaultDynamicBuyerProfile(safeId));
@@ -491,6 +601,10 @@ export function loadDynamicBuyerProfile(userId: string = 'demo'): DynamicBuyerPr
   return { ...dynamicBuyerProfilesStore.get(safeId)! };
 }
 
+/**
+ * Saves dynamic buyer profile:
+ * Updates in-memory cache and asynchronously persists to PostgreSQL using an atomic upsert.
+ */
 export function saveDynamicBuyerProfile(profile: DynamicBuyerProfile): DynamicBuyerProfile {
   const safeId = sanitizeUserId(profile.userId);
   const updated: DynamicBuyerProfile = {
@@ -499,8 +613,15 @@ export function saveDynamicBuyerProfile(profile: DynamicBuyerProfile): DynamicBu
     updated_at: new Date().toISOString(),
   };
   dynamicBuyerProfilesStore.set(safeId, updated);
+
+  // Asynchronously persist to PostgreSQL using an atomic upsert
+  persistDynamicBuyerProfile(updated).catch(err => {
+    console.warn(`[user-memory] Async DB persist failed for user ${safeId}:`, err);
+  });
+
   return updated;
 }
+
 
 /**
  * Compacts and extracts durable buyer facets from completed checkout sessions or intent traces.
@@ -526,7 +647,7 @@ export function compactBuyerMemoryFromSession(
   }
 ): DynamicBuyerProfile {
   const safeId = sanitizeUserId(userId);
-  const profile = loadDynamicBuyerProfile(safeId);
+  const profile = loadDynamicBuyerProfileSync(safeId);
 
   // 1. Update purchase velocity & lifetime spend
   if (session.total_cents && session.total_cents > 0) {
@@ -570,6 +691,77 @@ export function compactBuyerMemoryFromSession(
 
   return saveDynamicBuyerProfile(profile);
 }
+
+/**
+ * Asynchronously compacts buyer memory from session and awaits PostgreSQL persistence.
+ */
+export async function compactBuyerMemoryFromSessionAsync(
+  userId: string,
+  session: {
+    order_id?: string;
+    total_cents?: number;
+    merchant_domain?: string;
+    items?: Array<{
+      title: string;
+      category?: string;
+      brand?: string;
+      unit_price_cents?: number;
+      attributes?: Record<string, string | number | boolean | string[]>;
+    }>;
+  },
+  intentTrace?: {
+    category?: string;
+    extracted_specs?: Record<string, string | number | boolean | string[]>;
+  }
+): Promise<DynamicBuyerProfile> {
+  const safeId = sanitizeUserId(userId);
+  const profile = await loadDynamicBuyerProfile(safeId);
+
+  // 1. Update purchase velocity & lifetime spend
+  if (session.total_cents && session.total_cents > 0) {
+    profile.purchase_velocity.lifetime_spend_cents += session.total_cents;
+    profile.purchase_velocity.total_orders_completed += 1;
+  }
+
+  // 2. Extract brand affinities from items
+  if (session.items && session.items.length > 0) {
+    for (const item of session.items) {
+      if (item.brand && !profile.universal.preferred_brands.includes(item.brand)) {
+        profile.universal.preferred_brands.push(item.brand);
+      }
+
+      // 3. Domain facets
+      const cat = (item.category || intentTrace?.category || 'general').toLowerCase().trim();
+      const attrs = { ...(item.attributes || {}), ...(intentTrace?.extracted_specs || {}) };
+
+      if (Object.keys(attrs).length > 0) {
+        const existingFacet: DomainFacet = profile.domain_facets[cat] || {
+          category: cat,
+          attributes: {},
+          confidence_score: 0.8,
+          source_order_ids: [],
+          last_updated: new Date().toISOString(),
+        };
+
+        existingFacet.attributes = {
+          ...existingFacet.attributes,
+          ...attrs,
+        };
+        if (session.order_id && !existingFacet.source_order_ids.includes(session.order_id)) {
+          existingFacet.source_order_ids.push(session.order_id);
+        }
+        existingFacet.confidence_score = Math.min(1.0, existingFacet.confidence_score + 0.05);
+        existingFacet.last_updated = new Date().toISOString();
+        profile.domain_facets[cat] = existingFacet;
+      }
+    }
+  }
+
+  const updated = saveDynamicBuyerProfile(profile);
+  await persistDynamicBuyerProfile(updated);
+  return updated;
+}
+
 
 /**
  * Evaluates candidate products against universal and domain-specific rules.
