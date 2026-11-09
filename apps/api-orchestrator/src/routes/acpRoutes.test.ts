@@ -629,6 +629,25 @@ test('MCP Transport Binding: POST /mcp JSON-RPC 2.0 tool executions', async () =
   assert.equal(mcpErrBody.error.data.code, 'session_not_found');
 });
 
+test('MCP v2 Gateway: DNS Rebinding Protection rejects untrusted Host headers', async () => {
+  const app = await buildTestApp();
+
+  const badHostRes = await app.inject({
+    method: 'POST',
+    url: '/mcp',
+    headers: {
+      host: 'attacker-controlled.site',
+    },
+    payload: {
+      jsonrpc: '2.0',
+      id: 999,
+      method: 'tools/list',
+    },
+  });
+
+  assert.equal(badHostRes.statusCode, 403);
+});
+
 test('Batch 2: Capability Negotiation — Computes strict intersection of interventions', async () => {
   const app = await buildTestApp();
 

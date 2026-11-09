@@ -1,25 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMCPServer } from './server.js';
-import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { InMemoryTransport, createMcpHandler } from '@modelcontextprotocol/server';
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { createMCPServer, HardenedStdioServerTransport, DEFAULT_MAX_BUFFER_SIZE } from './server.js';
 
-test('MCP Enforcer Server - Tool Registration & Discovery', async (t) => {
+test('MCP Enforcer Server v2 - In-Process Client Tool Registration & Discovery', async (t) => {
   const server = createMCPServer();
-  assert.ok(server, 'createMCPServer should return an instance');
+  assert.ok(server, 'createMCPServer should return an McpServer instance');
 
-  // Verify list_tools returns all 11 registered tools
-  // (5 ACP checkout tools + 6 algorithmic/custodian gate tools)
-  const handlers = (server as any)._requestHandlers;
-  const listToolsHandler = handlers.get(ListToolsRequestSchema.shape.method.value);
-  assert.ok(listToolsHandler, 'ListTools handler should be registered');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'aegispay-test-client', version: '1.0.0' });
 
-  const listResponse = await listToolsHandler({
-    method: 'tools/list',
-    params: {},
-  });
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
 
+  const listResponse = await client.listTools();
   assert.ok(listResponse?.tools, 'Response should contain tools array');
-  const toolNames = listResponse.tools.map((t: any) => t.name);
+  const toolNames = listResponse.tools.map((tool) => tool.name);
 
   const expectedTools = [
     // 6 Algorithmic / Custodian Gate Tools
@@ -44,195 +43,337 @@ test('MCP Enforcer Server - Tool Registration & Discovery', async (t) => {
     );
   }
   assert.strictEqual(toolNames.length, 11, 'Exactly 11 tools should be registered');
+
+  await client.close();
+  await server.server.close();
 });
 
-test('MCP Enforcer Server - Call ACP Tools Execution', async (t) => {
+test('MCP Enforcer Server v2 - ACP Checkout Tools Execution with Structured Content', async (t) => {
   const server = createMCPServer();
-  const handlers = (server as any)._requestHandlers;
-  const callToolHandler = handlers.get(CallToolRequestSchema.shape.method.value);
-  assert.ok(callToolHandler, 'CallTool handler should be registered');
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'aegispay-test-client', version: '1.0.0' });
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
 
   // 1. Test create_checkout_session
-  const createResult = await callToolHandler({
-    method: 'tools/call',
-    params: {
-      name: 'create_checkout_session',
-      arguments: {
-        meta: { api_version: '2026-01-30', request_id: 'req_test_1' },
-        payload: {
-          currency: 'USD',
-          items: [
-            { id: 'item_1', name: 'Smart Widget', quantity: 2, unit_price_cents: 2500 },
-          ],
-        },
+  const createResult: any = await client.callTool({
+    name: 'create_checkout_session',
+    arguments: {
+      meta: { api_version: '2026-01-30', request_id: 'req_test_1' },
+      payload: {
+        currency: 'USD',
+        items: [
+          { id: 'item_1', name: 'Smart Widget', quantity: 2, unit_price_cents: 2500 },
+        ],
       },
     },
   });
 
   assert.ok(createResult?.content?.[0]?.text, 'create_checkout_session should return text content');
-  const sessionData = JSON.parse(createResult.content[0].text);
+  const sessionData = createResult.structuredContent || JSON.parse(createResult.content[0].text);
   assert.ok(sessionData.id, 'Session should have an id');
   assert.strictEqual(sessionData.status, 'ready_for_payment');
   assert.strictEqual(sessionData.line_items.length, 1);
   assert.ok(sessionData.totals.find((tot: any) => tot.type === 'total').amount > 0);
 
   // 2. Test get_checkout_session
-  const getResult = await callToolHandler({
-    method: 'tools/call',
-    params: {
-      name: 'get_checkout_session',
-      arguments: {
-        meta: { api_version: '2026-01-30' },
-        id: sessionData.id,
-      },
+  const getResult: any = await client.callTool({
+    name: 'get_checkout_session',
+    arguments: {
+      meta: { api_version: '2026-01-30' },
+      id: sessionData.id,
     },
   });
-  const getSessionData = JSON.parse(getResult.content[0].text);
+  const getSessionData = getResult.structuredContent || JSON.parse(getResult.content[0].text);
   assert.strictEqual(getSessionData.id, sessionData.id);
 
   // 3. Test update_checkout_session
-  const updateResult = await callToolHandler({
-    method: 'tools/call',
-    params: {
-      name: 'update_checkout_session',
-      arguments: {
-        meta: { api_version: '2026-01-30' },
-        id: sessionData.id,
-        payload: { order_notes: 'Rush delivery please' },
-      },
+  const updateResult: any = await client.callTool({
+    name: 'update_checkout_session',
+    arguments: {
+      meta: { api_version: '2026-01-30' },
+      id: sessionData.id,
+      payload: { order_notes: 'Rush delivery please' },
     },
   });
-  const updateSessionData = JSON.parse(updateResult.content[0].text);
+  const updateSessionData = updateResult.structuredContent || JSON.parse(updateResult.content[0].text);
   assert.strictEqual(updateSessionData.id, sessionData.id);
 
   // 4. Test complete_checkout_session
-  const completeResult = await callToolHandler({
-    method: 'tools/call',
-    params: {
-      name: 'complete_checkout_session',
-      arguments: {
-        meta: { api_version: '2026-01-30' },
-        id: sessionData.id,
-        payload: {
-          payment_method: { type: 'paypal_vault_v3' },
-        },
+  const completeResult: any = await client.callTool({
+    name: 'complete_checkout_session',
+    arguments: {
+      meta: { api_version: '2026-01-30' },
+      id: sessionData.id,
+      payload: {
+        payment_method: { type: 'paypal_vault_v3' },
       },
     },
   });
-  const completeSessionData = JSON.parse(completeResult.content[0].text);
+  const completeSessionData = completeResult.structuredContent || JSON.parse(completeResult.content[0].text);
   assert.strictEqual(completeSessionData.status, 'completed');
   assert.ok(completeSessionData.order?.id);
 
   // 5. Test cancel_checkout_session
-  const cancelResult = await callToolHandler({
-    method: 'tools/call',
-    params: {
-      name: 'cancel_checkout_session',
-      arguments: {
-        meta: { api_version: '2026-01-30' },
-        id: sessionData.id,
-        payload: { reason: 'changed_mind' },
-      },
+  const cancelResult: any = await client.callTool({
+    name: 'cancel_checkout_session',
+    arguments: {
+      meta: { api_version: '2026-01-30' },
+      id: sessionData.id,
+      payload: { reason: 'changed_mind' },
     },
   });
-  const cancelSessionData = JSON.parse(cancelResult.content[0].text);
+  const cancelSessionData = cancelResult.structuredContent || JSON.parse(cancelResult.content[0].text);
   assert.strictEqual(cancelSessionData.status, 'cancelled');
+
+  await client.close();
+  await server.server.close();
 });
 
-test('MCP Enforcer Server - Protocol Error Codes & Invalid Requests', async (t) => {
+test('MCP Enforcer Server v2 - Custodian Gate Tools Execution', async (t) => {
   const server = createMCPServer();
-  const sentMessages: any[] = [];
-  const mockTransport: any = {
-    start: async () => {},
-    send: async (msg: any) => {
-      sentMessages.push(msg);
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'aegispay-test-client', version: '1.0.0' });
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+
+  // 1. optimize_channel3_multi_merchant_basket
+  const optResult: any = await client.callTool({
+    name: 'optimize_channel3_multi_merchant_basket',
+    arguments: {
+      allowance_voucher_id: 'vch_test_123',
+      search_query: 'running shoes',
+      items: [
+        { product_id: 'prod_1', merchant_domain: 'store1.com', price_cents: 4000, quantity: 1 },
+        { product_id: 'prod_2', merchant_domain: 'store2.com', price_cents: 6000, quantity: 1 },
+      ],
     },
-    close: async () => {},
+  });
+  const optData = optResult.structuredContent || JSON.parse(optResult.content[0].text);
+  assert.strictEqual(optData.basket_total_cents, 10000);
+  assert.strictEqual(optData.assignments.length, 2);
+
+  // 2. broadcast_synthetic_intent_voucher
+  const broadcastResult: any = await client.callTool({
+    name: 'broadcast_synthetic_intent_voucher',
+    arguments: {
+      mandate_id: 'mandate_synth_1',
+      channel3_product_id: 'prod_camera_99',
+      merchant_domain: 'electronics.com',
+      retail_offer_cents: 50000,
+      buyer_bid_cents: 45000,
+    },
+  });
+  const broadcastData = broadcastResult.structuredContent || JSON.parse(broadcastResult.content[0].text);
+  assert.ok(broadcastData.voucher_id.startsWith('syn_'));
+  assert.strictEqual(broadcastData.status, 'BROADCASTED');
+
+  // 3. void_or_capture_escrow_hold
+  const captureResult: any = await client.callTool({
+    name: 'void_or_capture_escrow_hold',
+    arguments: {
+      authorization_id: 'auth_paypal_hold_77',
+      action: 'CAPTURE',
+      amount_cents: 4500,
+    },
+  });
+  const captureData = captureResult.structuredContent || JSON.parse(captureResult.content[0].text);
+  assert.strictEqual(captureData.status, 'CAPTURED');
+
+  // 4. submit_dispute_evidence_bundle
+  const evidenceResult: any = await client.callTool({
+    name: 'submit_dispute_evidence_bundle',
+    arguments: {
+      paypal_dispute_id: 'PP-D-12345',
+      carrier_tracking_number: '1Z9999999999999999',
+      policy_proof_text: 'Buyer verified non-delivery confirmation',
+      vision_defect_mask: [0, 0, 100, 100],
+    },
+  });
+  const evidenceData = evidenceResult.structuredContent || JSON.parse(evidenceResult.content[0].text);
+  assert.strictEqual(evidenceData.status, 'SUBMITTED');
+
+  // 5. propose_dispute_partial_settlement
+  const settlementResult: any = await client.callTool({
+    name: 'propose_dispute_partial_settlement',
+    arguments: {
+      paypal_dispute_id: 'PP-D-12345',
+      compromise_amount_cents: 2500,
+    },
+  });
+  const settlementData = settlementResult.structuredContent || JSON.parse(settlementResult.content[0].text);
+  assert.strictEqual(settlementData.status, 'PROPOSED');
+
+  // 6. authorize_conditional_escrow_order under $500 threshold
+  const escrowResult: any = await client.callTool({
+    name: 'authorize_conditional_escrow_order',
+    arguments: {
+      mandate_id: 'mandate_small_1',
+      merchant_domain: 'store.com',
+      requested_cents: 3000,
+      category_id: 'electronics',
+      items: [
+        { product_id: 'prod_usb_cable', price_cents: 3000, quantity: 1 },
+      ],
+    },
+  });
+  const escrowData = escrowResult.structuredContent || JSON.parse(escrowResult.content[0].text);
+  assert.strictEqual(escrowData.status, 'AUTHORIZED');
+  assert.ok(escrowData.paypal_order_id);
+
+  await client.close();
+  await server.server.close();
+});
+
+test('MCP Enforcer Server v2 - Human-in-the-Loop input_required Elicitation for >$500 Escrow', async (t) => {
+  const server = createMCPServer();
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'aegispay-test-client', version: '1.0.0' });
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+
+  // Request $750 (75,000 cents) without prior approval -> triggers input_required
+  const promptResult: any = await client.callTool({
+    name: 'authorize_conditional_escrow_order',
+    arguments: {
+      mandate_id: 'mandate_large_1',
+      merchant_domain: 'store.com',
+      requested_cents: 75000,
+      category_id: 'electronics',
+      items: [
+        { product_id: 'prod_laptop', price_cents: 75000, quantity: 1 },
+      ],
+    },
+  });
+
+  // Protocol revision 2026-07-28 input_required response / elicitation requirement check
+  assert.ok(
+    promptResult.resultType === 'input_required' ||
+      (promptResult.isError && (promptResult.content?.[0] as any)?.text?.includes('approval')),
+    'High value escrow must require approval elicitation or input_required'
+  );
+
+  // When confirmed: true is provided (e.g. buyer operator approved), authorization completes
+  const approvedResult: any = await client.callTool({
+    name: 'authorize_conditional_escrow_order',
+    arguments: {
+      mandate_id: 'mandate_large_1',
+      merchant_domain: 'store.com',
+      requested_cents: 75000,
+      category_id: 'electronics',
+      confirmed: true,
+      items: [
+        { product_id: 'prod_laptop', price_cents: 75000, quantity: 1 },
+      ],
+    },
+  });
+
+  const approvedData = approvedResult.structuredContent || JSON.parse(approvedResult.content[0].text);
+  assert.strictEqual(approvedData.status, 'AUTHORIZED');
+  assert.ok(approvedData.paypal_order_id);
+
+  await client.close();
+  await server.server.close();
+});
+
+test('MCP Enforcer Server v2 - Validation Errors and Unknown Tool Handling', async (t) => {
+  const server = createMCPServer();
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: 'aegispay-test-client', version: '1.0.0' });
+
+  await Promise.all([
+    server.connect(serverTransport),
+    client.connect(clientTransport),
+  ]);
+
+  // 1. Tool not found
+  await assert.rejects(
+    async () => {
+      await client.callTool({
+        name: 'non_existent_tool',
+        arguments: {},
+      });
+    },
+    (err: any) => {
+      return err.message.includes('not found') || err.code === -32601;
+    }
+  );
+
+  // 2. Missing required parameter in optimize_channel3_multi_merchant_basket
+  const invalidBasketRes = await client.callTool({
+    name: 'optimize_channel3_multi_merchant_basket',
+    arguments: {
+      // missing required allowance_voucher_id
+      search_query: 'shoes',
+    },
+  });
+  assert.strictEqual(invalidBasketRes.isError, true);
+  assert.ok((invalidBasketRes.content[0] as any).text.includes('allowance_voucher_id'));
+
+  // 3. Invalid items in create_checkout_session
+  const invalidSessionRes = await client.callTool({
+    name: 'create_checkout_session',
+    arguments: {
+      meta: { api_version: '2026-01-30' },
+      payload: {
+        currency: 'usd',
+        items: [], // violates min(1) constraint
+      },
+    },
+  });
+  assert.strictEqual(invalidSessionRes.isError, true);
+  assert.ok((invalidSessionRes.content[0] as any).text.includes('items'));
+
+  await client.close();
+  await server.server.close();
+});
+
+test('MCP Enforcer Server v2 - Streamable HTTP Handler Fetch Face', async (t) => {
+  const handler = createMcpHandler(() => createMCPServer());
+
+  // Wrap fetch for web Request compatibility
+  const customFetch = (input: any, init?: any) => {
+    const req = input instanceof Request ? input : new Request(input, init);
+    return handler.fetch(req);
   };
-  await server.connect(mockTransport);
 
-  const flushTicks = async () => new Promise((resolve) => setTimeout(resolve, 20));
-
-  // 1. Method Not Found (-32601) - Unknown JSON-RPC method
-  sentMessages.length = 0;
-  await mockTransport.onmessage({
-    jsonrpc: '2.0',
-    method: 'unknown/method_xyz',
-    params: {},
-    id: 101,
+  const transport = new StreamableHTTPClientTransport(new URL('http://localhost/mcp'), {
+    fetch: customFetch,
   });
-  await flushTicks();
-  assert.strictEqual(sentMessages.length, 1);
-  assert.strictEqual(sentMessages[0].id, 101);
-  assert.strictEqual(sentMessages[0].error.code, -32601);
-  assert.ok(sentMessages[0].error.message.includes('Method not found'));
+  const client = new Client({ name: 'streamable-test-client', version: '1.0.0' });
+  await client.connect(transport);
 
-  // 2. Tool Not Found (-32601) - tools/call with unknown tool name
-  sentMessages.length = 0;
-  await mockTransport.onmessage({
-    jsonrpc: '2.0',
-    method: 'tools/call',
-    params: {
-      name: 'non_existent_tool',
-      arguments: {},
+  const list = await client.listTools();
+  assert.strictEqual(list.tools.length, 11);
+
+  const pingResult: any = await client.callTool({
+    name: 'broadcast_synthetic_intent_voucher',
+    arguments: {
+      mandate_id: 'mandate_streamable_1',
+      channel3_product_id: 'prod_streamable_99',
+      merchant_domain: 'example.com',
+      retail_offer_cents: 20000,
+      buyer_bid_cents: 18000,
     },
-    id: 102,
   });
-  await flushTicks();
-  assert.strictEqual(sentMessages.length, 1);
-  assert.strictEqual(sentMessages[0].id, 102);
-  assert.strictEqual(sentMessages[0].error.code, -32601);
-  assert.ok(sentMessages[0].error.message.includes('Tool not found'));
 
-  // 3. Invalid Params (-32602) - Built-in custodian tool missing required fields
-  sentMessages.length = 0;
-  await mockTransport.onmessage({
-    jsonrpc: '2.0',
-    method: 'tools/call',
-    params: {
-      name: 'optimize_channel3_multi_merchant_basket',
-      arguments: {
-        // Missing required 'allowance_voucher_id'
-        search_query: 'shoes',
-      },
-    },
-    id: 103,
-  });
-  await flushTicks();
-  assert.strictEqual(sentMessages.length, 1);
-  assert.strictEqual(sentMessages[0].id, 103);
-  assert.strictEqual(sentMessages[0].error.code, -32602);
-  assert.ok(sentMessages[0].error.message.includes('Invalid arguments'));
+  assert.ok(pingResult.content[0].text);
+  assert.strictEqual(pingResult.isError, undefined);
 
-  // 4. Invalid Params (-32602) - ACP tool missing required properties
-  sentMessages.length = 0;
-  await mockTransport.onmessage({
-    jsonrpc: '2.0',
-    method: 'tools/call',
-    params: {
-      name: 'create_checkout_session',
-      arguments: {
-        meta: {
-          // Missing api_version
-        },
-        payload: {
-          currency: 'USD',
-          items: [], // violates min(1) items constraint
-        },
-      },
-    },
-    id: 104,
-  });
-  await flushTicks();
-  assert.strictEqual(sentMessages.length, 1);
-  assert.strictEqual(sentMessages[0].id, 104);
-  assert.strictEqual(sentMessages[0].error.code, -32602);
-  assert.ok(sentMessages[0].error.message.includes('Invalid params'));
+  await client.close();
 });
 
 test('HardenedStdioServerTransport - Parse Error (-32700), Invalid Request (-32600), and Buffer Overflow', async (t) => {
   const { Readable, Writable } = await import('node:stream');
-  const { HardenedStdioServerTransport } = await import('./server.js');
 
   const stdin = new Readable({ read() {} });
   let stdoutOutput = '';

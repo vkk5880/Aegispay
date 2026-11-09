@@ -153,7 +153,9 @@ export const AuthorizeEscrowOrderSchema = z.object({
   merchant_dispute_rate: z.number().min(0).max(1).optional(),
   merchant_discount_variance: z.number().min(0).max(1).optional(),
   redis_client: z.any().optional(),
-  spend_enforcer: z.custom<AtomicSpendEnforcer>().optional()
+  spend_enforcer: z.custom<AtomicSpendEnforcer>().optional(),
+  confirmed: z.boolean().optional(),
+  requires_3ds: z.boolean().optional()
 }).refine(
   data => data.requested_cents === data.items.reduce((sum, item) => sum + item.price_cents * item.quantity, 0),
   {

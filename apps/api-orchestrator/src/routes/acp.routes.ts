@@ -7,7 +7,10 @@ import {
   ACPCreateCheckoutSessionSchema,
   ACPPaymentHandlerExecuteSchema,
   ACP_STANDARD_PAYMENT_HANDLERS,
+  createMCPServer,
 } from '@aegispay/mcp-enforcer';
+import { createMcpHandler } from '@modelcontextprotocol/server';
+import { toNodeHandler, hostHeaderValidation } from '@modelcontextprotocol/node';
 import { defaultTaxEstimator } from '../services/tax-estimator.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
@@ -1059,159 +1062,38 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   // MCP Streamable HTTP JSON-RPC 2.0 Binding (/mcp) (docs/mcp-binding.md)
   // Conforming to MCP TypeScript SDK v2 & 2026-07-28 Protocol Revision
   // =========================================================================
+  const validateHost = hostHeaderValidation(['api.aegispay.com', 'localhost', '127.0.0.1', '::1', '[::1]']);
+  const mcpServerInstance = createMCPServer();
+  const mcpHandler = createMcpHandler(() => mcpServerInstance);
+  const nodeHandler = toNodeHandler(mcpHandler);
 
-  // GET /mcp: Streamable HTTP SSE stream endpoint
-  fastify.get('/mcp', async (request, reply) => {
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'mcp-protocol-version': '2026-07-28',
-    });
-    reply.raw.write(': AegisPay MCP Streamable HTTP endpoint active\n\n');
-    request.raw.on('close', () => {
-      reply.raw.end();
-    });
-  });
+  fastify.all('/mcp', async (request, reply) => {
+    // 1. DNS Rebinding Protection (reject unauthorized host headers)
+    if (!validateHost(request.raw, reply.raw)) {
+      reply.hijack();
+      return;
+    }
 
-  // DELETE /mcp: Session termination endpoint
-  fastify.delete('/mcp', async (request, reply) => {
-    return reply.status(200).send({
-      jsonrpc: '2.0',
-      result: { status: 'terminated' },
-    });
-  });
-
-  // POST /mcp: Streamable HTTP JSON-RPC 2.0 tool execution
-  fastify.post('/mcp', async (request, reply) => {
     const rpcBody: any = request.body || {};
     const { jsonrpc, id, method, params } = rpcBody;
 
-    if (jsonrpc !== '2.0' || !method) {
-      return reply.status(200).send({
-        jsonrpc: '2.0',
-        id: id || null,
-        error: {
-          code: -32600,
-          message: 'Invalid Request: jsonrpc must be 2.0 and method must be present',
-        },
-      });
-    }
-
-    // Handle standard MCP discovery / handshake
-    if (method === 'initialize' || method === 'server/discover') {
-      return reply.status(200).send({
-        jsonrpc: '2.0',
-        id,
-        result: {
-          protocolVersion: '2026-07-28',
-          serverInfo: {
-            name: 'aegispay-mcp-enforcer',
-            version: '0.2.0',
-          },
-          capabilities: {
-            tools: { listChanged: true },
-          },
-        },
-      });
-    }
-
-    if (method === 'ping') {
-      return reply.status(200).send({
-        jsonrpc: '2.0',
-        id,
-        result: {},
-      });
-    }
-
-    // Handle standard MCP tools/list
-    if (method === 'tools/list') {
-      return reply.status(200).send({
-        jsonrpc: '2.0',
-        id,
-        result: {
-          tools: [
-            {
-              name: 'create_checkout_session',
-              description: 'ACP MCP Tool: Creates a checkout session with authoritative cart totals and fulfillment options.',
-              inputSchema: { type: 'object', required: ['meta', 'payload'] },
-            },
-            {
-              name: 'get_checkout_session',
-              description: 'ACP MCP Tool: Retrieves the authoritative state of an active checkout session.',
-              inputSchema: { type: 'object', required: ['meta', 'id'] },
-            },
-            {
-              name: 'update_checkout_session',
-              description: 'ACP MCP Tool: Full replacement update of line items or fulfillment in checkout session.',
-              inputSchema: { type: 'object', required: ['meta', 'id', 'payload'] },
-            },
-            {
-              name: 'complete_checkout_session',
-              description: 'ACP MCP Tool: Submits payment instrument and finalizes order on merchant rails.',
-              inputSchema: { type: 'object', required: ['meta', 'id', 'payload'] },
-            },
-            {
-              name: 'cancel_checkout_session',
-              description: 'ACP MCP Tool: Cancels an active checkout session with optional intent trace.',
-              inputSchema: { type: 'object', required: ['meta', 'id'] },
-            },
-            {
-              name: 'optimize_channel3_multi_merchant_basket',
-              description: 'Runs the commission-subsidized knapsack solver across Channel3 offers.',
-              inputSchema: { type: 'object', required: ['allowance_voucher_id'] },
-            },
-            {
-              name: 'authorize_conditional_escrow_order',
-              description: 'Verifies the Ed25519 signature + Redis Lua atomic reservation, creates a multi-unit PayPal v2 Order.',
-              inputSchema: { type: 'object', required: ['mandate_id', 'merchant_domain', 'requested_cents', 'category_id', 'items'] },
-            },
-            {
-              name: 'broadcast_synthetic_intent_voucher',
-              description: 'Creates a PayPal Vault v3 setup token and broadcasts a binding below-retail bid.',
-              inputSchema: { type: 'object', required: ['mandate_id', 'channel3_product_id', 'merchant_domain', 'retail_offer_cents', 'buyer_bid_cents'] },
-            },
-            {
-              name: 'void_or_capture_escrow_hold',
-              description: 'Executes POST /v2/payments/authorizations/{id}/capture or void.',
-              inputSchema: { type: 'object', required: ['authorization_id', 'action'] },
-            },
-            {
-              name: 'submit_dispute_evidence_bundle',
-              description: 'Compiles carrier tracking, vision defect masks, and policy proofs into an in-memory PDF.',
-              inputSchema: { type: 'object', required: ['paypal_dispute_id'] },
-            },
-            {
-              name: 'propose_dispute_partial_settlement',
-              description: 'Executes POST /v1/customer/disputes/{id}/make-offer with calculated partial compromise amounts.',
-              inputSchema: { type: 'object', required: ['paypal_dispute_id', 'compromise_amount_cents'] },
-            },
-          ],
-        },
-      });
-    }
-
-    // Handle standard MCP tools/call
-    if (method === 'tools/call') {
-      const toolName = params?.name;
-      const toolArgs = params?.arguments || {};
+    // 2. Direct ACP Action Execution compatibility (e.g. method: 'create_checkout_session')
+    if (jsonrpc === '2.0' && method && !method.includes('/') && method !== 'initialize' && method !== 'ping') {
       try {
-        const result = await executeACPAction(toolName, toolArgs);
+        const result = await executeACPAction(method, params || {});
         return reply.status(200).send({
           jsonrpc: '2.0',
-          id,
-          result: {
-            content: [{ type: 'text', text: JSON.stringify(result.result || result) }],
-            structuredContent: result.result || result,
-          },
+          id: id || null,
+          result: result.result || result,
         });
       } catch (err: any) {
+        const rpcCode = err.code || -32000;
         return reply.status(200).send({
           jsonrpc: '2.0',
-          id,
+          id: id || null,
           error: {
-            code: err.code || -32000,
-            message: err.message || 'Tool execution error',
+            code: rpcCode,
+            message: err.message || 'ACP Internal Error',
             data: err.data || {
               type: 'invalid_request',
               code: 'processing_error',
@@ -1222,30 +1104,9 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    // Direct ACP Action Execution (e.g. method: 'create_checkout_session')
-    try {
-      const result = await executeACPAction(method, params || {});
-      return reply.status(200).send({
-        jsonrpc: '2.0',
-        id,
-        result: result.result || result,
-      });
-    } catch (err: any) {
-      const rpcCode = err.code || -32000;
-      return reply.status(200).send({
-        jsonrpc: '2.0',
-        id,
-        error: {
-          code: rpcCode,
-          message: err.message || 'ACP Internal Error',
-          data: err.data || {
-            type: 'invalid_request',
-            code: 'processing_error',
-            message: err.message,
-          },
-        },
-      });
-    }
+    // 3. Modern MCP v2 Streamable HTTP & JSON-RPC Gateway via toNodeHandler
+    reply.hijack();
+    await nodeHandler(request.raw, reply.raw, request.body);
   });
 
   /**
