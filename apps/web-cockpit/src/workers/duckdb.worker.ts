@@ -1,4 +1,5 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
+import { translateSsrmRequestToSql } from '../lib/ag-grid/DuckDbServerSideDatasource.js';
 
 export interface AnonymizedDisputeRecord {
   paypal_dispute_id: string;
@@ -17,7 +18,7 @@ export interface AnonymizedDisputeRecord {
 /**
  * Web Worker Message Protocol Definitions
  */
-export type DuckDBWorkerAction = 'QUERY' | 'INGEST' | 'INGEST_RECORD_BATCH' | 'AGGREGATE' | 'CLEAR_CACHE';
+export type DuckDBWorkerAction = 'QUERY' | 'INGEST' | 'INGEST_RECORD_BATCH' | 'AGGREGATE' | 'CLEAR_CACHE' | 'SSRM_QUERY';
 
 export interface DuckDBQueryPayload {
   query: string;
@@ -84,9 +85,15 @@ export function validateWorkerMessage(message: unknown): message is DuckDBWorker
     return false;
   }
 
-  const validActions: DuckDBWorkerAction[] = ['QUERY', 'INGEST', 'INGEST_RECORD_BATCH', 'AGGREGATE', 'CLEAR_CACHE'];
+  const validActions: DuckDBWorkerAction[] = ['QUERY', 'INGEST', 'INGEST_RECORD_BATCH', 'AGGREGATE', 'CLEAR_CACHE', 'SSRM_QUERY'];
   if (!validActions.includes(msg.action)) {
     return false;
+  }
+
+  if (msg.action === 'SSRM_QUERY') {
+    if (!msg.payload || typeof msg.payload !== 'object' || !msg.payload.request || typeof msg.payload.request !== 'object') {
+      return false;
+    }
   }
 
   if (msg.action === 'QUERY') {
@@ -516,6 +523,43 @@ export async function handleWorkerMessage(
           action: message.action,
           success: true,
           data: aggResult,
+          fallback: true,
+          executionTimeMs: Date.now() - startTime,
+        };
+      }
+      case 'SSRM_QUERY': {
+        const payload = message.payload as any;
+        const request = payload.request;
+        const tableName = payload.tableName || 'dispute_arbitrations';
+        const { dataQuery, countQuery, params } = translateSsrmRequestToSql(request, tableName);
+
+        if (db && isWasmSupported()) {
+          try {
+            const rows = await queryAnonymizedFinancialLedger(db, dataQuery, params);
+            const countRows = await queryAnonymizedFinancialLedger(db, countQuery, params);
+            const totalCount = countRows?.[0]?.total_count ?? (countRows?.[0]?.count ? Number(countRows[0].count) : rows.length);
+            return {
+              id: message.id,
+              action: message.action,
+              success: true,
+              data: { rowData: rows, rowCount: totalCount },
+              fallback: false,
+              executionTimeMs: Date.now() - startTime,
+            };
+          } catch {
+            // Fall through to fallback
+          }
+        }
+
+        // In-memory fallback
+        const start = request.startRow ?? 0;
+        const end = request.endRow ?? (start + 100);
+        const sliced = cachedRecords.slice(start, end);
+        return {
+          id: message.id,
+          action: message.action,
+          success: true,
+          data: { rowData: sliced, rowCount: cachedRecords.length },
           fallback: true,
           executionTimeMs: Date.now() - startTime,
         };

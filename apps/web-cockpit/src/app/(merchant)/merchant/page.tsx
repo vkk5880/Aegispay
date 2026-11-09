@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import { AutonomyDialWidget } from '@/components/ag-studio/AutonomyDialWidget';
 import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceComparatorWidget';
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
+import { LiveStudioCanvas } from '@/components/ag-studio/LiveStudioCanvas';
 import { DashboardReports } from '@/components/merchant/DashboardReports';
 import { Store, Database, ArrowLeft, Bot, Sparkles } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
@@ -74,50 +75,8 @@ export default function MerchantCockpitPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column: AG Studio Canvas & Visualizers */}
         <div className="lg:col-span-2 space-y-6">
-          {/* AG Studio 3 Harness */}
-          <div className="bg-white dark:bg-[#0b1324] rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col h-[480px]">
-            <div className="bg-slate-50 dark:bg-[#080d19] border-b border-slate-200 dark:border-slate-800 px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 text-sm flex items-center justify-between">
-              <span className="flex items-center gap-2">
-                <Bot className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                {showTechnicalDetails
-                  ? 'AG Studio 3 Canvas (Arbiter Agent Console)'
-                  : 'Automated Dispute Resolution Canvas'}
-              </span>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
-                {showTechnicalDetails ? 'Studio v3.0' : 'Active'}
-              </span>
-            </div>
-
-            <div className="flex-1 bg-slate-900 dark:bg-[#060b14] flex items-center justify-center relative p-6">
-              <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:20px_20px]" />
-              <div className="text-center relative z-10 max-w-md">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/40 mx-auto flex items-center justify-center text-cyan-400 mb-3 shadow-lg">
-                  <Sparkles className="w-6 h-6 animate-pulse" />
-                </div>
-                {showTechnicalDetails && (
-                  <div className="text-slate-400 mb-2 font-mono text-xs">
-                    <code>studio.registerToolRunner(&apos;paypal_arbiter&apos;)</code>
-                  </div>
-                )}
-                <h2 className="text-lg font-bold text-white mb-2">
-                  {showTechnicalDetails
-                    ? 'Multi-Agent Arbitration Cockpit Connected'
-                    : 'Automated Dispute Intelligence Connected'}
-                </h2>
-                <p className="text-slate-400 text-xs leading-relaxed">
-                  {showTechnicalDetails ? (
-                    <>
-                      Streaming cross-filtered insights via{' '}
-                      <code>api.defineAiCommand(&apos;isolate_high_risk_disputes&apos;)</code> and computing{' '}
-                      <code>Net_Retained_Margin</code> inline across 1,000 seeded sandbox disputes.
-                    </>
-                  ) : (
-                    'AI-assisted return inspection, fraud defense, and instant PayPal claim resolution are actively protecting your store margins.'
-                  )}
-                </p>
-              </div>
-            </div>
-          </div>
+          {/* Active AG Studio 3 Canvas */}
+          <LiveStudioCanvas />
 
           {/* Vision Forensics Evidence */}
           <div className="bg-white dark:bg-[#0b1324] rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800 p-5">

@@ -1,43 +1,39 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useMemo, useCallback } from 'react';
 import {
-  ClientSideRowModelModule,
-  ColumnAutoSizeModule,
-  DateFilterModule,
   enableDevValidations,
-  NumberFilterModule,
-  QuickFilterModule,
-  TextFilterModule,
-  themeQuartz,
   type ColDef,
   type ColTypeDefs,
   type ValueFormatterParams,
+  type GridApi,
+  type GridReadyEvent,
 } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
+import { aegisEnterpriseModules } from '@/lib/ag-grid/enterpriseModules';
+import { useAgGridTheme, type GridDensity } from '@/lib/ag-grid/useAgGridTheme';
+import { OrderDetailView } from '@/components/ag-grid/details/OrderDetailView';
+import { DisputeDetailView } from '@/components/ag-grid/details/DisputeDetailView';
+import { HateoasActionCellRenderer } from '@/components/ag-grid/renderers/HateoasActionCellRenderer';
+import { RiskScoreRadialCellRenderer } from '@/components/ag-grid/renderers/RiskScoreRadialCellRenderer';
+import { EvidenceThumbnailCellRenderer } from '@/components/ag-grid/renderers/EvidenceThumbnailCellRenderer';
+import { CarrierTrackerCellRenderer } from '@/components/ag-grid/renderers/CarrierTrackerCellRenderer';
+import { MonetarySplitCellRenderer } from '@/components/ag-grid/renderers/MonetarySplitCellRenderer';
+import { SlaCountdownCellRenderer } from '@/components/ag-grid/renderers/SlaCountdownCellRenderer';
+import { useRealtimeGridStream } from '@/hooks/useRealtimeGridStream';
+import {
+  Download,
+  FileSpreadsheet,
+  BarChart3,
+  Columns,
+  Radio,
+  SlidersHorizontal,
+  Zap,
+} from 'lucide-react';
 
 if (process.env.NODE_ENV !== 'production') {
   enableDevValidations();
 }
-
-const modules = [
-  ClientSideRowModelModule,
-  TextFilterModule,
-  NumberFilterModule,
-  DateFilterModule,
-  QuickFilterModule,
-  ColumnAutoSizeModule,
-];
-
-const theme = themeQuartz.withParams({
-  fontFamily: 'var(--pp-font, sans-serif)',
-  accentColor: 'var(--pp-blue, #0070e0)',
-  foregroundColor: 'var(--pp-ink, #001435)',
-  borderColor: 'var(--pp-border, #dbe1e8)',
-  headerFontWeight: 600,
-  headerTextColor: 'var(--pp-muted, #545d68)',
-  rowHoverColor: 'var(--pp-highlight, #e6f0fc)',
-});
 
 export type Row = Record<string, unknown>;
 
@@ -49,7 +45,6 @@ export function sanitizeQuickFilter(input: unknown): string {
   if (typeof input !== 'string') {
     return '';
   }
-  // Trim and escape regex special characters: \ ^ $ * + ? . ( ) | { } [ ]
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').trim();
 }
 
@@ -101,16 +96,28 @@ export function formatTimestamp({ value }: ValueFormatterParams<Row>): string {
 }
 
 export const columnTypes: ColTypeDefs<Row> = {
-  money: { valueFormatter: formatMoney, filter: 'agNumberColumnFilter' },
+  money: {
+    valueFormatter: formatMoney,
+    filter: 'agNumberColumnFilter',
+    aggFunc: 'sum',
+  },
   timestamp: { valueFormatter: formatTimestamp, filter: 'agDateColumnFilter' },
   dateTime: { valueFormatter: formatTimestamp, filter: 'agDateColumnFilter' },
 };
 
-const defaultColDef: ColDef<Row> = { filter: true };
+const defaultColDef: ColDef<Row> = {
+  filter: true,
+  enableRowGroup: true,
+  enablePivot: true,
+  enableValue: true,
+  sortable: true,
+  resizable: true,
+};
+
 const autoSizeStrategy = { type: 'fitCellContents' } as const;
 
 /**
- * Exports in-memory row data to downloadable CSV format.
+ * Exports in-memory row data to downloadable CSV format (fallback).
  */
 export function exportToCsv(rows: Row[], filename = 'merchant-settlement.csv'): void {
   if (!rows || rows.length === 0) return;
@@ -138,18 +145,122 @@ export function exportToCsv(rows: Row[], filename = 'merchant-settlement.csv'): 
   }
 }
 
-export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[] }) {
+export interface DataGridProps {
+  rows: Row[];
+  columns: ColDef<Row>[];
+  masterDetail?: boolean;
+  detailCellRenderer?: any;
+  enablePivot?: boolean;
+  rowModelType?: 'clientSide' | 'serverSide';
+  serverSideDatasource?: any;
+  enableCharts?: boolean;
+  enableFlashing?: boolean;
+  tableName?: string;
+}
+
+export function DataGrid({
+  rows,
+  columns,
+  masterDetail = true,
+  detailCellRenderer,
+  enablePivot = false,
+  rowModelType = 'clientSide',
+  serverSideDatasource,
+  enableCharts = true,
+  enableFlashing = true,
+}: DataGridProps) {
   const [search, setSearch] = useState('');
   const [selectedRow, setSelectedRow] = useState<Row | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [isPivotMode, setIsPivotMode] = useState(enablePivot);
+  const [gridApi, setGridApi] = useState<GridApi | null>(null);
 
-  // Sanitize the search query before providing to AG Grid quick filter text
+  const { theme, density, setDensity } = useAgGridTheme();
+
+  // Wire real-time streaming updates
+  const { triggerSimulatedEvent } = useRealtimeGridStream({
+    gridApi,
+    autoSimulateIntervalMs: 0,
+  });
+
+  const onGridReady = useCallback((params: GridReadyEvent) => {
+    setGridApi(params.api);
+    if (serverSideDatasource && rowModelType === 'serverSide') {
+      params.api.setGridOption('serverSideDatasource', serverSideDatasource);
+    }
+  }, [serverSideDatasource, rowModelType]);
+
   const sanitizedSearch = sanitizeQuickFilter(search);
 
-  const handleExport = () => {
+  // Native AG Grid Enterprise Excel Export
+  const handleExcelExport = () => {
+    if (gridApi && typeof gridApi.exportDataAsExcel === 'function') {
+      try {
+        gridApi.exportDataAsExcel({
+          fileName: 'aegispay-paypal-settlement-audit.xlsx',
+          sheetName: 'Transactions',
+          author: 'AegisPay Autonomous Clearinghouse Cockpit',
+          columnWidth: 120,
+        });
+        setActionNotice('Native Enterprise Excel workbook exported (.xlsx)');
+        setTimeout(() => setActionNotice(null), 3500);
+        return;
+      } catch {
+        // Fallback below
+      }
+    }
+    exportToCsv(rows, 'aegispay-paypal-settlement.csv');
+    setActionNotice('Settlement export downloaded successfully');
+    setTimeout(() => setActionNotice(null), 3500);
+  };
+
+  // Streaming CSV Export
+  const handleCsvExport = () => {
+    if (gridApi && typeof gridApi.exportDataAsCsv === 'function') {
+      try {
+        gridApi.exportDataAsCsv({ fileName: 'aegispay-settlement-records.csv' });
+        setActionNotice('Streaming Enterprise CSV exported');
+        setTimeout(() => setActionNotice(null), 3000);
+        return;
+      } catch {
+        // Fallback below
+      }
+    }
     exportToCsv(rows);
     setActionNotice('Settlement CSV exported successfully');
     setTimeout(() => setActionNotice(null), 3000);
+  };
+
+  // Integrated AG Charts: Programmatic Range Chart
+  const handleGenerateChart = () => {
+    if (!gridApi) return;
+    try {
+      const numCols = columns.filter((c) => c.type === 'money' || c.aggFunc === 'sum').map((c) => c.field as string);
+      const catCols = columns.filter((c) => c.field === 'currency' || c.field === 'counterparty' || c.field === 'name' || c.field === 'status').map((c) => c.field as string);
+
+      gridApi.createRangeChart({
+        cellRange: {
+          rowStartIndex: 0,
+          rowEndIndex: Math.min(rows.length - 1, 9),
+          columns: [...catCols.slice(0, 1), ...numCols.slice(0, 2)],
+        },
+        chartType: 'groupedColumn',
+      });
+      setActionNotice('Integrated AG Chart created over active range');
+      setTimeout(() => setActionNotice(null), 3500);
+    } catch {
+      setActionNotice('Select numeric range cells to generate chart');
+      setTimeout(() => setActionNotice(null), 3000);
+    }
+  };
+
+  const handleTogglePivot = () => {
+    if (!gridApi) return;
+    const nextMode = !isPivotMode;
+    setIsPivotMode(nextMode);
+    gridApi.setGridOption('pivotMode', nextMode);
+    setActionNotice(nextMode ? 'Pivot Mode Activated' : 'Standard Grid Layout Restored');
+    setTimeout(() => setActionNotice(null), 2500);
   };
 
   const handleAction = (actionType: 'approve' | 'refund' | 'escalate') => {
@@ -165,52 +276,206 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
     setTimeout(() => setActionNotice(null), 4000);
   };
 
+  // Register Custom Cell Renderers & Detail Views
+  const components = useMemo(() => ({
+    OrderDetailView,
+    DisputeDetailView,
+    HateoasActionCellRenderer,
+    RiskScoreRadialCellRenderer,
+    EvidenceThumbnailCellRenderer,
+    CarrierTrackerCellRenderer,
+    MonetarySplitCellRenderer,
+    SlaCountdownCellRenderer,
+  }), []);
+
+  // Configure master detail parameters
+  const resolvedDetailRenderer = detailCellRenderer || OrderDetailView;
+
+  // Process columns: add group cell renderer to first column when masterDetail is active
+  const augmentedColumns = useMemo(() => {
+    return columns.map((col, idx) => {
+      if (idx === 0 && masterDetail) {
+        return {
+          ...col,
+          cellRenderer: 'agGroupCellRenderer',
+        };
+      }
+      return col;
+    });
+  }, [columns, masterDetail]);
+
+  const sideBar = useMemo(() => ({
+    toolPanels: [
+      {
+        id: 'columns',
+        labelDefault: 'Columns',
+        labelKey: 'columns',
+        iconKey: 'columns',
+        toolPanel: 'agColumnsToolPanel',
+      },
+      {
+        id: 'filters',
+        labelDefault: 'Filters',
+        labelKey: 'filters',
+        iconKey: 'filter',
+        toolPanel: 'agFiltersToolPanel',
+      },
+    ],
+    defaultToolPanel: '',
+  }), []);
+
+  const statusBar = useMemo(() => ({
+    statusPanels: [
+      { statusPanel: 'agTotalAndFilteredRowCountComponent', align: 'left' },
+      { statusPanel: 'agSelectedRowCountComponent', align: 'left' },
+      { statusPanel: 'agAggregationComponent', align: 'right' },
+    ],
+  }), []);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {/* Merchant Action Bar */}
+      {/* Enterprise Cockpit Action Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search all columns…"
-          aria-label="Search all columns"
-          className="h-10 w-72 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c1424] px-3 text-sm outline-none focus:border-cyan-500 text-slate-800 dark:text-slate-100"
-        />
         <div className="flex items-center gap-2">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search all columns…"
+            aria-label="Search all columns"
+            className="h-9 w-64 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c1424] px-3 text-xs outline-none focus:border-cyan-500 text-slate-800 dark:text-slate-100 shadow-sm"
+          />
+
+          {/* Density Preset Controls */}
+          <div className="hidden sm:flex items-center rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 text-[11px] font-mono">
+            {(['comfortable', 'compact', 'dense'] as GridDensity[]).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDensity(d)}
+                className={`px-2 py-1 rounded-lg capitalize transition-colors cursor-pointer ${
+                  density === d
+                    ? 'bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
+                }`}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
           {actionNotice && (
-            <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 border border-emerald-500/30 px-3 py-1.5 rounded-lg animate-fade-in">
+            <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1 rounded-lg animate-fade-in flex items-center gap-1.5 shadow-sm">
+              <Zap className="w-3.5 h-3.5 text-emerald-400" />
               {actionNotice}
             </span>
           )}
+
+          {/* Pivot Mode Toggle */}
           <button
             type="button"
-            onClick={handleExport}
-            className="h-10 px-3.5 text-xs font-bold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+            onClick={handleTogglePivot}
+            className={`h-9 px-2.5 text-xs font-bold rounded-xl border flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm ${
+              isPivotMode
+                ? 'bg-purple-600 border-purple-500 text-white'
+                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+            }`}
+            title="Toggle Enterprise Pivot Mode"
           >
-            Export Settlement CSV
+            <Columns className="w-3.5 h-3.5" />
+            Pivot
+          </button>
+
+          {/* Range Chart Action */}
+          {enableCharts && (
+            <button
+              type="button"
+              onClick={handleGenerateChart}
+              className="h-9 px-2.5 text-xs font-bold rounded-xl bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+              title="Create Range Chart"
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-cyan-500" />
+              Chart
+            </button>
+          )}
+
+          {/* Real-Time Pulse Simulator */}
+          <button
+            type="button"
+            onClick={triggerSimulatedEvent}
+            className="h-9 px-2.5 text-xs font-bold rounded-xl bg-cyan-950/40 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-900/50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            title="Simulate Inbound Transaction Pulse with Green Cell Flash"
+          >
+            <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            Stream Pulse
+          </button>
+
+          {/* Excel Export */}
+          <button
+            type="button"
+            onClick={handleExcelExport}
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            title="Export Native AG Grid Enterprise Excel (.xlsx)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5" />
+            Excel
+          </button>
+
+          {/* CSV Export */}
+          <button
+            type="button"
+            onClick={handleCsvExport}
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            title="Export Filtered CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            CSV
           </button>
         </div>
       </div>
 
+      {/* Grid Container */}
       <div
-        className="min-h-[400px] h-[520px] flex-1 w-full rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm"
+        className="min-h-[420px] h-[540px] flex-1 w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm transition-colors"
         role="region"
         aria-label="Merchant Data Table"
         aria-busy={!rows}
       >
-        <AgGridProvider modules={modules}>
+        <AgGridProvider modules={aegisEnterpriseModules}>
           <AgGridReact
             theme={theme}
-            rowData={rows}
-            columnDefs={columns}
+            rowData={rowModelType === 'clientSide' ? rows : undefined}
+            columnDefs={augmentedColumns}
             columnTypes={columnTypes}
             defaultColDef={defaultColDef}
             quickFilterText={sanitizedSearch}
             autoSizeStrategy={autoSizeStrategy}
             enableCellTextSelection
             domLayout="normal"
+            onGridReady={onGridReady}
             onRowClicked={(event) => event.data && setSelectedRow(event.data)}
+            // Master/Detail Configuration
+            masterDetail={masterDetail}
+            detailCellRenderer={resolvedDetailRenderer}
+            detailRowAutoHeight
+            // Real-Time Cell Flashing & IDs
+            getRowId={(params) => String(params.data?.id || params.data?.transaction_id || params.data?.dispute_id || params.data?.currency || Math.random())}
+            enableCellChangeFlash={enableFlashing}
+            cellFlashDuration={800}
+            cellFadeDuration={1200}
+            // Integrated AG Charts & Selection
+            enableCharts={enableCharts}
+            cellSelection={true}
+            // Grouping, Aggregation & Footers
+            grandTotalRow="bottom"
+            groupIncludeFooter={true}
+            groupIncludeTotalFooter={true}
+            // Enterprise SideBar & StatusBar
+            sideBar={sideBar}
+            statusBar={statusBar}
+            components={components}
           />
         </AgGridProvider>
       </div>
@@ -222,7 +487,7 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         >
-          <div className="w-full max-w-lg rounded-2xl bg-[#0c1424] border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 text-slate-100">
+          <div className="w-full max-w-lg rounded-2xl bg-[#0c1424] border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 text-slate-100 animate-in fade-in">
             <div className="flex justify-between items-start border-b border-slate-800 pb-3">
               <div>
                 <h3 className="text-base font-bold text-white">Merchant Custody & Order Controls</h3>
@@ -275,3 +540,5 @@ export function DataGrid({ rows, columns }: { rows: Row[]; columns: ColDef<Row>[
     </div>
   );
 }
+
+export default DataGrid;

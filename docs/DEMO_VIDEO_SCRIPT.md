@@ -62,22 +62,30 @@
 
 ---
 
-### Act 4: AG Studio 3 Cockpit & 12-Action Dispute Forensics (2:15 – 3:00)
-- **On Screen:**
-  - Switch to the Merchant Cockpit (`http://localhost:3000/merchant`).
-  - AG Studio 3 data grid rendered with 1,000 real-time arbitration rows.
-  - Click on a dispute: Side-by-side modal opens showing Channel3 studio reference photo vs. buyer's uploaded return photo.
-  - Defect bounding box and mobile EXIF tamper flag highlighted in red.
-  - Click **Preview Evidence Dossier**: PDF compiled via `pdf-lib` shown with USPS tracking telemetry.
-  - Hold **Accept Claim & Avoid Fee** button for 2 seconds with safety progress ring.
-- **Narrator (2:15 – 2:45):**
-  > "For merchants, managing disputes is costly. Our Merchant Cockpit is powered by **AG Studio 3** and **DuckDB-WASM** for sub-10ms in-browser analytics.
-  > When a buyer claims damage, AegisPay's vision forensics model compares the buyer's photo against Channel3's baseline studio image and detects EXIF metadata tampering.
-  > It compiles an evidentiary PDF dossier via `pdf-lib`, pushes it via multipart upload to PayPal Disputes v1, and updates shipment tracking via PayPal Tracking v1."
-- **On Screen:**
+### Act 4: AG Grid Enterprise & AG Studio 3 Arbitration Cockpit (2:15 – 3:00)
+- **On Screen (2:15 – 2:30):**
+  - Switch to the Merchant Cockpit (`http://localhost:3000/merchant/transactions`).
+  - Expand row `TXN-DEMO-001` with **AG Grid Enterprise Master/Detail**: nested `<OrderDetailView />` child grid reveals individual payee splits across Channel3 merchants, 72h Vault token hold countdown, and live USPS tracking scan events.
+  - Hover over SVG radial $(L, R)$ meter to show Gemini Vision forensic rationale popover.
+  - Click **Stream Pulse**: new incoming transaction lands at top of grid with real-time emerald green cell change flash.
+- **Narrator (2:15 – 2:30):**
+  > "For merchants, AegisPay deploys **AG Grid Enterprise v36** as our clearinghouse surface.
+  > Master/Detail rows expand multi-payee purchase splits, Vault token lifecycles, and live USPS tracking telemetry.
+  > Radial SVG meters visualize our Gemini 3.8 Flash Liability and Abuse matrix, while live SSE streams pulse incoming transactions with green cell flashes."
+- **On Screen (2:30 – 2:45):**
+  - Open `/merchant/balances`: in-cell area sparklines render 30-day settlement trajectories.
+  - In `/merchant/transactions`: click **Pivot** to cross-tabulate multi-currency reserves, and click **Excel** to download native `.xlsx` multi-sheet workbook.
+  - Switch to `/merchant`: show **AG Studio 3 Live Multi-Agent Canvas** with Prompt Bar.
+  - Type: `"Isolate high risk disputes with abuse score > 60%"`. Studio Lead Agent executes cross-filter instantly over DuckDB-WASM Arrow tables in `< 10ms`.
+  - Hold **Accept Claim** button for 2 seconds with safety progress ring and 5-second undo toast.
+- **Narrator (2:30 – 2:45):**
+  > "We embed area sparklines for 30-day liquidity trends, toggle 1-click financial Pivot Mode, and bridge DuckDB-WASM directly into AG Grid's Server-Side Row Model for sub-10ms queries over 100,000 records.
+  > On our active **AG Studio 3** canvas, natural language commands cross-filter dispute queues, calculate net retained margins, and trigger 1-click HATEOAS claims with 2-second hold-to-confirm safety."
+- **On Screen (2:45 – 3:00):**
   - High-impact closing title card:
     - **AegisPay: Autonomous Commerce. Cryptographic Trust. Zero Regrets.**
+    - Track Target: AG Grid / AG Studio 3 1st Place ($5,000) & Grand Prize ($12,000).
     - GitHub Repository URL & Live Render Deployment link.
 - **Narrator (2:45 – 3:00):**
-  > "With 18 PayPal endpoints, official `@paypal/agent-toolkit` bridging, Fastlane 1-click checkout, and zero-trust Redis Lua enforcers, AegisPay is the production-ready infrastructure for the next billion agentic transactions.
+  > "With 18 PayPal endpoints, official `@paypal/agent-toolkit` bridging, Fastlane 1-click checkout, zero-trust Redis Lua enforcers, and the full AG Grid Enterprise & AG Studio 3 suite, AegisPay is the production-grade infrastructure for the agentic economy.
   > Thank you."

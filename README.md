@@ -9,6 +9,7 @@
 > - **Sponsor Prize Tracks:** AG Grid / AG Studio 3 ($5,000), Channel3 ($1,500), APIMatic ($1,000), Bryntum ($1,000), Render ($1,000 Credits)  
 >
 > 📖 **Comprehensive Guides & Submission Deliverables:**  
+> - [📊 AG Grid Enterprise & AG Studio 3 Architecture Guide](docs/AG_GRID.md)  
 > - [📘 PayPal Developer Modernization & 18-Endpoint Integration Guide](docs/PAYPAL_INTEGRATION.md)  
 > - [🎬 3-Minute Second-by-Second Demo Video Script](docs/DEMO_VIDEO_SCRIPT.md)  
 > - [☁️ Render Cloud Infrastructure & Workflows Dossier](docs/RENDER.md)  
@@ -44,10 +45,13 @@ AegisPay is a production-grade dual-sided agentic commerce platform that bridges
    - Compiles in-memory forensic evidence dossiers via `pdf-lib` and uploads `multipart/form-data` to `/provide-evidence`. Generates automated prepaid return shipping labels with scannable QR codes for Tier 3 claims.
 7. **Live `PayPal-Mock-Response` Chaos Simulator (`apps/web-cockpit`):**
    - Injects authentic `PayPal-Mock-Response` headers (`INSTRUMENT_DECLINED`, `COMPLIANCE_VIOLATION`) in PayPal Sandbox to verify that compensating Redis Lua rollbacks and financial ledgers handle bank declines in `< 1ms`.
-8. **AG Studio 3 + Bryntum SLA Scheduler + DuckDB-WASM Cockpit (`apps/web-cockpit`):**
-   - AG Studio 3 (`@ag-grid/studio@3.0.0`) harness wiring 5 built-in agents plus custom `paypal_arbiter` specialist.
-   - Sub-10ms in-browser OLAP queries via `@duckdb/duckdb-wasm`.
-   - Bryntum SLA Scheduler (`@bryntum/scheduler-trial`) featuring an **"Unallocated SLA Deadline"** filter badge and urgent breach sorting.
+8. **AG Grid Enterprise v36 + AG Studio 3 + DuckDB-WASM Clearinghouse Cockpit (`apps/web-cockpit`):**
+   - **AG Grid Enterprise Suite**: Full tree-shakable module registry (`enterpriseModules.ts`), dynamic Quartz theming engine synchronized with dark/light mode (`useAgGridTheme.ts`), and 6 specialized React cell renderers (HATEOAS 2s hold buttons, SVG radial $(L, R)$ meters, Channel3 pristine vs return diffs, USPS trackers, monetary splits, SLA timers).
+   - **Master/Detail Hierarchical Architecture**: Child sub-grids (`OrderDetailView`, `DisputeDetailView`) for multi-payee purchase units, Vault setup tokens, and embedded forensic evidence dossiers.
+   - **DuckDB-WASM + SSRM OLAP Bridge**: AG Grid Server-Side Row Model powered directly by client-side DuckDB-WASM with parameterized SQL translation running sub-10ms queries over 100K+ records.
+   - **In-Cell Sparklines & Integrated AG Charts**: Area sparklines for 30-day liquidity trends, column sparklines for synthetic bid velocity, and 1-click range-based chart creation.
+   - **Live AG Studio 3 Canvas**: Active `<LiveStudioCanvas />` with multi-agent harness (`setupStudioHarness`), custom `paypal_arbiter` runner, and natural language command prompt bar.
+   - **Financial Aggregations & Multi-Sheet Excel**: Row grouping by currency/status, bottom grand totals (`grandTotalRow: 'bottom'`), status bar summaries, real-time cell flashing (`applyTransactionAsync`), and native `.xlsx` multi-sheet workbook export. See [`docs/AG_GRID.md`](docs/AG_GRID.md).
 
 ---
 
@@ -56,7 +60,7 @@ AegisPay is a production-grade dual-sided agentic commerce platform that bridges
 | Sponsor Track | Prize | How AegisPay Integrates & Complies |
 | :--- | :--- | :--- |
 | **PayPal Core & Agentic Commerce** | $27,000 | Grounded Orders v2 (Multi-Purchase Units, AUTHORIZE/CAPTURE), Payments v2, Vault v3 Setup Tokens, Disputes v1 (12 actions), Shipment Tracking v1, Webhook cryptographic signature verification, and HTTP 402 / OpenAI ACP agent gateways. |
-| **AG Grid / AG Studio 3** | $5,000 | AG Studio 3 AI harness (`createStudio` + `createAiHarness`), custom `paypal_arbiter` specialist via `clientToolRunner`, programmatic cross-filtering (`api.defineAiCommand`), calculated expression column (`Net_Retained_Margin`), custom SVG `EvidenceComparatorWidget`, and `HateoasDisputeActionRenderer` with safety hold. |
+| **AG Grid / AG Studio 3** | $5,000 | **AG Grid Enterprise v36 Suite**: Master/Detail nested order grids (`OrderDetailView`), 6 custom React cell renderers, dynamic Quartz theming engine, DuckDB-WASM SSRM bridge (`DuckDbServerSideDatasource`), in-cell area/column sparklines, row grouping, pivot mode, real-time streaming flash, and native multi-sheet Excel export. **AG Studio 3 Canvas**: Active `<LiveStudioCanvas />` with multi-agent harness (`setupStudioHarness`), custom `paypal_arbiter` runner, and prompt bar executing cross-filtering and margin calculation commands. See [`docs/AG_GRID.md`](docs/AG_GRID.md). |
 | **Channel3** | $1,500 | Multimodal product discovery (`/v1/search` with text, image, category ID, and hex palette), promo code `PAYPAL-HACKATHON-2026`, commission rebate subsidy solver, Two-Phase Commit (2PC) inventory pre-check, and 72-hour price-drop polling. |
 | **APIMatic** | $1,000 | Grounded `@paypal/paypal-server-sdk` initialization, full schema validation, fault injection headers, idempotency tokens (`PayPal-Request-Id`), and comprehensive audit documentation in `docs/APIMATIC.md`. |
 | **Bryntum** | $1,000 | `@bryntum/scheduler-trial` embedded in Merchant Cockpit with prominent **"Unallocated SLA Deadline"** badge, color-coded urgency indicators (Red <6h, Yellow vision triage, Green submitted), and 1-click **"Imminent Breach"** filter. |
