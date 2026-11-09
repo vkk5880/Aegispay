@@ -21,13 +21,19 @@ import { SlaCountdownCellRenderer } from './renderers/SlaCountdownCellRenderer.j
 
 test('1. Enterprise Module Registry: Contains full AG Grid Enterprise module suite', () => {
   assert.ok(Array.isArray(aegisEnterpriseModules));
-  assert.ok(aegisEnterpriseModules.length >= 20);
+  assert.ok(aegisEnterpriseModules.length >= 25);
 
-  const moduleNames = aegisEnterpriseModules.map((m: any) => m?.moduleName || m?.name || '');
   const hasMasterDetail = aegisEnterpriseModules.some((m: any) => JSON.stringify(m).includes('MasterDetail') || m?.moduleName?.includes('MasterDetail'));
   const hasRowGrouping = aegisEnterpriseModules.some((m: any) => JSON.stringify(m).includes('RowGrouping') || m?.moduleName?.includes('RowGrouping'));
+  const hasRowGroupingPanel = aegisEnterpriseModules.some((m: any) => JSON.stringify(m).includes('RowGroupingPanel') || m?.moduleName?.includes('RowGroupingPanel'));
+  const hasTooltip = aegisEnterpriseModules.some((m: any) => JSON.stringify(m).includes('Tooltip') || m?.moduleName?.includes('Tooltip'));
+  const hasRichSelect = aegisEnterpriseModules.some((m: any) => JSON.stringify(m).includes('RichSelect') || m?.moduleName?.includes('RichSelect'));
 
-  assert.ok(aegisEnterpriseModules.length > 0);
+  assert.ok(hasMasterDetail);
+  assert.ok(hasRowGrouping);
+  assert.ok(hasRowGroupingPanel);
+  assert.ok(hasTooltip);
+  assert.ok(hasRichSelect);
 });
 
 test('2. Dynamic Theming Engine: Generates PayPal brand tokens for Light and Dark modes', () => {
@@ -115,6 +121,7 @@ test('5. SSRM DuckDB-WASM SQL Translation: Translates pagination, filters, and s
     filterModel: {
       status: { filterType: 'text', type: 'equals', filter: 'S' },
       amount: { filterType: 'number', type: 'greaterThan', filter: 100 },
+      date: { filterType: 'date', type: 'inRange', dateFrom: '2026-11-01', dateTo: '2026-11-30' },
     },
     sortModel: [{ colId: 'date', sort: 'desc' as const }],
   };
@@ -122,13 +129,13 @@ test('5. SSRM DuckDB-WASM SQL Translation: Translates pagination, filters, and s
   const { dataQuery, countQuery, params } = translateSsrmRequestToSql(ssrmRequest, 'transactions');
 
   assert.ok(dataQuery.startsWith('SELECT * FROM transactions'));
-  assert.ok(dataQuery.includes('WHERE status = ? AND amount > ?'));
+  assert.ok(dataQuery.includes('WHERE status = ? AND amount > ? AND date >= ? AND date <= ?'));
   assert.ok(dataQuery.includes('ORDER BY date DESC'));
   assert.ok(dataQuery.includes('LIMIT 20 OFFSET 20'));
-  assert.deepEqual(params, ['S', 100]);
+  assert.deepEqual(params, ['S', 100, '2026-11-01', '2026-11-30']);
 
   assert.ok(countQuery.startsWith('SELECT COUNT(*) as total_count FROM transactions'));
-  assert.ok(countQuery.includes('WHERE status = ? AND amount > ?'));
+  assert.ok(countQuery.includes('WHERE status = ? AND amount > ? AND date >= ? AND date <= ?'));
 });
 
 test('6. DuckDbServerSideDatasource: Paginates and calls params.success with row count', async () => {

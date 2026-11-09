@@ -11,7 +11,7 @@
 
 ## 1. Executive Summary & Architectural Overview
 
-AegisPay integrates **AG Grid Enterprise v36** and **AG Studio 3** as the mission-control surface for multi-merchant agentic commerce and AI dispute arbitration. When autonomous shopping agents negotiate Knapsack bundles across disparate merchants, the resulting transaction streams, escrow holds, Vault authorization lifecycles, and return disputes require financial-grade telemetry.
+AegisPay integrates **AG Grid Enterprise v36.3.0** and **AG Studio 3.1.0** as the mission-control surface for multi-merchant agentic commerce and AI dispute arbitration. When autonomous shopping agents negotiate Knapsack bundles across disparate merchants, the resulting transaction streams, escrow holds, Vault authorization lifecycles, and return disputes require financial-grade telemetry.
 
 AegisPay fulfills every criterion of the AG Grid and AG Studio sponsor tracks through ten core architectural innovations:
 
@@ -59,7 +59,8 @@ flowchart TD
 | **Custom Cell Renderers** | React `CustomCellRendererProps` | Renderers Suite | 6 specialized renderers: HATEOAS 2s hold buttons, SVG radial $(L, R)$ meters, Channel3 pristine vs return diffs, USPS trackers, monetary splits, SLA countdowns. |
 | **In-Cell Sparklines** | `SparklinesModule` (`agSparklineCellRenderer`) | `/merchant/balances`, `/merchant/products` | Area sparklines for 30-day liquidity trajectories and column sparklines for synthetic bid velocity. |
 | **Server-Side Row Model** | `ServerSideRowModelModule` | `DuckDbServerSideDatasource.ts` | Connects AG Grid SSRM directly to in-browser DuckDB-WASM, running sub-10ms SQL over 100K+ records. |
-| **Row Grouping & Pivoting** | `RowGroupingModule`, `PivotModule` | `/merchant/transactions` | Multi-currency grouping, grand total summary footers (`grandTotalRow: 'bottom'`), and 1-click Pivot Mode. |
+| **Row Grouping & Drop Panel** | `RowGroupingModule`, `RowGroupingPanelModule`, `PivotModule` | `/merchant/transactions` | Interactive drag-and-drop row group panel (`rowGroupPanelShow: 'always'`), multi-currency grouping, grand total summary footers (`grandTotalRow: 'bottom'`), and 1-click Pivot Mode. |
+| **Tooltips & Rich Select** | `TooltipModule`, `RichSelectModule` | `enterpriseModules.ts` | Smooth 200ms delayed cell/header tooltips and rich select capabilities. |
 | **Dynamic Theming Engine** | `themeQuartz.withParams` | `useAgGridTheme.ts` | Synchronizes grid colors with Cockpit dark/light mode (`#0070e0` vs `#06b6d4`, `#ffffff` vs `#0b1324`, and density presets). |
 | **Integrated AG Charts** | `IntegratedChartsModule`, `GridChartsModule` | `DataGrid.tsx` | 1-click programmatic range chart creation over active transactions and dispute metrics. |
 | **Status Bar & SideBar** | `StatusBarModule`, `SideBarModule` | `DataGrid.tsx` | Total row count, filtered count, selected count, dynamic aggregations (Sum/Avg/Min/Max), and Column/Filter tool panels. |

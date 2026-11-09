@@ -89,6 +89,22 @@ export function translateSsrmRequestToSql(
         const placeholders = f.values.map(() => '?').join(', ');
         whereClauses.push(`${safeCol} IN (${placeholders})`);
         params.push(...f.values);
+      } else if (f.filterType === 'date') {
+        const dateFrom = f.dateFrom ? String(f.dateFrom) : '';
+        const dateTo = f.dateTo ? String(f.dateTo) : '';
+        if (f.type === 'greaterThan' && dateFrom) {
+          whereClauses.push(`${safeCol} > ?`);
+          params.push(dateFrom);
+        } else if (f.type === 'lessThan' && dateFrom) {
+          whereClauses.push(`${safeCol} < ?`);
+          params.push(dateFrom);
+        } else if (f.type === 'inRange' && dateFrom && dateTo) {
+          whereClauses.push(`${safeCol} >= ? AND ${safeCol} <= ?`);
+          params.push(dateFrom, dateTo);
+        } else if (dateFrom) {
+          whereClauses.push(`${safeCol} = ?`);
+          params.push(dateFrom);
+        }
       }
     }
   }

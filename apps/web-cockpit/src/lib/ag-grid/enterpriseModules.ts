@@ -7,11 +7,13 @@ import {
   TextFilterModule,
   CsvExportModule,
   HighlightChangesModule,
+  TooltipModule,
   type Module,
 } from 'ag-grid-community';
 import {
   MasterDetailModule,
   RowGroupingModule,
+  RowGroupingPanelModule,
   PivotModule,
   RangeSelectionModule,
   CellSelectionModule,
@@ -31,6 +33,7 @@ import {
   AggregationModule,
   GridChartsModule,
   IntegratedChartsModule,
+  RichSelectModule,
 } from 'ag-grid-enterprise';
 
 export const aegisEnterpriseModules: Module[] = [
@@ -42,8 +45,10 @@ export const aegisEnterpriseModules: Module[] = [
   TextFilterModule,
   CsvExportModule,
   HighlightChangesModule,
+  TooltipModule,
   MasterDetailModule,
   RowGroupingModule,
+  RowGroupingPanelModule,
   PivotModule,
   RangeSelectionModule,
   CellSelectionModule,
@@ -63,6 +68,7 @@ export const aegisEnterpriseModules: Module[] = [
   AggregationModule,
   GridChartsModule,
   IntegratedChartsModule,
+  RichSelectModule,
 ];
 
 export default aegisEnterpriseModules;

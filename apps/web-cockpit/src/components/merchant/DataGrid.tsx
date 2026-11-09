@@ -8,6 +8,8 @@ import {
   type ValueFormatterParams,
   type GridApi,
   type GridReadyEvent,
+  type GetRowIdParams,
+  type RowClickedEvent,
 } from 'ag-grid-community';
 import { AgGridProvider, AgGridReact } from 'ag-grid-react';
 import { aegisEnterpriseModules } from '@/lib/ag-grid/enterpriseModules';
@@ -112,6 +114,7 @@ const defaultColDef: ColDef<Row> = {
   enableValue: true,
   sortable: true,
   resizable: true,
+  tooltipShowDelay: 200,
 };
 
 const autoSizeStrategy = { type: 'fitCellContents' } as const;
@@ -156,6 +159,7 @@ export interface DataGridProps {
   enableCharts?: boolean;
   enableFlashing?: boolean;
   tableName?: string;
+  showRowGroupPanel?: boolean;
 }
 
 export function DataGrid({
@@ -168,6 +172,7 @@ export function DataGrid({
   serverSideDatasource,
   enableCharts = true,
   enableFlashing = true,
+  showRowGroupPanel = true,
 }: DataGridProps) {
   const [search, setSearch] = useState('');
   const [selectedRow, setSelectedRow] = useState<Row | null>(null);
@@ -192,8 +197,29 @@ export function DataGrid({
 
   const sanitizedSearch = sanitizeQuickFilter(search);
 
+  // Pure, deterministic row ID resolver for stable AG Grid delta operations
+  const getRowId = useCallback((params: GetRowIdParams<Row>) => {
+    const d = params.data;
+    if (!d) return String(params.node?.rowIndex ?? 'unknown');
+    if (d.id != null) return String(d.id);
+    if (d.transaction_id != null) return String(d.transaction_id);
+    if (d.dispute_id != null) return String(d.dispute_id);
+    if (d.number != null) return String(d.number);
+    if (d.productId != null) return String(d.productId);
+    if (d.currency != null && d.date != null) return `${d.currency}_${d.date}`;
+    if (d.currency != null) return String(d.currency);
+    if (d.name != null) return String(d.name);
+    return `row_${params.node?.rowIndex ?? 0}`;
+  }, []);
+
+  const onRowClicked = useCallback((event: RowClickedEvent<Row>) => {
+    if (event.data) {
+      setSelectedRow(event.data);
+    }
+  }, []);
+
   // Native AG Grid Enterprise Excel Export
-  const handleExcelExport = () => {
+  const handleExcelExport = useCallback(() => {
     if (gridApi && typeof gridApi.exportDataAsExcel === 'function') {
       try {
         gridApi.exportDataAsExcel({
@@ -212,10 +238,10 @@ export function DataGrid({
     exportToCsv(rows, 'aegispay-paypal-settlement.csv');
     setActionNotice('Settlement export downloaded successfully');
     setTimeout(() => setActionNotice(null), 3500);
-  };
+  }, [gridApi, rows]);
 
   // Streaming CSV Export
-  const handleCsvExport = () => {
+  const handleCsvExport = useCallback(() => {
     if (gridApi && typeof gridApi.exportDataAsCsv === 'function') {
       try {
         gridApi.exportDataAsCsv({ fileName: 'aegispay-settlement-records.csv' });
@@ -229,10 +255,10 @@ export function DataGrid({
     exportToCsv(rows);
     setActionNotice('Settlement CSV exported successfully');
     setTimeout(() => setActionNotice(null), 3000);
-  };
+  }, [gridApi, rows]);
 
   // Integrated AG Charts: Programmatic Range Chart
-  const handleGenerateChart = () => {
+  const handleGenerateChart = useCallback(() => {
     if (!gridApi) return;
     try {
       const numCols = columns.filter((c) => c.type === 'money' || c.aggFunc === 'sum').map((c) => c.field as string);
@@ -252,18 +278,20 @@ export function DataGrid({
       setActionNotice('Select numeric range cells to generate chart');
       setTimeout(() => setActionNotice(null), 3000);
     }
-  };
+  }, [gridApi, columns, rows]);
 
-  const handleTogglePivot = () => {
+  const handleTogglePivot = useCallback(() => {
     if (!gridApi) return;
-    const nextMode = !isPivotMode;
-    setIsPivotMode(nextMode);
-    gridApi.setGridOption('pivotMode', nextMode);
-    setActionNotice(nextMode ? 'Pivot Mode Activated' : 'Standard Grid Layout Restored');
-    setTimeout(() => setActionNotice(null), 2500);
-  };
+    setIsPivotMode((prev) => {
+      const nextMode = !prev;
+      gridApi.setGridOption('pivotMode', nextMode);
+      setActionNotice(nextMode ? 'Pivot Mode Activated' : 'Standard Grid Layout Restored');
+      setTimeout(() => setActionNotice(null), 2500);
+      return nextMode;
+    });
+  }, [gridApi]);
 
-  const handleAction = (actionType: 'approve' | 'refund' | 'escalate') => {
+  const handleAction = useCallback((actionType: 'approve' | 'refund' | 'escalate') => {
     if (!selectedRow) return;
     const msg =
       actionType === 'approve'
@@ -274,7 +302,7 @@ export function DataGrid({
     setActionNotice(msg);
     setSelectedRow(null);
     setTimeout(() => setActionNotice(null), 4000);
-  };
+  }, [selectedRow]);
 
   // Register Custom Cell Renderers & Detail Views
   const components = useMemo(() => ({
@@ -455,13 +483,13 @@ export function DataGrid({
             enableCellTextSelection
             domLayout="normal"
             onGridReady={onGridReady}
-            onRowClicked={(event) => event.data && setSelectedRow(event.data)}
+            onRowClicked={onRowClicked}
             // Master/Detail Configuration
             masterDetail={masterDetail}
             detailCellRenderer={resolvedDetailRenderer}
             detailRowAutoHeight
-            // Real-Time Cell Flashing & IDs
-            getRowId={(params) => String(params.data?.id || params.data?.transaction_id || params.data?.dispute_id || params.data?.currency || Math.random())}
+            // Real-Time Cell Flashing & Pure Deterministic IDs
+            getRowId={getRowId}
             enableCellChangeFlash={enableFlashing}
             cellFlashDuration={800}
             cellFadeDuration={1200}
@@ -469,6 +497,7 @@ export function DataGrid({
             enableCharts={enableCharts}
             cellSelection={true}
             // Grouping, Aggregation & Footers
+            rowGroupPanelShow={showRowGroupPanel ? 'always' : 'onlyWhenGrouping'}
             grandTotalRow="bottom"
             groupIncludeFooter={true}
             groupIncludeTotalFooter={true}
