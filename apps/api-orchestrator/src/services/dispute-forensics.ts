@@ -3,6 +3,52 @@ import { defaultPayPalClient, PayPalApimaticClient } from './paypal-apimatic.js'
 import { evaluatePerceptualDuplicate, KnownEvidenceRecord } from './image-hasher.js';
 import { PerceptualHashResult } from '@aegispay/shared-types';
 
+export interface BoundingBox {
+  x: number; // 0.0 - 1.0 normalized
+  y: number; // 0.0 - 1.0 normalized
+  width: number; // 0.0 - 1.0 normalized
+  height: number; // 0.0 - 1.0 normalized
+  label: string; // e.g. 'cracked_screen', 'torn_fabric', 'missing_accessory'
+  confidence: number; // [0.0, 1.0]
+}
+
+export interface ExifMetadata {
+  capture_timestamp?: string;
+  camera_make?: string;
+  camera_model?: string;
+  software?: string; // e.g. 'Photoshop', 'GIMP' (flags tamper)
+  gps_latitude?: number;
+  gps_longitude?: number;
+  is_modified?: boolean;
+}
+
+export interface DisputeForensicAnalysisInput {
+  dispute_id: string;
+  buyer_id: string;
+  merchant_id: string;
+  dispute_amount_cents: number;
+  buyer_statement: string;
+  buyer_image_url: string;
+  catalog_cleaned_image_url?: string;
+  bounding_boxes?: BoundingBox[];
+  exif_metadata?: ExifMetadata;
+  tracking_delivered_timestamp?: string;
+  buyer_dispute_count_last_90d?: number;
+}
+
+export interface DisputeForensicsResult extends DisputeMatrixDecision {
+  dispute_id: string;
+  defect_bounding_boxes: BoundingBox[];
+  exif_tampered: boolean;
+  tamper_reasons: string[];
+  hateoas_actions: {
+    rel: string;
+    href: string;
+    method: 'GET' | 'POST' | 'PUT';
+    description: string;
+  }[];
+}
+
 export interface BoundingBoxCoordinates {
   ymin: number;
   xmin: number;
@@ -82,6 +128,97 @@ export class DisputeForensicsService {
 
   constructor(paypalClient?: PayPalApimaticClient) {
     this.paypalClient = paypalClient || defaultPayPalClient;
+  }
+
+  /**
+   * Performs high-level multi-modal dispute analysis combining defect bounding boxes,
+   * EXIF metadata tamper checks, buyer dispute history velocity, and 2D matrix arbitration.
+   */
+  public analyzeDispute(input: DisputeForensicAnalysisInput): DisputeForensicsResult {
+    const tamperReasons: string[] = [];
+    let exifTampered = false;
+
+    // 1. EXIF Tamper Detection
+    if (input.exif_metadata) {
+      if (input.exif_metadata.software && /(photoshop|gimp|canva|editor|lightroom|pixelmator|snapseed)/i.test(input.exif_metadata.software)) {
+        exifTampered = true;
+        tamperReasons.push(`Tampering detected: Image software header indicates editing tool '${input.exif_metadata.software}'`);
+      }
+      if (input.exif_metadata.is_modified) {
+        exifTampered = true;
+        tamperReasons.push('Tampering detected: File modification timestamp postdates file creation timestamp');
+      }
+      if (input.tracking_delivered_timestamp && input.exif_metadata.capture_timestamp) {
+        const delivered = new Date(input.tracking_delivered_timestamp).getTime();
+        const captured = new Date(input.exif_metadata.capture_timestamp).getTime();
+        if (captured < delivered - 3600000) {
+          exifTampered = true;
+          tamperReasons.push('Temporal anomaly: Photo was taken before package was marked delivered');
+        }
+      }
+    }
+
+    // 2. Defect Bounding Box Analysis
+    const boxes = input.bounding_boxes || [];
+    let defectCoverage = 0;
+    for (const b of boxes) {
+      defectCoverage += Math.min(1.0, Math.max(0.0, b.width * b.height));
+    }
+    const defectSeverityScore = Math.min(1.0, defectCoverage * 2.5 + (boxes.length > 0 ? 0.2 : 0.0));
+
+    // 3. Buyer Velocity & Policy Validity Scores
+    const buyerVelocity = Math.min(1.0, (input.buyer_dispute_count_last_90d || 0) / 5.0);
+    const policyValidScore = input.dispute_amount_cents <= 100000 ? 0.9 : 0.7;
+
+    // 4. Matrix Evaluation
+    const factors: ForensicsFactors = {
+      defect_severity_score: defectSeverityScore,
+      non_delivery_score: input.buyer_statement.toLowerCase().includes('not received') ? 0.95 : 0.05,
+      policy_valid_score: policyValidScore,
+      exif_tamper_flag: exifTampered,
+      identity_match_score: exifTampered ? 0.3 : 0.85,
+      buyer_dispute_velocity_score: buyerVelocity,
+      dispute_amount_cents: input.dispute_amount_cents,
+    };
+
+    const decision = defaultDisputeMatrixService.calculateLiabilityAndAbuse(factors);
+
+    // 5. Build HATEOAS Actions
+    const hateoasActions = [
+      {
+        rel: 'self',
+        href: `/api/disputes/${input.dispute_id}/matrix`,
+        method: 'GET' as const,
+        description: 'Read computed liability matrix and forensics state',
+      },
+      {
+        rel: 'provide_evidence',
+        href: `/api/disputes/${input.dispute_id}/evidence`,
+        method: 'POST' as const,
+        description: 'Submit PDF evidence dossier to PayPal Disputes v1',
+      },
+      {
+        rel: 'make_offer',
+        href: `/api/disputes/${input.dispute_id}/offer`,
+        method: 'POST' as const,
+        description: 'Propose automated partial settlement offer to buyer',
+      },
+      {
+        rel: 'escalate_sla',
+        href: `/api/disputes/${input.dispute_id}/escalate`,
+        method: 'POST' as const,
+        description: 'Escalate to human review or PayPal arbitration before SLA deadline',
+      },
+    ];
+
+    return {
+      ...decision,
+      dispute_id: input.dispute_id,
+      defect_bounding_boxes: boxes,
+      exif_tampered: exifTampered,
+      tamper_reasons: tamperReasons,
+      hateoas_actions: hateoasActions,
+    };
   }
 
   /**

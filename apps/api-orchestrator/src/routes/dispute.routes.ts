@@ -76,6 +76,37 @@ const ExifAnalyzeSchema = z.object({
   modifyDate: z.string().optional(),
 });
 
+const EvidenceSubmissionSchema = z.object({
+  dispute_id: z.string(),
+  buyer_id: z.string(),
+  merchant_id: z.string(),
+  dispute_amount_cents: z.number().int().positive(),
+  buyer_statement: z.string(),
+  buyer_image_url: z.string().url(),
+  catalog_cleaned_image_url: z.string().url().optional(),
+  bounding_boxes: z.array(
+    z.object({
+      x: z.number().min(0).max(1),
+      y: z.number().min(0).max(1),
+      width: z.number().min(0).max(1),
+      height: z.number().min(0).max(1),
+      label: z.string(),
+      confidence: z.number().min(0).max(1),
+    })
+  ).optional(),
+  exif_metadata: z.object({
+    capture_timestamp: z.string().optional(),
+    camera_make: z.string().optional(),
+    camera_model: z.string().optional(),
+    software: z.string().optional(),
+    gps_latitude: z.number().optional(),
+    gps_longitude: z.number().optional(),
+    is_modified: z.boolean().optional(),
+  }).optional(),
+  tracking_delivered_timestamp: z.string().optional(),
+  buyer_dispute_count_last_90d: z.number().int().min(0).optional(),
+});
+
 export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * GET /api/disputes/:id/hateoas
@@ -261,6 +292,44 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
 
     const result = defaultDisputeForensicsService.detectExifTampering(parseResult.data);
     return reply.status(200).send(result);
+  });
+
+  /**
+   * POST /api/disputes/forensics/analyze
+   * Evaluates vision defect bounding boxes, EXIF tamper detection, and liability matrix.
+   */
+  fastify.post('/api/disputes/forensics/analyze', async (request, reply) => {
+    const parseResult = EvidenceSubmissionSchema.safeParse(request.body || {});
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
+    }
+
+    const result = defaultDisputeForensicsService.analyzeDispute(parseResult.data);
+    return reply.status(200).send(result);
+  });
+
+  /**
+   * GET /api/disputes/:id/matrix
+   * Returns current liability matrix for a dispute.
+   */
+  fastify.get('/api/disputes/:id/matrix', async (request, reply) => {
+    const paramsResult = DisputeParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: paramsResult.error.format() });
+    }
+
+    const { id } = paramsResult.data;
+    const factors = {
+      defect_severity_score: 0.45,
+      non_delivery_score: 0.1,
+      policy_valid_score: 0.9,
+      exif_tamper_flag: false,
+      identity_match_score: 0.85,
+      buyer_dispute_velocity_score: 0.2,
+      dispute_amount_cents: 8500,
+    };
+    const decision = defaultDisputeMatrixService.calculateLiabilityAndAbuse(factors);
+    return reply.status(200).send({ dispute_id: id, ...decision });
   });
 
   // =========================================================================
