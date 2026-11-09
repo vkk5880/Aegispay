@@ -1,8 +1,53 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { buildApp } from '../index.js';
 import { generatePaymentReceipt } from '../middleware/http402-interceptor.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
+import { defaultChannel3Client } from '../services/channel3.client.js';
+import { defaultCartSolver } from '../services/cart-solver.js';
+import type { SpendMandate } from '@aegispay/shared-types';
+
+function createSignedTestMandate(overrides: Partial<SpendMandate> = {}): SpendMandate {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const rawPubHex = publicKey.export({ type: 'spki', format: 'der' }).subarray(12).toString('hex');
+
+  const baseMandate = {
+    mandate_id: `mandate_test_${Date.now()}`,
+    buyer_id: 'cust_procure_buyer_01',
+    max_total_spend_cents: 50000,
+    max_single_merchant_cents: 30000,
+    cumulative_spent_cents: 0,
+    currency_code: 'USD',
+    allowed_category_ids: ['electronics', 'audio'],
+    public_key_hex: rawPubHex,
+    expires_at: new Date(Date.now() + 3600 * 1000).toISOString(),
+    status: 'ACTIVE' as const,
+    ...overrides,
+  };
+
+  const messageObj = {
+    mandate_id: baseMandate.mandate_id,
+    buyer_id: baseMandate.buyer_id,
+    max_total_spend_cents: baseMandate.max_total_spend_cents,
+    max_single_merchant_cents: baseMandate.max_single_merchant_cents,
+    currency_code: baseMandate.currency_code,
+    allowed_category_ids: baseMandate.allowed_category_ids,
+    expires_at: baseMandate.expires_at,
+    status: baseMandate.status,
+    public_key_hex: baseMandate.public_key_hex,
+  };
+
+  const sigBuffer = crypto.sign(null, Buffer.from(JSON.stringify(messageObj), 'utf8'), privateKey);
+  const sigHex = sigBuffer.toString('hex');
+
+  return {
+    ...baseMandate,
+    ed25519_signature_hex: sigHex,
+    created_at: new Date(),
+    expires_at: new Date(baseMandate.expires_at),
+  } as SpendMandate;
+}
 
 test('Procurement API: POST /api/buyer/vault/setup creates ephemeral setup session', async () => {
   const app = await buildApp();
@@ -172,7 +217,7 @@ test('Procurement API: POST /api/buyer/capture captures approved order and trigg
 test('Intent Voucher API: POST and GET intent vouchers', async () => {
   const app = await buildApp();
 
-  // Test broadcast overage handling
+  // Test broadcast overage handling (outside 5-18% range: 29900 vs 25000 is 19.6% > 18%)
   const broadcastRes = await app.inject({
     method: 'POST',
     url: '/api/intent-vouchers/broadcast',
@@ -208,6 +253,265 @@ test('Intent Voucher API: POST and GET intent vouchers', async () => {
   const getVoucherJson = getVoucherRes.json();
   assert.equal(getVoucherJson.voucher_id, 'vch_sample_123');
   assert.equal(getVoucherJson.status, 'ACTIVE_PRICE_LOCK');
+});
+
+test('Synthetic Intent Vouchers: Evaluates [5%, 18%] overage bounds and Vault v3 token bindings', async () => {
+  const app = await buildApp();
+
+  // 1. In-bounds overage: retail 11000, cap 10000 -> overage = 10% (between 5% and 18%)
+  // Bid = 10000. With 12% discount allowed, floor is 9680. Bid (10000) >= floor (9680) -> auto-cleared!
+  const eligibleClearedRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/broadcast',
+    payload: {
+      mandate_id: 'mandate_synth_cleared_01',
+      buyer_id: 'cust_synth_01',
+      channel3_product_id: 'ch3_sony_wh1000xm5',
+      merchant_domain: 'bestbuy.com',
+      retail_offer_cents: 11000,
+      buyer_budget_cap_cents: 10000,
+      buyer_bid_cents: 10000,
+      commission_rebate_rate: 0.12,
+    },
+  });
+
+  assert.equal(eligibleClearedRes.statusCode, 200);
+  const clearedJson = eligibleClearedRes.json();
+  assert.equal(clearedJson.eligible_for_synthetic_intent, true);
+  assert.equal(clearedJson.overage_percentage, 10);
+  assert.ok(clearedJson.voucher_id?.startsWith('syn_'));
+  assert.ok(clearedJson.paypal_vault_setup_token_id);
+  assert.equal(clearedJson.auto_cleared, true);
+  assert.equal(clearedJson.negotiation_status, 'ACCEPTED_AND_CAPTURED');
+  assert.ok(clearedJson.resulting_paypal_order_id);
+
+  // 2. In-bounds overage with bid below merchant margin floor -> OPEN_BID status
+  // Retail 11500, cap 10000 -> 15% overage. Floor = 11500 * (1 - 0.05) = 10925. Bid = 9500 < 10925.
+  const openBidRes = await app.inject({
+    method: 'POST',
+    url: '/api/vouchers/bids',
+    payload: {
+      mandate_id: 'mandate_synth_open_02',
+      buyer_id: 'cust_synth_02',
+      channel3_product_id: 'ch3_macbook_air',
+      merchant_domain: 'apple.com',
+      retail_offer_cents: 11500,
+      buyer_budget_cap_cents: 10000,
+      buyer_bid_cents: 9500,
+      merchant_min_floor_discount_pct: 0.05,
+      commission_rebate_rate: 0.04,
+    },
+  });
+
+  assert.equal(openBidRes.statusCode, 200);
+  const openJson = openBidRes.json();
+  assert.equal(openJson.eligible_for_synthetic_intent, true);
+  assert.equal(openJson.overage_percentage, 15);
+  assert.equal(openJson.auto_cleared, false);
+  assert.equal(openJson.negotiation_status, 'OPEN_BID');
+  assert.ok(openJson.paypal_vault_setup_token_id);
+
+  // 3. Out-of-bounds overage: retail 10300, cap 10000 -> overage = 3% (< 5%) -> Ineligible
+  const underOverageRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/broadcast',
+    payload: {
+      mandate_id: 'mandate_synth_under_03',
+      channel3_product_id: 'ch3_prod_low',
+      merchant_domain: 'retailer.com',
+      retail_offer_cents: 10300,
+      buyer_budget_cap_cents: 10000,
+    },
+  });
+
+  assert.equal(underOverageRes.statusCode, 200);
+  const underJson = underOverageRes.json();
+  assert.equal(underJson.eligible_for_synthetic_intent, false);
+  assert.equal(underJson.overage_percentage, 3);
+  assert.ok(underJson.reason?.includes('outside eligible autonomous range'));
+
+  // 4. Out-of-bounds overage: retail 12500, cap 10000 -> overage = 25% (> 18%) -> Ineligible
+  const overOverageRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/broadcast',
+    payload: {
+      mandate_id: 'mandate_synth_over_04',
+      channel3_product_id: 'ch3_prod_high',
+      merchant_domain: 'retailer.com',
+      retail_offer_cents: 12500,
+      buyer_budget_cap_cents: 10000,
+    },
+  });
+
+  assert.equal(overOverageRes.statusCode, 200);
+  const overJson = overOverageRes.json();
+  assert.equal(overJson.eligible_for_synthetic_intent, false);
+  assert.equal(overJson.overage_percentage, 25);
+  assert.ok(overJson.reason?.includes('outside eligible autonomous range'));
+
+  // 5. Retail within budget cap: retail <= budget cap -> direct checkout possible
+  const withinBudgetRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/broadcast',
+    payload: {
+      mandate_id: 'mandate_synth_exact_05',
+      channel3_product_id: 'ch3_prod_exact',
+      merchant_domain: 'retailer.com',
+      retail_offer_cents: 10000,
+      buyer_budget_cap_cents: 10000,
+    },
+  });
+
+  assert.equal(withinBudgetRes.statusCode, 200);
+  const withinJson = withinBudgetRes.json();
+  assert.equal(withinJson.eligible_for_synthetic_intent, false);
+  assert.equal(withinJson.overage_percentage, 0);
+  assert.ok(withinJson.reason?.includes('direct checkout possible'));
+});
+
+test('Counter-Bid Negotiation & Voucher Acceptance: 2-turn negotiations and 1-click acceptance', async () => {
+  const app = await buildApp();
+  const mandate = createSignedTestMandate({
+    max_total_spend_cents: 50000,
+    max_single_merchant_cents: 30000,
+    cumulative_spent_cents: 5000,
+  });
+
+  // 1. Direct acceptance: buyer bid >= merchant min floor
+  const directAcceptRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/counter',
+    payload: {
+      mandate,
+      voucher_id: 'vch_counter_direct_01',
+      channel3_product_id: 'ch3_bose_qc45',
+      merchant_domain: 'bose.com',
+      retail_offer_cents: 29900,
+      merchant_min_floor_cents: 25000,
+      buyer_bid_cents: 26000,
+    },
+  });
+
+  assert.equal(directAcceptRes.statusCode, 200);
+  const directAcceptJson = directAcceptRes.json();
+  assert.equal(directAcceptJson.status, 'DIRECT_ACCEPTED');
+  assert.equal(directAcceptJson.ed25519_mandate_verified, true);
+  assert.ok(directAcceptJson.resulting_order_id);
+
+  // 2. Turn 1 Auto-Accept: buyer bid < merchant floor, and merchant counter within auto_accept_buffer_cents
+  // Retail 20000, floor 17000, buyer bid 15000. Midpoint counter = 17000 + (3000 * 0.40) = 18200.
+  // Diff = 18200 - 15000 = 3200. Set auto_accept_buffer_cents = 3500 -> auto accepted!
+  const autoAcceptRes = await app.inject({
+    method: 'POST',
+    url: '/api/vouchers/counter-offer',
+    payload: {
+      mandate,
+      voucher_id: 'vch_counter_auto_02',
+      channel3_product_id: 'ch3_sony_camera',
+      merchant_domain: 'bhphotovideo.com',
+      retail_offer_cents: 20000,
+      merchant_min_floor_cents: 17000,
+      buyer_bid_cents: 15000,
+      turn: 1,
+      auto_accept_buffer_cents: 3500,
+    },
+  });
+
+  assert.equal(autoAcceptRes.statusCode, 200);
+  const autoAcceptJson = autoAcceptRes.json();
+  assert.equal(autoAcceptJson.status, 'AUTO_ACCEPTED');
+  assert.equal(autoAcceptJson.ed25519_mandate_verified, true);
+  assert.ok(autoAcceptJson.merchant_counter_voucher);
+  assert.equal(autoAcceptJson.merchant_counter_voucher.merchant_counter_cents, 18200);
+  assert.ok(autoAcceptJson.resulting_order_id);
+
+  // 3. Turn 1 HITL Prompt: counter exceeds auto_accept_buffer_cents but within mandate cap
+  // Same parameters with small buffer ($10 / 1000 cents). Counter is 18200, buyer bid 15000 (diff 3200 > 1000).
+  const hitlRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/counter',
+    payload: {
+      mandate,
+      voucher_id: 'vch_counter_hitl_03',
+      channel3_product_id: 'ch3_sony_camera',
+      merchant_domain: 'bhphotovideo.com',
+      retail_offer_cents: 20000,
+      merchant_min_floor_cents: 17000,
+      buyer_bid_cents: 15000,
+      turn: 1,
+      auto_accept_buffer_cents: 1000, // $10 buffer
+    },
+  });
+
+  assert.equal(hitlRes.statusCode, 200);
+  const hitlJson = hitlRes.json();
+  assert.equal(hitlJson.status, 'HITL_CONFIRMATION_REQUIRED');
+  assert.equal(hitlJson.ed25519_mandate_verified, true);
+  assert.ok(hitlJson.hitl_prompt);
+  assert.equal(hitlJson.hitl_prompt.required, true);
+  assert.equal(hitlJson.hitl_prompt.timeout_seconds, 60);
+  assert.ok(hitlJson.hitl_prompt.action_tokens.accept_token);
+  assert.ok(hitlJson.hitl_prompt.action_tokens.decline_token);
+
+  // 4. Max turns reached: negotiation turn > 2 rejects out of bounds
+  const overTurnsRes = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/counter',
+    payload: {
+      mandate,
+      voucher_id: 'vch_counter_limit_04',
+      channel3_product_id: 'ch3_drone',
+      merchant_domain: 'dji.com',
+      retail_offer_cents: 50000,
+      merchant_min_floor_cents: 40000,
+      buyer_bid_cents: 35000,
+      turn: 2,
+      turn_history: [
+        { turn_number: 1, proposer: 'MERCHANT', offer_cents: 45000, timestamp: new Date().toISOString() },
+        { turn_number: 2, proposer: 'MERCHANT', offer_cents: 40000, timestamp: new Date().toISOString() },
+      ],
+    },
+  });
+
+  assert.equal(overTurnsRes.statusCode, 200);
+  const overTurnsJson = overTurnsRes.json();
+  assert.equal(overTurnsJson.status, 'REJECTED_OUT_OF_BOUNDS');
+  assert.equal(overTurnsJson.max_turns_reached, true);
+
+  // 5. Merchant 1-Click Voucher Acceptance (/api/intent-vouchers/:id/accept and alias /api/vouchers/:id/accept)
+  const acceptRes1 = await app.inject({
+    method: 'POST',
+    url: '/api/intent-vouchers/syn_test_accept_01/accept',
+    payload: {
+      merchant_domain: 'bestbuy.com',
+      accepted_amount_cents: 9500,
+    },
+  });
+
+  assert.equal(acceptRes1.statusCode, 200);
+  const acceptJson1 = acceptRes1.json();
+  assert.equal(acceptJson1.voucher_id, 'syn_test_accept_01');
+  assert.equal(acceptJson1.status, 'ACCEPTED_AND_CAPTURED');
+  assert.equal(acceptJson1.merchant_domain, 'bestbuy.com');
+  assert.equal(acceptJson1.final_captured_cents, 9500);
+  assert.ok(acceptJson1.paypal_order_id);
+  assert.ok(acceptJson1.captured_at);
+
+  const acceptRes2 = await app.inject({
+    method: 'POST',
+    url: '/api/vouchers/syn_test_accept_02/accept',
+    payload: {
+      merchant_domain: 'target.com',
+      accepted_amount_cents: 11000,
+    },
+  });
+
+  assert.equal(acceptRes2.statusCode, 200);
+  const acceptJson2 = acceptRes2.json();
+  assert.equal(acceptJson2.voucher_id, 'syn_test_accept_02');
+  assert.equal(acceptJson2.status, 'ACCEPTED_AND_CAPTURED');
+  assert.equal(acceptJson2.merchant_domain, 'target.com');
+  assert.equal(acceptJson2.final_captured_cents, 11000);
 });
 
 test('Procurement API: POST /api/buyer/capture enforces 3D Secure liability shift branches', async () => {
@@ -345,6 +649,75 @@ test('Procurement API: POST /api/buyer/capture enforces 3D Secure liability shif
   } finally {
     defaultPayPalClient.getOrder = origGetOrder;
   }
+});
+
+test('Knapsack Cart & Channel3 Invariants: Multi-merchant cart optimization and 2PC stock verification', async () => {
+  // 1. Verify 2PC stock verification holds before payment execution
+  const holdResult = await defaultChannel3Client.verifyAndHoldStock(['ch3_prod_9921', 'ch3_prod_9922']);
+  assert.equal(holdResult.all_held, true);
+  assert.equal(holdResult.success, true);
+  assert.ok(holdResult.reservation_id);
+  assert.equal(holdResult.verified_items.length, 2);
+
+  // 2. Multi-merchant knapsack solver with commission rebate passback (alpha = 0.75)
+  const mockProducts = [
+    {
+      product_id: 'prod_1',
+      title: 'Noise Cancelling Headphones',
+      description: 'Over-ear wireless headphones',
+      category_id: 'audio',
+      images: [{ url: 'https://bestbuy.com/img1.png', cleaned_url: 'https://bestbuy.com/img1.png' }],
+      offers: [
+        {
+          id: 'off_sony_1',
+          product_id: 'prod_1',
+          domain: 'bestbuy.com',
+          price: 29900,
+          compare_at_price: 34900,
+          max_commission_rate: 0.08,
+          stock_status: 'IN_STOCK' as const,
+        },
+      ],
+    },
+    {
+      product_id: 'prod_2',
+      title: 'USB-C Fast Charging Cable',
+      description: 'Braided nylon cable',
+      category_id: 'cables',
+      images: [{ url: 'https://anker.com/img2.png', cleaned_url: 'https://anker.com/img2.png' }],
+      offers: [
+        {
+          id: 'off_anker_1',
+          product_id: 'prod_2',
+          domain: 'anker.com',
+          price: 1999,
+          compare_at_price: 2499,
+          max_commission_rate: 0.10,
+          stock_status: 'IN_STOCK' as const,
+        },
+      ],
+    },
+  ];
+
+  const requirements = [
+    { product_id: 'prod_1', name: 'Sony Headphones', quantity: 1 },
+    { product_id: 'prod_2', name: 'Anker Cable', quantity: 1 },
+  ];
+
+  const optimizationResult = defaultCartSolver.solve(mockProducts, requirements, {
+    alpha: 0.75,
+    budgetCapCents: 35000,
+  });
+
+  assert.ok(optimizationResult);
+  assert.equal(optimizationResult.assigned_merchants.length, 2);
+  assert.ok(optimizationResult.gross_subtotal_cents <= 35000);
+  assert.ok(optimizationResult.total_commission_rebate_cents > 0);
+  assert.ok(optimizationResult.is_within_budget);
+  assert.ok(optimizationResult.net_buyer_expenditure_cents <= 35000);
+  // Verify that commission rebate platform credit reduces expenditure before taxes & shipping
+  const preTaxShippingNet = optimizationResult.gross_subtotal_cents - optimizationResult.total_commission_rebate_cents;
+  assert.ok(preTaxShippingNet < optimizationResult.gross_subtotal_cents);
 });
 
 test('Dispute Forensics API: GET /api/disputes/:id/hateoas returns valid action links across all stages', async () => {
