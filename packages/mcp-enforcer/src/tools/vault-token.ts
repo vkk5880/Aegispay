@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { defaultAuditChain } from '../audit-chain.js';
+
+const logger = createLogger('MCP:Enforcer:VaultToken', { stream: 'stderr' });
 
 /**
  * Zod schema for minting a PayPal Vault v3 setup token or registering a vaulted payment token.
@@ -19,6 +22,16 @@ export const VaultTokenInputSchema = z.object({
     .string()
     .max(128)
     .regex(/^[a-zA-Z0-9_-]+$/, 'setup_token_id contains invalid characters')
+    .optional(),
+  return_url: z
+    .string()
+    .url('Invalid return_url format')
+    .max(512, 'return_url cannot exceed 512 characters')
+    .optional(),
+  cancel_url: z
+    .string()
+    .url('Invalid cancel_url format')
+    .max(512, 'cancel_url cannot exceed 512 characters')
     .optional(),
 });
 
@@ -52,10 +65,12 @@ export function maskSensitiveToken(token: string): string {
  */
 function maskSafeError(err: unknown): { code: string; message: string } {
   const errMsg = err instanceof Error ? err.message : String(err);
-  console.error('[MCP Enforcer:vault-token] Masked error:', errMsg);
+  const errStack = err instanceof Error ? err.stack : undefined;
+  logger.error('Masked vault token error', { errorMessage: errMsg, stack: errStack });
 
   if (errMsg.startsWith('ERR_')) {
     const code = errMsg.split(':')[0].trim();
+    logger.warn('Recognized business guardrail failure in vault token operation', { code, message: errMsg });
     return {
       code,
       message: errMsg,
@@ -79,10 +94,17 @@ export async function handleVaultToken(
     createPaymentToken?: (setupTokenId: string) => Promise<{ id: string; status: string }>;
   }
 ): Promise<VaultTokenResult> {
+  logger.info('Evaluating vault token operation request', sanitizeForLogging(rawArgs));
   try {
     const parseResult = VaultTokenInputSchema.safeParse(rawArgs);
     if (!parseResult.success) {
       const issue = parseResult.error.issues[0];
+      const formattedErrors = parseResult.error.format();
+      logger.warn('Vault token input schema validation failed', {
+        issue,
+        formattedErrors,
+        rawArgs: sanitizeForLogging(rawArgs),
+      });
       return {
         success: false,
         error: {
@@ -93,20 +115,126 @@ export async function handleVaultToken(
     }
 
     const args = parseResult.data;
+    logger.debug('Vault token schema successfully validated', {
+      mandate_id: args.mandate_id,
+      customer_id: args.customer_id,
+      usage_type: args.usage_type,
+      customer_type: args.customer_type,
+      payment_source_type: args.payment_source_type,
+      has_setup_token_id: Boolean(args.setup_token_id),
+      has_return_url: Boolean(args.return_url),
+      has_cancel_url: Boolean(args.cancel_url),
+      has_vault_client: Boolean(vaultClient),
+    });
+
+    // Customer ID bounds and formatting checks
+    if (!/^[a-zA-Z0-9_-]+$/.test(args.customer_id)) {
+      logger.warn('Customer ID validation failed: invalid format', { customer_id: args.customer_id });
+      return {
+        success: false,
+        error: {
+          code: 'ERR_INVALID_CUSTOMER_ID',
+          message: 'customer_id contains invalid characters',
+        },
+      };
+    }
+    logger.debug('Customer ID validated', { customer_id: args.customer_id });
+
+    // Validate return_url and cancel_url protocols if supplied
+    if (args.return_url) {
+      logger.debug('Validating vault return_url protocol', { return_url: args.return_url });
+      try {
+        const parsedReturn = new URL(args.return_url);
+        if (parsedReturn.protocol !== 'http:' && parsedReturn.protocol !== 'https:') {
+          logger.warn('Vault return_url rejected: invalid protocol', { protocol: parsedReturn.protocol });
+          return {
+            success: false,
+            error: {
+              code: 'ERR_INVALID_RETURN_URL',
+              message: 'return_url must use http or https protocol',
+            },
+          };
+        }
+        logger.debug('Vault return_url protocol verified', { host: parsedReturn.host });
+      } catch (urlErr) {
+        logger.warn('Vault return_url failed URL parsing', {
+          return_url: args.return_url,
+          error: urlErr instanceof Error ? urlErr.message : String(urlErr),
+        });
+        return {
+          success: false,
+          error: {
+            code: 'ERR_INVALID_RETURN_URL',
+            message: 'return_url is not a valid URL',
+          },
+        };
+      }
+    }
+
+    if (args.cancel_url) {
+      logger.debug('Validating vault cancel_url protocol', { cancel_url: args.cancel_url });
+      try {
+        const parsedCancel = new URL(args.cancel_url);
+        if (parsedCancel.protocol !== 'http:' && parsedCancel.protocol !== 'https:') {
+          logger.warn('Vault cancel_url rejected: invalid protocol', { protocol: parsedCancel.protocol });
+          return {
+            success: false,
+            error: {
+              code: 'ERR_INVALID_CANCEL_URL',
+              message: 'cancel_url must use http or https protocol',
+            },
+          };
+        }
+        logger.debug('Vault cancel_url protocol verified', { host: parsedCancel.host });
+      } catch (urlErr) {
+        logger.warn('Vault cancel_url failed URL parsing', {
+          cancel_url: args.cancel_url,
+          error: urlErr instanceof Error ? urlErr.message : String(urlErr),
+        });
+        return {
+          success: false,
+          error: {
+            code: 'ERR_INVALID_CANCEL_URL',
+            message: 'cancel_url is not a valid URL',
+          },
+        };
+      }
+    }
 
     if (args.setup_token_id) {
       // Step: Convert setup token to permanent payment token
+      logger.info('Branch: Converting setup token to permanent payment token', {
+        masked_setup_token: maskSensitiveToken(args.setup_token_id),
+        customer_id: args.customer_id,
+      });
+
       let paymentTokenId = `vlt_pt_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
       let status = 'VAULTED';
 
       if (vaultClient?.createPaymentToken) {
+        logger.debug('Invoking external vaultClient.createPaymentToken', {
+          masked_setup_token: maskSensitiveToken(args.setup_token_id),
+        });
         const clientResult = await vaultClient.createPaymentToken(args.setup_token_id);
         paymentTokenId = clientResult.id;
         status = clientResult.status;
+        logger.info('vaultClient.createPaymentToken returned result', {
+          masked_payment_token: maskSensitiveToken(paymentTokenId),
+          status,
+        });
+      } else {
+        logger.debug('No vaultClient provided; generated synthetic vaulted payment token', {
+          masked_payment_token: maskSensitiveToken(paymentTokenId),
+          status,
+        });
       }
 
       const masked = maskSensitiveToken(paymentTokenId);
 
+      logger.debug('Appending VAULT_TOKEN_CONVERTED to immutable audit chain', {
+        mandate_id: args.mandate_id,
+        customer_id: args.customer_id,
+      });
       const auditEvent = defaultAuditChain.append({
         request_id: args.mandate_id,
         event_type: 'VAULT_TOKEN_CONVERTED',
@@ -120,8 +248,13 @@ export async function handleVaultToken(
           status,
         },
       });
+      logger.info('Vault token conversion audit event appended', {
+        auditHash: auditEvent.hash,
+        seq: auditEvent.seq,
+        eventId: auditEvent.event_id,
+      });
 
-      return {
+      const result: VaultTokenResult = {
         success: true,
         setup_token_id: args.setup_token_id,
         payment_token_id: paymentTokenId,
@@ -130,19 +263,49 @@ export async function handleVaultToken(
         masked_token: masked,
         audit_hash: auditEvent.hash,
       };
+
+      logger.info('Vault token conversion completed successfully', {
+        customer_id: args.customer_id,
+        status,
+        masked_token: masked,
+      });
+
+      return result;
     } else {
       // Step: Mint initial setup token
+      logger.info('Branch: Minting initial PayPal Vault setup token', {
+        customer_id: args.customer_id,
+        usage_type: args.usage_type,
+        customer_type: args.customer_type,
+      });
+
       let setupTokenId = `vlt_st_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
       let status = 'CREATED';
 
       if (vaultClient?.createSetupToken) {
+        logger.debug('Invoking external vaultClient.createSetupToken', {
+          customer_id: args.customer_id,
+        });
         const clientResult = await vaultClient.createSetupToken(args);
         setupTokenId = clientResult.id;
         status = clientResult.status;
+        logger.info('vaultClient.createSetupToken returned result', {
+          masked_setup_token: maskSensitiveToken(setupTokenId),
+          status,
+        });
+      } else {
+        logger.debug('No vaultClient provided; generated synthetic vault setup token', {
+          masked_setup_token: maskSensitiveToken(setupTokenId),
+          status,
+        });
       }
 
       const masked = maskSensitiveToken(setupTokenId);
 
+      logger.debug('Appending VAULT_SETUP_TOKEN_CREATED to immutable audit chain', {
+        mandate_id: args.mandate_id,
+        customer_id: args.customer_id,
+      });
       const auditEvent = defaultAuditChain.append({
         request_id: args.mandate_id,
         event_type: 'VAULT_SETUP_TOKEN_CREATED',
@@ -157,8 +320,13 @@ export async function handleVaultToken(
           status,
         },
       });
+      logger.info('Vault setup token audit event appended', {
+        auditHash: auditEvent.hash,
+        seq: auditEvent.seq,
+        eventId: auditEvent.event_id,
+      });
 
-      return {
+      const result: VaultTokenResult = {
         success: true,
         setup_token_id: setupTokenId,
         customer_id: args.customer_id,
@@ -166,8 +334,20 @@ export async function handleVaultToken(
         masked_token: masked,
         audit_hash: auditEvent.hash,
       };
+
+      logger.info('Vault setup token minted successfully', {
+        customer_id: args.customer_id,
+        status,
+        masked_token: masked,
+      });
+
+      return result;
     }
   } catch (err: unknown) {
+    logger.error('Unexpected exception during handleVaultToken execution', {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
     const masked = maskSafeError(err);
     return {
       success: false,
