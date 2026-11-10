@@ -14,6 +14,9 @@ import { toNodeHandler, hostHeaderValidation } from '@modelcontextprotocol/node'
 import { defaultTaxEstimator } from '../services/tax-estimator.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+export const logger = createLogger('API:Routes:ACP');
 
 export const SUPPORTED_API_VERSIONS = [
   '2025-09-29',
@@ -364,6 +367,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * A2A Protocol Agent Card Discovery Endpoint
    */
   fastify.get('/.well-known/agent-card.json', async (request, reply) => {
+    logger.debug('Serving /.well-known/agent-card.json discovery manifest');
     reply.header('Content-Type', 'application/json');
     reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send({
@@ -399,6 +403,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * Complies with rfc.discovery.md and OpenAI ACP.
    */
   fastify.get('/.well-known/acp.json', async (request, reply) => {
+    logger.debug('Serving /.well-known/acp.json discovery manifest');
     reply.header('Content-Type', 'application/json');
     reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send({
@@ -422,6 +427,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * Universal Commerce Protocol (UCP) discovery endpoint.
    */
   fastify.get('/.well-known/ucp.json', async (request, reply) => {
+    logger.debug('Serving /.well-known/ucp.json discovery manifest');
     reply.header('Content-Type', 'application/json');
     reply.header('Cache-Control', 'public, max-age=3600');
     return reply.send({
@@ -451,6 +457,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * Standardized machine-readable agent guide and capability directory.
    */
   fastify.get('/llms.txt', async (request, reply) => {
+    logger.debug('Serving /llms.txt capability directory');
     reply.header('Content-Type', 'text/plain; charset=utf-8');
     reply.header('Cache-Control', 'public, max-age=3600');
     const llmsTxtContent = [
@@ -474,8 +481,14 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * Shared Session Creation Handler
    */
   const handleSessionCreate = async (request: any, reply: any) => {
+    logger.info('Received ACP checkout session creation request', {
+      headers: sanitizeForLogging(request.headers),
+      method: request.method,
+      url: request.url,
+    });
     const apiVersion = request.headers['api-version'] as string;
     if (apiVersion && !SUPPORTED_API_VERSIONS.includes(apiVersion)) {
+      logger.warn(`Unsupported API version requested: '${apiVersion}'`, { supported: SUPPORTED_API_VERSIONS });
       return reply.status(400).send({
         type: 'invalid_request',
         code: 'unsupported_api_version',
@@ -486,6 +499,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
 
     const rawIdempHeader = request.headers['idempotency-key'];
     if (rawIdempHeader !== undefined && typeof rawIdempHeader === 'string' && rawIdempHeader.trim().length === 0) {
+      logger.warn('Empty Idempotency-Key header provided in ACP session create');
       return reply.status(400).send({
         type: 'invalid_request',
         code: 'invalid_idempotency_key',
@@ -496,6 +510,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
     const idempotencyKey = (request.headers['idempotency-key'] as string) || '';
     if (idempotencyKey) {
       if (idempotencyKey.length > 255) {
+        logger.warn('Idempotency-Key exceeds maximum length of 255 characters', { length: idempotencyKey.length });
         return reply.status(400).send({
           type: 'invalid_request',
           code: 'invalid_idempotency_key',
@@ -504,6 +519,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       }
 
       if (idempotencyStore.has(idempotencyKey)) {
+        logger.info(`Idempotency cache hit for key: ${idempotencyKey}`);
         const cached = idempotencyStore.get(idempotencyKey)!;
         const currentFingerprint = crypto
           .createHash('sha256')
@@ -511,6 +527,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
           .digest('hex');
 
         if (cached.requestFingerprint && cached.requestFingerprint !== currentFingerprint) {
+          logger.warn(`Idempotency conflict detected for key: ${idempotencyKey}`);
           return reply.status(422).send({
             type: 'invalid_request',
             code: 'idempotency_conflict',
@@ -527,6 +544,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
 
     const parseResult = ACPCreateCheckoutSessionSchema.safeParse(request.body);
     if (!parseResult.success) {
+      logger.warn('ACPCreateCheckoutSessionSchema validation failed', { errors: parseResult.error.format() });
       return reply.status(400).send({
         type: 'invalid_request',
         code: 'invalid_parameter',
@@ -636,6 +654,19 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
       created_at: new Date().toISOString(),
     };
 
+    logger.info(`Created ACP checkout session ${sessionId}`, {
+      sessionId,
+      currency: sessionData.currency,
+      subtotalCents,
+      taxCents: taxCalculation.tax_cents,
+      shippingCents: standardShippingCents,
+      totalDiscountCents,
+      totalCents,
+      appliedDiscountsCount: appliedDiscounts.length,
+      rejectedDiscountsCount: rejectedDiscounts.length,
+      itemCount: normalizedItems.length,
+      negotiatedInterventions,
+    });
     checkoutSessionsStore.set(sessionId, sessionData);
 
     const effectiveIdemp = idempotencyKey || `idemp_${sessionId}`;
@@ -675,7 +706,13 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   const handleSessionGet = async (request: any, reply: any) => {
     const { id } = request.params;
+    logger.debug(`Retrieving ACP checkout session ${id}`);
     const session = checkoutSessionsStore.get(id);
+    if (!session) {
+      logger.warn(`Checkout session not found: ${id}`);
+    } else {
+      logger.debug(`Found ACP checkout session ${id} with status: ${session.status}`);
+    }
 
     if (!session) {
       return reply.status(404).send({
@@ -698,6 +735,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post('/checkout_sessions/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.info(`Mutating ACP checkout session ${id}`, { body: sanitizeForLogging(request.body) });
     const session = checkoutSessionsStore.get(id);
 
     if (!session) {
@@ -773,6 +811,9 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post('/checkout_sessions/:id/complete', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.info(`Attempting to complete ACP checkout session ${id}`, {
+      paymentMethodType: (request.body as any)?.payment_method?.type || 'vault_token',
+    });
     const session = checkoutSessionsStore.get(id);
 
     if (!session) {
@@ -832,6 +873,10 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post('/checkout_sessions/:id/cancel', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.info(`Attempting to cancel ACP checkout session ${id}`, {
+      reason: (request.body as any)?.reason,
+      intentTrace: (request.body as any)?.intent_trace,
+    });
     const session = checkoutSessionsStore.get(id);
 
     if (!session) {
@@ -874,6 +919,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * Creates a pre-checkout cart resource with estimated non-authoritative totals.
    */
   fastify.post('/carts', async (request, reply) => {
+    logger.info('Creating pre-checkout cart resource');
     const body: any = request.body || {};
     const items = Array.isArray(body.line_items) ? body.line_items : (Array.isArray(body.items) ? body.items : []);
     if (items.length === 0) {
@@ -944,6 +990,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.get('/carts/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.debug(`Retrieving pre-checkout cart ${id}`);
     const cart = cartsStore.get(id);
 
     if (!cart) {
@@ -978,6 +1025,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   const handleCartUpdate = async (request: any, reply: any) => {
     const { id } = request.params as { id: string };
+    logger.info(`Updating pre-checkout cart ${id}`);
     const cart = cartsStore.get(id);
 
     if (!cart) {
@@ -1039,6 +1087,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post('/carts/:id/cancel', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.info(`Cancelling pre-checkout cart ${id}`);
     const cart = cartsStore.get(id);
 
     if (!cart) {
@@ -1068,6 +1117,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   const nodeHandler = toNodeHandler(mcpHandler);
 
   fastify.all('/mcp', async (request, reply) => {
+    logger.debug('MCP endpoint invoked', { method: request.method });
     // 1. DNS Rebinding Protection (reject unauthorized host headers)
     if (!validateHost(request.raw, reply.raw)) {
       reply.hijack();
@@ -1087,6 +1137,12 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
           result: result.result || result,
         });
       } catch (err: any) {
+        logger.error(`MCP action execution failed: ${err.message}`, {
+          route: '/mcp',
+          action: method,
+          code: err.code || -32000,
+          stack: err.stack,
+        });
         const rpcCode = err.code || -32000;
         return reply.status(200).send({
           jsonrpc: '2.0',
@@ -1113,8 +1169,10 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /acp/payment_handler
    */
   fastify.post('/acp/payment_handler', async (request, reply) => {
+    logger.info('Executing ACP payment handler request', { body: sanitizeForLogging(request.body) });
     const parseResult = ACPPaymentHandlerExecuteSchema.safeParse(request.body);
     if (!parseResult.success) {
+      logger.warn('ACPCreateCheckoutSessionSchema validation failed', { errors: parseResult.error.format() });
       return reply.status(400).send({
         type: 'invalid_request',
         code: 'invalid_parameter',
@@ -1224,6 +1282,13 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
         read_back_verified: checkoutResult.readBackVerified,
       });
     } catch (err: any) {
+      logger.error(`Payment handler execution failed: ${err.message}`, {
+        route: '/acp/payment_handler',
+        payment_handler_id,
+        checkout_session_id,
+        code: 'upstream_psp_failed',
+        stack: err.stack,
+      });
       fastify.log.error(err);
       return reply.status(502).send({
         type: 'payment_handler_error',
@@ -1239,6 +1304,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/acp/actions
    */
   fastify.post('/api/acp/actions', async (request, reply) => {
+    logger.info('Executing ACP action request', { body: sanitizeForLogging(request.body) });
     const parseResult = ACPActionRequestSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({
@@ -1282,6 +1348,12 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
         ...result,
       });
     } catch (err: any) {
+      logger.error(`ACP action execution failed: ${err.message}`, {
+        route: '/api/acp/actions',
+        action,
+        code: 'execution_failed',
+        stack: err.stack,
+      });
       fastify.log.error(err);
       return reply.status(500).send({
         type: 'action_execution_error',
@@ -1310,6 +1382,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   const authSessionsStore = new Map<string, StoredAuthSession>();
 
   fastify.post('/delegate_authentication', async (request, reply) => {
+    logger.info('Creating 3DS delegate authentication session');
     const body: any = request.body || {};
     const merchant_id = body.merchant_id;
     const payment_method = body.payment_method;
@@ -1419,6 +1492,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   // =========================================================================
 
   const handleDelegatePayment = async (request: any, reply: any) => {
+    logger.info('Handling delegate payment request');
     const idempKey = request.headers['idempotency-key'] as string;
     if (!idempKey) {
       return reply.status(400).send({
@@ -1490,6 +1564,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.get('/orders/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.debug(`Retrieving order details for ${id}`);
     const order = ordersStore.get(id);
 
     if (!order) {
@@ -1512,6 +1587,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   fastify.post('/orders/:id/fulfillments', async (request, reply) => {
     const { id } = request.params as { id: string };
+    logger.info(`Adding fulfillment event for order ${id}`, { body: sanitizeForLogging(request.body) });
     const order = ordersStore.get(id);
 
     if (!order) {
@@ -1593,6 +1669,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
    */
   const handleOrderMutation = async (request: any, reply: any) => {
     const { id } = request.params as { id: string };
+    logger.info(`Handling pre-shipment order mutation for ${id}`, { body: sanitizeForLogging(request.body) });
 
     let order: StoredEnhancedOrder | undefined;
     let session: StoredCheckoutSession | undefined;
@@ -1695,6 +1772,12 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
           'Pre-shipment line-item cancellation refund'
         );
       } catch (err: any) {
+        logger.error(`PayPal pre-shipment refund API call failed, falling back to mock record: ${err.message}`, {
+          route: '/orders/:id/order',
+          captureId,
+          refundVal,
+          stack: err.stack,
+        });
         refundResult = {
           id: `MOCK_REFUND_${Date.now()}`,
           status: 'COMPLETED',
@@ -1779,6 +1862,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   const feedsStore = new Map<string, StoredFeed>();
 
   fastify.post('/feeds', async (request, reply) => {
+    logger.info('Creating product feed');
     const body: any = request.body || {};
     const feedId = `feed_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
     const feed: StoredFeed = {
@@ -1921,6 +2005,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   const webhookEventsStore: any[] = [];
 
   const handleWebhookOrderEvents = async (request: any, reply: any) => {
+    logger.info('Handling ACP webhook order event', { event: (request.body as any)?.event });
     const body: any = request.body || {};
     const eventType = body.event;
     if (!eventType || (eventType !== 'order_create' && eventType !== 'order_update')) {
@@ -1949,6 +2034,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/webhooks/acp', handleWebhookOrderEvents);
 
   fastify.get('/.well-known/openrpc.json', async (request, reply) => {
+    logger.debug('Serving /.well-known/openrpc.json specification');
     reply.header('Content-Type', 'application/json');
     reply.header('Cache-Control', 'public, max-age=3600');
     return reply.status(200).send({

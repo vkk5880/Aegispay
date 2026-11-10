@@ -1,5 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import { defaultPayPalClient, PayPalApimaticClient } from '../services/paypal-apimatic.js';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+export const logger = createLogger('API:Routes:Reconciliation');
 
 export interface CsvLedgerRow {
   order_id: string;
@@ -26,13 +29,26 @@ export const reconciliationRoutes: FastifyPluginAsync<{
    * Helper to parse CSV string into structured ledger rows.
    */
   const parseCsvText = (csvText: string): CsvLedgerRow[] => {
+    logger.debug('Parsing raw CSV text for merchant reconciliation', {
+      textLength: csvText.length,
+    });
     const lines = csvText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-    if (lines.length <= 1) return [];
+    if (lines.length <= 1) {
+      logger.warn('CSV parsing aborted: empty or header-only content', { lineCount: lines.length });
+      return [];
+    }
 
     const headers = lines[0].toLowerCase().split(',').map((h) => h.trim());
     const orderIdIdx = headers.findIndex((h) => h.includes('order') || h.includes('id'));
     const amountIdx = headers.findIndex((h) => h.includes('amount') || h.includes('total') || h.includes('cents'));
     const notesIdx = headers.findIndex((h) => h.includes('note') || h.includes('desc'));
+
+    logger.debug('CSV column header indices mapped', {
+      orderIdIdx,
+      amountIdx,
+      notesIdx,
+      headers,
+    });
 
     const rows: CsvLedgerRow[] = [];
     for (let i = 1; i < lines.length; i++) {
@@ -50,6 +66,7 @@ export const reconciliationRoutes: FastifyPluginAsync<{
       });
     }
 
+    logger.info(`Parsed ${rows.length} valid ledger rows from ${lines.length - 1} data lines`);
     return rows;
   };
 
@@ -60,6 +77,12 @@ export const reconciliationRoutes: FastifyPluginAsync<{
   fastify.post('/api/merchant/reconcile-csv', async (request, reply) => {
     const body = request.body as any;
     let ledgerRows: CsvLedgerRow[] = [];
+
+    logger.info('Received merchant reconciliation request', {
+      hasCsvContent: Boolean(body?.csv_content),
+      hasRowsArray: Array.isArray(body?.rows),
+      rowsCount: Array.isArray(body?.rows) ? body.rows.length : undefined,
+    });
 
     if (body?.csv_content && typeof body.csv_content === 'string') {
       ledgerRows = parseCsvText(body.csv_content);
@@ -72,7 +95,9 @@ export const reconciliationRoutes: FastifyPluginAsync<{
             : Math.round((parseFloat(String(row.expected_amount_usd || '0')) || 0) * 100),
         notes: row.notes,
       }));
+      logger.info(`Extracted ${ledgerRows.length} rows directly from body.rows array`);
     } else {
+      logger.warn('Reconciliation request payload invalid: missing both csv_content and rows');
       return reply.status(400).send({
         error: 'Invalid payload: provide either csv_content string or rows array',
       });
@@ -83,13 +108,19 @@ export const reconciliationRoutes: FastifyPluginAsync<{
     let mismatchedCount = 0;
     let totalDiscrepancyCents = 0;
 
+    logger.info(`Starting reconciliation loop for ${ledgerRows.length} ledger records`);
+
     for (const row of ledgerRows) {
-      if (!row.order_id) continue;
+      if (!row.order_id) {
+        logger.debug('Skipping ledger row missing order_id');
+        continue;
+      }
       const expectedCents = row.expected_amount_cents || 0;
 
       let actualCents = 0;
       let orderStatus = 'UNKNOWN';
 
+      logger.debug(`Looking up PayPal order details for order '${row.order_id}'`);
       try {
         const orderDetails = await paypalClient.getOrder(row.order_id);
         if (orderDetails && typeof orderDetails === 'object') {
@@ -99,7 +130,18 @@ export const reconciliationRoutes: FastifyPluginAsync<{
             actualCents = Math.round(parseFloat(units[0].amount.value) * 100);
           }
         }
-      } catch {
+        logger.debug(`PayPal order lookup succeeded for '${row.order_id}'`, {
+          orderStatus,
+          actualCents,
+          expectedCents,
+        });
+      } catch (err: any) {
+        logger.error(`PayPal order lookup failed for order '${row.order_id}': ${err?.message || err}`, {
+          route: '/api/merchant/reconcile-csv',
+          orderId: row.order_id,
+          code: 'PAYPAL_ORDER_LOOKUP_FAILED',
+          stack: err?.stack,
+        });
         // Order lookup failure: treated as missing capture
       }
 
@@ -149,12 +191,23 @@ export const reconciliationRoutes: FastifyPluginAsync<{
       }
     }
 
+    const reconciliationRatePercent =
+      items.length > 0 ? Number(((matchedCount / items.length) * 100).toFixed(2)) : 100;
+
+    logger.info('Reconciliation completed', {
+      totalRecords: items.length,
+      matchedCount,
+      mismatchedCount,
+      totalDiscrepancyCents,
+      reconciliationRatePercent,
+    });
+
     return reply.status(200).send({
       total_records: items.length,
       matched_count: matchedCount,
       mismatched_count: mismatchedCount,
       total_discrepancy_cents: totalDiscrepancyCents,
-      reconciliation_rate_percent: items.length > 0 ? Number(((matchedCount / items.length) * 100).toFixed(2)) : 100,
+      reconciliation_rate_percent: reconciliationRatePercent,
       items,
     });
   });
