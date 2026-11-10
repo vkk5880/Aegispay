@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import type { ChatResponsePayload } from '@aegispay/shared-types';
 import { getApiBaseUrl } from '@/lib/utils';
+import { apiLogger } from '@/lib/logger';
 
 export async function POST(req: Request) {
   const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
   const body = await req.json();
+  apiLogger.debug('POST /api/buyer/chat received:', { message: body.message, action: body.action });
 
   if (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT) {
     try {
@@ -17,10 +19,13 @@ export async function POST(req: Request) {
 
       if (res.ok) {
         const data = await res.json();
+        apiLogger.debug('Upstream orchestrator /api/buyer/chat returned success');
         return NextResponse.json(data);
+      } else {
+        apiLogger.warn(`Upstream orchestrator /api/buyer/chat returned status ${res.status}`);
       }
-    } catch {
-      // Fall back to robust in-memory mock responses for standalone preview or testing
+    } catch (err: any) {
+      apiLogger.warn('Upstream orchestrator unavailable, falling back to local simulation:', err?.message);
     }
   }
 

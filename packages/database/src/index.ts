@@ -1,6 +1,9 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
 import * as schema from './schema.js';
+import { createLogger } from '@aegispay/shared-types';
+
+export const dbLogger = createLogger('Database:Postgres');
 
 // PostgreSQL client creation (backward compatible with Render basic-1gb connection bounding)
 export function createDb(
@@ -12,13 +15,22 @@ export function createDb(
     statementTimeoutMillis?: number;
   }
 ) {
+  const max = options?.max ?? 20;
+  const connectionTimeoutMillis = options?.connectionTimeoutMillis ?? 5000;
+  dbLogger.debug(`Creating PostgreSQL pool (max: ${max}, connectionTimeout: ${connectionTimeoutMillis}ms)`);
+
   const pool = new Pool({
     connectionString,
-    max: options?.max ?? 20,
+    max,
     idleTimeoutMillis: options?.idleTimeoutMillis ?? 30000,
-    connectionTimeoutMillis: options?.connectionTimeoutMillis ?? 5000,
+    connectionTimeoutMillis,
     statement_timeout: options?.statementTimeoutMillis ?? 10000,
   });
+
+  pool.on('error', (err) => {
+    dbLogger.error('Unexpected error on idle PostgreSQL pool client:', err);
+  });
+
   return drizzle(pool, { schema });
 }
 

@@ -8,7 +8,10 @@ import {
   ComparisonMatrixSchema,
   ExplainableCartPayloadSchema,
   ExplainableCartPayload,
+  createLogger,
 } from '@aegispay/shared-types';
+
+export const mastraLogger = createLogger('Mastra:Assistant');
 import { Agent } from '@mastra/core/agent';
 import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';
@@ -1066,6 +1069,8 @@ export class ShoppingAssistantService {
       user_api_key: request.user_api_key,
     };
 
+    mastraLogger.info(`Processing chat message: "${request.message}" (model: ${input.model}, action hint: ${input.explicit_action || 'auto-detect'})`);
+
     try {
       // 12-second timeout circuit breaker per Phase 4
       let timeoutId: NodeJS.Timeout | null = null;
@@ -1073,6 +1078,7 @@ export class ShoppingAssistantService {
         timeoutId = setTimeout(() => reject(new Error('Mastra Workflow execution timed out (12s circuit breaker)')), 12000);
       });
 
+      const startTime = Date.now();
       const run = await this.chatWorkflow.createRun();
       const runPromise = run.start({ inputData: input });
       const runResult = await Promise.race([runPromise, timeoutPromise]);
@@ -1084,11 +1090,13 @@ export class ShoppingAssistantService {
 
       // Validate emitted output strictly against Zod schema
       const validated = WorkflowOutputSchema.parse(runResult.result);
+      mastraLogger.info(`Mastra Workflow DAG finished in ${Date.now() - startTime}ms (action: ${validated.action}, items: ${(validated as any).products?.length || 0})`);
       return {
         ...(validated as ChatResponsePayload),
         active_model: resolveCommerceModel(request.model),
       };
     } catch (err: any) {
+      mastraLogger.warn(`Mastra Workflow DAG failed (${err?.message}). Activating local deterministic reasoner fallback...`);
       // Upstream LLM timeout or 429 rate limit failover to deterministic local reasoner
       const proposal = runLocalReasoner(request.message);
       const fallbackAmountCents = proposal.toolCall.args.amountUsd

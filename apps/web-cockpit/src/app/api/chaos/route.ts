@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
+import { chaosLogger } from '@/lib/logger';
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const action = body.action;
     const now = new Date().toISOString();
+    chaosLogger.info(`Executing Chaos Simulator action: "${action}"`);
 
     switch (action) {
       /**
@@ -517,9 +519,11 @@ export async function POST(request: Request) {
       }
 
       default:
+        chaosLogger.warn(`Unknown chaos action requested: ${action}`);
         return NextResponse.json({ error: `Unknown chaos action: ${action}` }, { status: 400 });
     }
   } catch (err: any) {
+    chaosLogger.error('Chaos simulator action execution exception:', err);
     return NextResponse.json({ error: 'CHAOS_EXECUTION_FAILED', message: err.message }, { status: 500 });
   }
 }

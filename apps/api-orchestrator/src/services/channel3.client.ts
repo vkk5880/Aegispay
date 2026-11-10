@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
-import { Channel3Item } from '@aegispay/shared-types';
+import { Channel3Item, createLogger } from '@aegispay/shared-types';
 import { defaultCartSolver, KnapsackOptimizationResult, RequiredShoppingItem } from './cart-solver.js';
 import { Channel3 as OfficialChannel3Sdk, Channel3Api } from '@channel3/sdk';
 
 dotenv.config();
+
+export const channel3Logger = createLogger('Channel3:Client');
 
 export interface Channel3SearchFilters {
   query?: string;
@@ -251,7 +253,9 @@ export class Channel3Client {
    * Channel3 /v1/search (text query, inspiration image_url, category_ids, and hex color)
    */
   async search(filters: Channel3SearchFilters): Promise<Channel3SearchResponse> {
+    channel3Logger.debug(`Search query: "${filters.query || ''}", categories: ${filters.category_ids?.join(',') || 'none'}, color: ${filters.hex_color || 'none'}`);
     if (!this.apiKey || this.apiKey === 'your_channel3_api_key_here') {
+      channel3Logger.debug('No live API key; returning mock dataset for search.');
       return this.getMockSearchResponse(filters);
     }
 

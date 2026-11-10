@@ -1,5 +1,8 @@
 import http from 'http';
 import { startTaskServer } from '@renderinc/sdk/workflows';
+import { createLogger } from '@aegispay/shared-types';
+
+export const workflowLogger = createLogger('Render:Workflows');
 
 // Import flows & tasks so they register themselves with Render Workflows runtime
 import './tasks/priceDropWatcher.js';
@@ -17,20 +20,30 @@ export const REGISTERED_FLOWS = [
 ] as const;
 
 async function main() {
-  console.log('[Workflows] Initializing AegisPay Render Workflows Engine (@renderinc/sdk v1.8.0)...');
+  workflowLogger.info('Initializing AegisPay Render Workflows Engine (@renderinc/sdk v1.8.0)...', {
+    registeredFlows: REGISTERED_FLOWS,
+  });
+
+  process.on('uncaughtException', (err) => {
+    workflowLogger.error('CRITICAL: Render Workflows uncaughtException:', err);
+  });
+  process.on('unhandledRejection', (reason) => {
+    workflowLogger.error('CRITICAL: Render Workflows unhandledRejection:', reason);
+  });
 
   if (process.env.RENDER_SDK_SOCKET_PATH) {
     try {
       await startTaskServer();
-      console.log('[Workflows] Render Workflows Task Server started successfully on socket:', process.env.RENDER_SDK_SOCKET_PATH);
+      workflowLogger.info('Render Workflows Task Server started successfully on socket:', process.env.RENDER_SDK_SOCKET_PATH);
     } catch (error) {
-      console.error('[Workflows] Failed to start Render Task Server:', error);
+      workflowLogger.error('Failed to start Render Task Server:', error);
       process.exit(1);
     }
   } else {
     // Local / container simulation: run lightweight HTTP listener to keep process active and provide health probes
     const port = parseInt(process.env.PORT || '4001', 10);
     const server = http.createServer((req, res) => {
+      workflowLogger.debug(`Simulation server request: ${req.method} ${req.url}`);
       if (req.url === '/health' || req.url === '/' || req.url === '/api/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
@@ -49,15 +62,15 @@ async function main() {
     });
 
     server.listen(port, '0.0.0.0', () => {
-      console.log(`[Workflows] Local simulation server listening on http://0.0.0.0:${port}`);
+      workflowLogger.info(`Local simulation server listening on http://0.0.0.0:${port}`);
     });
 
     // Graceful shutdown
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
       process.on(signal, () => {
-        console.log(`[Workflows] Received ${signal}, closing simulation server...`);
+        workflowLogger.info(`Received ${signal}, closing simulation server...`);
         server.close(() => {
-          console.log('[Workflows] Simulation server closed cleanly.');
+          workflowLogger.info('Simulation server closed cleanly.');
           process.exit(0);
         });
       });

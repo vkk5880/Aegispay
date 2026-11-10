@@ -1,5 +1,8 @@
 import { defaultTaxEstimator } from './tax-estimator.js';
 import { Channel3Offer, Channel3ProductDetail } from './channel3.client.js';
+import { createLogger } from '@aegispay/shared-types';
+
+export const cartLogger = createLogger('CartSolver:Knapsack');
 
 export interface RequiredShoppingItem {
   product_id: string;
@@ -110,6 +113,8 @@ export class CartSolver {
     const alpha = options?.alpha ?? this.alpha;
     const lambda = options?.lambdaAnomaly ?? this.lambdaAnomaly;
     const budgetCap = options?.budgetCapCents;
+
+    cartLogger.debug(`Starting Knapsack solver for ${requirements.length} item(s) across ${products.length} catalog product(s) (budgetCap: ${budgetCap ? '$' + (budgetCap / 100).toFixed(2) : 'none'})`);
 
     // Filter candidate offers for each required item
     const candidateChoicesPerItem: CandidateOfferWithProduct[][] = [];
@@ -354,6 +359,8 @@ export class CartSolver {
         })),
       };
     });
+
+    cartLogger.info(`Knapsack optimization complete: ${assignedMerchants.length} vendor(s), net spend: $${(netBuyerExpenditure / 100).toFixed(2)}, saved $${(totalRebate / 100).toFixed(2)} (${(savingsPercentage * 100).toFixed(1)}%), within budget: ${isWithinBudget}`);
 
     return {
       assigned_merchants: assignedMerchants,

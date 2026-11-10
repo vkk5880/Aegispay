@@ -9,8 +9,11 @@ import {
 } from '@paypal/paypal-server-sdk';
 import crypto from 'node:crypto';
 import dotenv from 'dotenv';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 
 dotenv.config();
+
+export const paypalLogger = createLogger('PayPal:APIMatic');
 
 export interface PayPalConfig {
   clientId: string;
@@ -393,8 +396,13 @@ export class PayPalApimaticClient {
     initialBackoffMs = 500
   ): Promise<Response> {
     let attempt = 0;
+    const method = options.method || 'GET';
+    paypalLogger.debug(`Outgoing PayPal HTTP Request -> [${method}] ${url}`);
+
     while (attempt <= maxRetries) {
+      const startTime = Date.now();
       const response = await fetch(url, options);
+      const elapsed = Date.now() - startTime;
 
       if (response.status === 429 && attempt < maxRetries) {
         attempt++;
@@ -405,8 +413,15 @@ export class PayPalApimaticClient {
           ? Math.min(parsedRetryAfter + jitter, 10000)
           : initialBackoffMs * Math.pow(2, attempt - 1) + jitter;
 
+        paypalLogger.warn(`PayPal HTTP 429 Rate Limited on ${url}. Retrying attempt ${attempt}/${maxRetries} after ${delayMs.toFixed(0)}ms (Retry-After: ${retryAfterHeader})...`);
         await this.sleep(delayMs);
         continue;
+      }
+
+      if (!response.ok) {
+        paypalLogger.warn(`PayPal HTTP Response <- [${method}] ${url} returned ${response.status} ${response.statusText} (${elapsed}ms)`);
+      } else {
+        paypalLogger.debug(`PayPal HTTP Response <- [${method}] ${url} status ${response.status} (${elapsed}ms)`);
       }
 
       return response;
@@ -443,10 +458,15 @@ export class PayPalApimaticClient {
             ? Math.min(parsedRetryAfter + jitter, 10000)
             : initialBackoffMs * Math.pow(2, attempt - 1) + jitter;
 
+          paypalLogger.warn(`PayPal SDK 429 Rate Limited. Retrying attempt ${attempt}/${maxRetries} after ${delayMs.toFixed(0)}ms...`);
           await this.sleep(delayMs);
           continue;
         }
 
+        paypalLogger.error(`PayPal SDK Operation Exception: ${err.message}`, {
+          statusCode: err.statusCode || err.status,
+          result: err.result,
+        });
         throw err;
       }
     }

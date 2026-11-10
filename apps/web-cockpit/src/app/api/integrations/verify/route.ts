@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/utils';
+import { apiLogger } from '@/lib/logger';
 
 export async function GET() {
   const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
+  apiLogger.debug('GET /api/integrations/verify checking upstream orchestrator...');
 
   try {
     const res = await fetch(`${orchestratorUrl}/api/integrations/verify`, {
@@ -13,10 +15,13 @@ export async function GET() {
 
     if (res.ok) {
       const data = await res.json();
+      apiLogger.debug('Upstream /api/integrations/verify returned healthy multi-sponsor ledger');
       return NextResponse.json(data);
+    } else {
+      apiLogger.warn(`Upstream /api/integrations/verify returned status ${res.status}`);
     }
-  } catch {
-    // Graceful fallback to verified simulated multi-track ledger
+  } catch (err: any) {
+    apiLogger.warn('Orchestrator unavailable for /api/integrations/verify, using local mock verification:', err?.message);
   }
 
   return NextResponse.json({

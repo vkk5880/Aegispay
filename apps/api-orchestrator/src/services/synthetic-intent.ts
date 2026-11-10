@@ -1,4 +1,7 @@
 import { PayPalApimaticClient, defaultPayPalClient } from './paypal-apimatic.js';
+import { createLogger } from '@aegispay/shared-types';
+
+export const syntheticLogger = createLogger('SyntheticIntent');
 
 export interface SyntheticIntentProposal {
   mandate_id: string;
@@ -49,6 +52,7 @@ export class SyntheticIntentEngine {
     const budgetCap = proposal.buyer_budget_cap_cents;
 
     if (retail <= budgetCap) {
+      syntheticLogger.debug(`Product ${proposal.channel3_product_id} retail ($${(retail/100).toFixed(2)}) is within budget ($${(budgetCap/100).toFixed(2)}). Direct checkout possible.`);
       return {
         eligible_for_synthetic_intent: false,
         overage_percentage: 0,
@@ -57,9 +61,11 @@ export class SyntheticIntentEngine {
     }
 
     const overagePercentage = Number((((retail - budgetCap) / budgetCap) * 100).toFixed(2));
+    syntheticLogger.debug(`Evaluated overage: ${overagePercentage}% for product ${proposal.channel3_product_id} (retail: $${(retail/100).toFixed(2)}, budgetCap: $${(budgetCap/100).toFixed(2)})`);
 
     // Section 4.3: When a buyer's desired basket exceeds budget cap by 5%-18%
     if (overagePercentage < 5.0 || overagePercentage > 18.0) {
+      syntheticLogger.debug(`Overage ${overagePercentage}% outside eligible range [5%, 18%].`);
       return {
         eligible_for_synthetic_intent: false,
         overage_percentage: overagePercentage,
