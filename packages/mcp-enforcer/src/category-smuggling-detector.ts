@@ -1,7 +1,11 @@
 import {
+  createLogger,
+  sanitizeForLogging,
   CategorySmugglingItem,
   CategorySmugglingCheckResult,
 } from '@aegispay/shared-types';
+
+const logger = createLogger('MCP:Enforcer:CategorySmuggling', { stream: 'stderr' });
 
 /**
  * Compiled regular expressions for prohibited financial instruments and high-risk assets.
@@ -39,7 +43,12 @@ function normalizeText(text: string): string {
   const deseparated = text
     .replace(/([a-zA-Z])\s*[-_.!@#$%^&*]\s*(?=[a-zA-Z])/gi, '$1')
     .replace(/\b([a-zA-Z])\s+(?=[a-zA-Z]\b)/gi, '$1');
-  return `${text} ${deseparated}`.toLowerCase();
+  const normalized = `${text} ${deseparated}`.toLowerCase();
+  logger.debug('Normalized text for category smuggling analysis', {
+    originalLength: text.length,
+    normalizedLength: normalized.length,
+  });
+  return normalized;
 }
 
 /**
@@ -50,13 +59,27 @@ export function detectCategorySmuggling(
   items: CategorySmugglingItem[],
   intentReason?: string
 ): CategorySmugglingCheckResult {
+  logger.info('Initiating category smuggling detection scan', {
+    itemsCount: items.length,
+    hasIntentReason: Boolean(intentReason),
+  });
+
   const detectedTokens: string[] = [];
 
   // 1. Scan intent reason if provided
   if (intentReason) {
     const normalizedReason = normalizeText(intentReason);
+    logger.debug('Scanning intent reason against prohibited patterns', {
+      reasonPrefix: intentReason.slice(0, 30),
+    });
+
     for (const pattern of PROHIBITED_PATTERNS) {
-      if (pattern.regex.test(normalizedReason)) {
+      const isMatched = pattern.regex.test(normalizedReason);
+      if (isMatched) {
+        logger.warn('Prohibited pattern matched in intent reason', {
+          token: pattern.name,
+          pattern: pattern.regex.toString(),
+        });
         if (!detectedTokens.includes(pattern.name)) {
           detectedTokens.push(pattern.name);
         }
@@ -65,13 +88,27 @@ export function detectCategorySmuggling(
   }
 
   // 2. Scan every individual line item
-  for (const item of items) {
+  for (let idx = 0; idx < items.length; idx++) {
+    const item = items[idx];
     const combinedItemText = normalizeText(
       `${item.title} ${item.description || ''} ${item.category || ''}`
     );
 
+    logger.debug('Scanning line item for category smuggling', {
+      itemIndex: idx,
+      title: item.title,
+      category: item.category,
+    });
+
     for (const pattern of PROHIBITED_PATTERNS) {
-      if (pattern.regex.test(combinedItemText)) {
+      const isMatched = pattern.regex.test(combinedItemText);
+      if (isMatched) {
+        logger.warn('Prohibited pattern matched in item details', {
+          itemIndex: idx,
+          itemTitle: item.title,
+          token: pattern.name,
+          pattern: pattern.regex.toString(),
+        });
         if (!detectedTokens.includes(pattern.name)) {
           detectedTokens.push(pattern.name);
         }
@@ -80,14 +117,26 @@ export function detectCategorySmuggling(
   }
 
   if (detectedTokens.length > 0) {
+    const blockReason = `Prohibited asset or category smuggling detected: [${detectedTokens.join(', ')}]. Transaction blocked under constitutional spend policy.`;
+    logger.error('Category smuggling detected: BLOCK verdict issued', {
+      detectedTokens,
+      scannedItemsCount: items.length,
+      verdict: 'BLOCK',
+    });
+
     return {
       is_smuggled: true,
       verdict: 'BLOCK',
       detected_tokens: detectedTokens,
-      reason: `Prohibited asset or category smuggling detected: [${detectedTokens.join(', ')}]. Transaction blocked under constitutional spend policy.`,
+      reason: blockReason,
       scanned_items_count: items.length,
     };
   }
+
+  logger.info('Category smuggling scan completed: ALLOW verdict issued', {
+    scannedItemsCount: items.length,
+    verdict: 'ALLOW',
+  });
 
   return {
     is_smuggled: false,

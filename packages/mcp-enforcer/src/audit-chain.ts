@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('MCP:Enforcer:AuditChain', { stream: 'stderr' });
 
 /**
  * Genesis hash for the initial block in the immutable hash chain.
@@ -40,9 +43,14 @@ export function validateCanonicalNode(node: unknown, path = '$'): void {
 
   if (typeof node === 'number') {
     if (!Number.isFinite(node)) {
+      logger.error('Canonical validation error: non-finite number detected', { path, value: node });
       throw new CanonicalisationError(`Non-finite number at ${path}: ${node}`);
     }
     if (!Number.isInteger(node)) {
+      logger.error('Canonical validation error: floating-point number detected in financial hash chain', {
+        path,
+        value: node,
+      });
       throw new CanonicalisationError(
         `float at ${path}: ${node}. Floats have no canonical form and must never enter the hash chain — use integer cents (custodian.money) or integer basis points (custodian.bp).`
       );
@@ -60,6 +68,7 @@ export function validateCanonicalNode(node: unknown, path = '$'): void {
   if (typeof node === 'object') {
     for (const [key, val] of Object.entries(node as Record<string, unknown>)) {
       if (typeof key !== 'string') {
+        logger.error('Canonical validation error: non-string key in object', { path, key: String(key) });
         throw new CanonicalisationError(`non-string key at ${path}: ${String(key)}`);
       }
       validateCanonicalNode(val, `${path}.${key}`);
@@ -67,6 +76,7 @@ export function validateCanonicalNode(node: unknown, path = '$'): void {
     return;
   }
 
+  logger.error('Canonical validation error: unserialisable type', { path, type: typeof node });
   throw new CanonicalisationError(`unserialisable type at ${path}: ${typeof node}`);
 }
 
@@ -105,7 +115,12 @@ export function canonicalJson(value: unknown): string {
  */
 export function canonicalHash(value: unknown): string {
   const jsonStr = canonicalJson(value);
-  return crypto.createHash('sha256').update(jsonStr, 'utf8').digest('hex');
+  const hash = crypto.createHash('sha256').update(jsonStr, 'utf8').digest('hex');
+  logger.debug('Calculated canonical SHA-256 hash', {
+    hashPrefix: hash.slice(0, 16),
+    byteLength: Buffer.byteLength(jsonStr, 'utf8'),
+  });
+  return hash;
 }
 
 /**
@@ -139,7 +154,14 @@ export function computeChainHash(params: {
     inferred: Record<string, unknown>;
   };
 }): string {
-  return canonicalHash({
+  logger.debug('Computing chain hash for audit link', {
+    prevHashPrefix: params.prev_hash.slice(0, 16),
+    eventId: params.event_id,
+    requestId: params.request_id,
+    eventType: params.event_type,
+  });
+
+  const hash = canonicalHash({
     prev_hash: params.prev_hash,
     event_id: params.event_id,
     request_id: params.request_id,
@@ -147,6 +169,12 @@ export function computeChainHash(params: {
     event_type: params.event_type,
     payload: params.payload,
   });
+
+  logger.debug('Computed chain hash for audit link successfully', {
+    eventId: params.event_id,
+    hashPrefix: hash.slice(0, 16),
+  });
+  return hash;
 }
 
 /**
@@ -168,11 +196,26 @@ export class AuditChain {
     event_id?: string;
     ts?: string;
   }): LedgerEvent {
+    logger.info('Appending event link to MCP immutable audit chain', {
+      requestId: params.request_id,
+      eventType: String(params.event_type),
+      currentChainLength: this.events.length,
+      hasExplicitEventId: Boolean(params.event_id),
+    });
+
     if (!params.observed || typeof params.observed !== 'object') {
+      logger.error('Audit chain append failed: observed is not a record/object', {
+        requestId: params.request_id,
+        type: typeof params.observed,
+      });
       throw new LedgerError('observed must be a record/object');
     }
     const inferred = params.inferred ?? {};
     if (typeof inferred !== 'object') {
+      logger.error('Audit chain append failed: inferred is not a record/object', {
+        requestId: params.request_id,
+        type: typeof inferred,
+      });
       throw new LedgerError('inferred must be a record/object');
     }
 
@@ -185,6 +228,13 @@ export class AuditChain {
       observed: params.observed,
       inferred,
     };
+
+    logger.debug('Calculating SHA-256 hash for audit chain event', {
+      seq,
+      eventId: event_id,
+      prevHashPrefix: prev_hash.slice(0, 16),
+      isGenesis: prev_hash === GENESIS_HASH,
+    });
 
     const hash = computeChainHash({
       prev_hash,
@@ -207,15 +257,29 @@ export class AuditChain {
     };
 
     this.events.push(Object.freeze(event));
+    logger.info('Successfully appended and sealed event in MCP audit chain', {
+      seq,
+      eventId: event_id,
+      hashPrefix: hash.slice(0, 16),
+      totalEvents: this.events.length,
+    });
     return event;
   }
 
   verifyChain(): boolean {
+    logger.info('Verifying MCP audit chain integrity', { totalEvents: this.events.length });
+
     for (let i = 0; i < this.events.length; i++) {
       const current = this.events[i];
       const expectedPrevHash = i === 0 ? GENESIS_HASH : this.events[i - 1].hash;
 
       if (current.prev_hash !== expectedPrevHash) {
+        logger.error('MCP audit chain integrity violation: previous hash mismatch', {
+          seq: current.seq,
+          eventId: current.event_id,
+          recordedPrevHashPrefix: current.prev_hash.slice(0, 16),
+          expectedPrevHashPrefix: expectedPrevHash.slice(0, 16),
+        });
         return false;
       }
 
@@ -229,9 +293,17 @@ export class AuditChain {
       });
 
       if (current.hash !== calculatedHash) {
+        logger.error('MCP audit chain integrity violation: hash recalculation mismatch', {
+          seq: current.seq,
+          eventId: current.event_id,
+          recordedHashPrefix: current.hash.slice(0, 16),
+          calculatedHashPrefix: calculatedHash.slice(0, 16),
+        });
         return false;
       }
     }
+
+    logger.info('MCP audit chain integrity successfully verified', { totalEvents: this.events.length });
     return true;
   }
 
@@ -240,11 +312,18 @@ export class AuditChain {
   }
 
   getEventsByRequestId(requestId: string): LedgerEvent[] {
-    return this.events.filter((e) => e.request_id === requestId);
+    const matches = this.events.filter((e) => e.request_id === requestId);
+    logger.debug('Queried MCP audit chain events by requestId', {
+      requestId,
+      matchedCount: matches.length,
+    });
+    return matches;
   }
 
   clear(): void {
+    const priorCount = this.events.length;
     this.events = [];
+    logger.info('Cleared MCP audit chain', { clearedEventsCount: priorCount });
   }
 }
 
@@ -258,6 +337,7 @@ export function appendVerdict(
   requestId: string,
   verdict: Record<string, unknown>
 ): LedgerEvent {
+  logger.info('Appending decision verdict to MCP audit chain', { requestId });
   return chain.append({
     request_id: requestId,
     event_type: LedgerEventType.DECISION_MADE,
@@ -266,6 +346,7 @@ export function appendVerdict(
 }
 
 export function verifyChainIntegrity(chain: AuditChain): boolean {
+  logger.debug('Invoking verifyChainIntegrity helper');
   return chain.verifyChain();
 }
 

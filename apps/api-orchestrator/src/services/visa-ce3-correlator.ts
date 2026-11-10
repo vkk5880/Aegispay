@@ -1,8 +1,12 @@
 import crypto from 'node:crypto';
 import {
+  createLogger,
+  sanitizeForLogging,
   VisaCe3Evidence,
   VisaCe3QualifyingTransaction,
 } from '@aegispay/shared-types';
+
+const logger = createLogger('API:Services:FinancialCustodian:VisaCe3');
 
 export interface OrderTelemetry {
   id: string;
@@ -33,7 +37,12 @@ export interface CurrentDisputeContext {
  */
 function normalizeAddress(addr?: string): string {
   if (!addr) return '';
-  return addr.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalized = addr.toLowerCase().replace(/[^a-z0-9]/g, '');
+  logger.debug('Normalized shipping address for Visa CE 3.0 comparison', {
+    originalLength: addr.length,
+    normalizedLength: normalized.length,
+  });
+  return normalized;
 }
 
 /**
@@ -41,7 +50,12 @@ function normalizeAddress(addr?: string): string {
  */
 function sha256Seal(data: unknown): string {
   const content = typeof data === 'string' ? data : JSON.stringify(data);
-  return crypto.createHash('sha256').update(content).digest('hex');
+  const hash = crypto.createHash('sha256').update(content).digest('hex');
+  logger.debug('Generated SHA-256 exhibit legal seal', {
+    hashPrefix: hash.slice(0, 16),
+    contentLength: content.length,
+  });
+  return hash;
 }
 
 /**
@@ -57,6 +71,16 @@ export function correlateVisaCe3Evidence(
   context: CurrentDisputeContext,
   historicalOrders: OrderTelemetry[]
 ): VisaCe3Evidence {
+  logger.info('Starting Visa Compelling Evidence 3.0 (Rule 10.4) transaction history scan', {
+    disputeId: context.dispute_id,
+    buyerId: context.buyer_id,
+    orderId: context.order.id,
+    historicalOrdersTotal: historicalOrders.length,
+    hasCurrentIp: Boolean(context.order.ip_address),
+    hasCurrentDevice: Boolean(context.order.device_fingerprint),
+    hasCurrentShippingAddress: Boolean(context.order.shipping_address),
+  });
+
   const current = context.order;
   const currentNormAddress = normalizeAddress(current.shipping_address);
 
@@ -68,34 +92,51 @@ export function correlateVisaCe3Evidence(
       !order.has_dispute
   );
 
+  logger.info('Filtered undisputed settled historical orders', {
+    totalEvaluated: historicalOrders.length,
+    undisputedSettledCount: undisputedOrders.length,
+  });
+
   // 2. Identify qualifying transactions matching >= 1 core qualifier
   const qualifyingTransactions: VisaCe3QualifyingTransaction[] = [];
 
   for (const pastOrder of undisputedOrders) {
     const matchedQualifiers: ('IP_ADDRESS' | 'DEVICE_FINGERPRINT' | 'SHIPPING_ADDRESS' | 'CUSTOMER_ACCOUNT_ID')[] = [];
 
-    if (current.ip_address && pastOrder.ip_address && current.ip_address === pastOrder.ip_address) {
+    const ipMatched = Boolean(current.ip_address && pastOrder.ip_address && current.ip_address === pastOrder.ip_address);
+    if (ipMatched) {
       matchedQualifiers.push('IP_ADDRESS');
     }
 
-    if (
+    const deviceMatched = Boolean(
       current.device_fingerprint &&
       pastOrder.device_fingerprint &&
       current.device_fingerprint === pastOrder.device_fingerprint
-    ) {
+    );
+    if (deviceMatched) {
       matchedQualifiers.push('DEVICE_FINGERPRINT');
     }
 
-    if (
+    const addressMatched = Boolean(
       currentNormAddress &&
       pastOrder.shipping_address &&
       currentNormAddress === normalizeAddress(pastOrder.shipping_address)
-    ) {
+    );
+    if (addressMatched) {
       matchedQualifiers.push('SHIPPING_ADDRESS');
     }
 
     // Every order in this buyer history matches the verified PayPal customer identity
     matchedQualifiers.push('CUSTOMER_ACCOUNT_ID');
+
+    logger.debug('Evaluated past order against Visa CE 3.0 matching qualifiers', {
+      pastOrderId: pastOrder.id,
+      ipMatched,
+      deviceMatched,
+      addressMatched,
+      accountMatched: true,
+      totalMatchedQualifiers: matchedQualifiers.length,
+    });
 
     // A qualifying transaction must have at least 2 matching attributes (Account + at least 1 device/network/location anchor)
     if (matchedQualifiers.length >= 2) {
@@ -106,11 +147,29 @@ export function correlateVisaCe3Evidence(
         currency: 'USD',
         matched_qualifiers: matchedQualifiers,
       });
+      logger.info('Identified qualifying Visa CE 3.0 transaction', {
+        orderId: pastOrder.id,
+        settledAt: pastOrder.settled_at,
+        amountCents: pastOrder.amount_cents,
+        matchedQualifiers,
+      });
     }
   }
 
+  logger.info('Visa CE 3.0 qualifier evaluation summary', {
+    disputeId: context.dispute_id,
+    qualifyingTransactionsCount: qualifyingTransactions.length,
+    requiredCount: 2,
+  });
+
   // 3. GUARDRAIL 3 CHECK: Minimum 2 qualifying transactions required under Visa Core Rule 10.4
   if (qualifyingTransactions.length < 2) {
+    logger.warn('Visa CE 3.0 eligibility check failed: insufficient historical qualifying transactions', {
+      disputeId: context.dispute_id,
+      qualifyingCount: qualifyingTransactions.length,
+      fallbackMode: 'STANDARD_PAYPAL_EVIDENCE_REBUTTAL',
+    });
+
     return {
       dispute_id: context.dispute_id,
       buyer_id: context.buyer_id,
@@ -131,6 +190,11 @@ export function correlateVisaCe3Evidence(
 
   // 4. Eligible: Compute correlation confidence and generate court-ready legal brief
   const confidence = qualifyingTransactions.length >= 3 ? 98 : 92;
+  logger.info('Visa CE 3.0 eligibility confirmed: generating court-ready rebuttal dossier', {
+    disputeId: context.dispute_id,
+    confidence,
+    qualifyingTransactionsCount: qualifyingTransactions.length,
+  });
 
   const brief = [
     `FORMAL REBUTTAL & EVIDENCE DOSSIER UNDER VISA COMPELLING EVIDENCE 3.0 (RULE 10.4)`,
@@ -162,6 +226,12 @@ export function correlateVisaCe3Evidence(
       sha256: sha256Seal(brief),
     },
   ];
+
+  logger.info('Sealed Visa CE 3.0 exhibits with SHA-256 cryptographic hashes', {
+    disputeId: context.dispute_id,
+    exhibitsCount: exhibitHashes.length,
+    confidence,
+  });
 
   return {
     dispute_id: context.dispute_id,
