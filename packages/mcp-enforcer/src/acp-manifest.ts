@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import {
   toolHandlers,
   OptimizeBasketSchema,
@@ -11,6 +12,8 @@ import {
   AcpAddressSchema,
   AcpCartBuyerSchema,
 } from '@aegispay/shared-types';
+
+const logger = createLogger('MCP:Enforcer:ACPManifest', { stream: 'stderr' });
 
 /**
  * OpenAI Agentic Commerce Protocol (ACP) Manifest Specification
@@ -867,6 +870,11 @@ export const ACP_MANIFEST: ACPManifest = {
 export const acp_version = '2026-01-30';
 
 export function generateACPManifest(): ACPManifest {
+  logger.debug('Generating ACP discovery manifest', {
+    protocol: ACP_MANIFEST.protocol,
+    actionsCount: ACP_MANIFEST.actions.length,
+    handlersCount: ACP_MANIFEST.capabilities?.payment_handlers.length,
+  });
   return ACP_MANIFEST;
 }
 
@@ -887,10 +895,18 @@ export class ACPValidationError extends Error {
 }
 
 export async function executeACPAction(actionName: string, params: Record<string, any>) {
+  const endTimer = logger.time(`ACP:Action:${actionName}`);
+  logger.info(`Executing ACP action: ${actionName}`, sanitizeForLogging(params));
+
   try {
     switch (actionName) {
       case 'discover_products': {
+        logger.debug('Validating ACP discover_products payload');
         const parsed = ACPDiscoverProductsSchema.parse(params);
+        logger.debug('Dispatching discover_products to handleOptimizeBasket', {
+          allowanceVoucherId: parsed.allowance_voucher_id,
+          hasQuery: Boolean(parsed.query),
+        });
         const res = await toolHandlers.handleOptimizeBasket({
           allowance_voucher_id: parsed.allowance_voucher_id,
           search_query: parsed.query,
@@ -898,52 +914,113 @@ export async function executeACPAction(actionName: string, params: Record<string
           hex_color: parsed.hex_color,
           image_url: parsed.image_url,
         });
+        logger.info('ACP discover_products executed successfully');
+        endTimer('Completed discover_products');
         return { action: 'discover_products', result: res };
       }
       case 'request_purchase_quote': {
+        logger.debug('Validating ACP request_purchase_quote payload');
         const parsed = ACPRequestPurchaseQuoteSchema.parse(params);
+        logger.debug('Dispatching request_purchase_quote to handleBroadcastIntent', {
+          mandateId: parsed.mandate_id,
+          merchantDomain: parsed.merchant_domain,
+          bidCents: parsed.buyer_bid_cents,
+        });
         const res = await toolHandlers.handleBroadcastIntent(parsed);
+        logger.info('ACP request_purchase_quote executed successfully');
+        endTimer('Completed request_purchase_quote');
         return { action: 'request_purchase_quote', result: res };
       }
       case 'create_checkout_session': {
+        logger.debug('Validating ACP create_checkout_session payload');
         const parsed = ACPMCPCreateCheckoutSessionSchema.parse(params);
+        logger.debug('Dispatching create_checkout_session to handleCreateCheckoutSession', {
+          apiVersion: parsed.meta.api_version,
+          itemCount: parsed.payload.items.length,
+        });
         const res = await toolHandlers.handleCreateCheckoutSession(parsed);
+        logger.info('ACP create_checkout_session executed successfully');
+        endTimer('Completed create_checkout_session');
         return { action: 'create_checkout_session', result: res };
       }
       case 'get_checkout_session': {
+        logger.debug('Validating ACP get_checkout_session payload');
         const parsed = ACPMCPGetCheckoutSessionSchema.parse(params);
+        logger.debug('Dispatching get_checkout_session to handleGetCheckoutSession', { id: parsed.id });
         const res = await toolHandlers.handleGetCheckoutSession(parsed);
+        logger.info('ACP get_checkout_session executed successfully');
+        endTimer('Completed get_checkout_session');
         return { action: 'get_checkout_session', result: res };
       }
       case 'update_checkout_session': {
+        logger.debug('Validating ACP update_checkout_session payload');
         const parsed = ACPMCPUpdateCheckoutSessionSchema.parse(params);
+        logger.debug('Dispatching update_checkout_session to handleUpdateCheckoutSession', { id: parsed.id });
         const res = await toolHandlers.handleUpdateCheckoutSession(parsed);
+        logger.info('ACP update_checkout_session executed successfully');
+        endTimer('Completed update_checkout_session');
         return { action: 'update_checkout_session', result: res };
       }
       case 'complete_checkout_session': {
+        logger.debug('Validating ACP complete_checkout_session payload');
         const parsed = ACPMCPCompleteCheckoutSessionSchema.parse(params);
+        logger.debug('Dispatching complete_checkout_session to handleCompleteCheckoutSession', {
+          id: parsed.id,
+          paymentType: parsed.payload.payment_method.type,
+        });
         const res = await toolHandlers.handleCompleteCheckoutSession(parsed);
+        logger.info('ACP complete_checkout_session executed successfully');
+        endTimer('Completed complete_checkout_session');
         return { action: 'complete_checkout_session', result: res };
       }
       case 'cancel_checkout_session': {
+        logger.debug('Validating ACP cancel_checkout_session payload');
         const parsed = ACPMCPCancelCheckoutSessionSchema.parse(params);
+        logger.debug('Dispatching cancel_checkout_session to handleCancelCheckoutSession', {
+          id: parsed.id,
+          reason: parsed.payload?.reason,
+        });
         const res = await toolHandlers.handleCancelCheckoutSession(parsed);
+        logger.info('ACP cancel_checkout_session executed successfully');
+        endTimer('Completed cancel_checkout_session');
         return { action: 'cancel_checkout_session', result: res };
       }
       case 'confirm_payment_hold': {
+        logger.debug('Validating ACP confirm_payment_hold payload');
         const parsed = ACPConfirmPaymentHoldSchema.parse(params);
+        logger.debug('Dispatching confirm_payment_hold to handleAuthorizeEscrow', {
+          mandateId: parsed.mandate_id,
+          merchantDomain: parsed.merchant_domain,
+          requestedCents: parsed.requested_cents,
+        });
         const res = await toolHandlers.handleAuthorizeEscrow(parsed);
+        logger.info('ACP confirm_payment_hold executed successfully');
+        endTimer('Completed confirm_payment_hold');
         return { action: 'confirm_payment_hold', result: res };
       }
-      default:
+      default: {
+        logger.error(`Unsupported ACP action requested: ${actionName}`);
+        endTimer('Unsupported action');
         throw new ACPValidationError(
           `Unsupported ACP action: ${actionName}. Supported actions: discover_products, request_purchase_quote, confirm_payment_hold, create_checkout_session, get_checkout_session, update_checkout_session, complete_checkout_session, cancel_checkout_session`
         );
+      }
     }
   } catch (err: any) {
     if (err instanceof z.ZodError) {
+      logger.error(`ACP validation failed for action ${actionName}`, {
+        errors: err.errors,
+        actionName,
+      });
+      endTimer('Schema validation error');
       throw new ACPValidationError(`Invalid params: ${err.message}`, err.errors);
     }
+    logger.error(`ACP action execution failure: ${actionName}`, {
+      error: err?.message,
+      stack: err?.stack,
+      actionName,
+    });
+    endTimer('Execution exception');
     throw err;
   }
 }
@@ -985,8 +1062,13 @@ export interface BazaarDiscoveryManifest {
  * Validates route configuration to check whether Bazaar discovery metadata is present
  */
 export function checkIfBazaarNeeded(routes: Record<string, any>): boolean {
-  if (!routes || typeof routes !== 'object') return false;
-  return Object.values(routes).some(r => r && (r.bazaar || (r.extensions && r.extensions['bazaar'])));
+  if (!routes || typeof routes !== 'object') {
+    logger.debug('checkIfBazaarNeeded evaluated false: invalid or non-object routes');
+    return false;
+  }
+  const isNeeded = Object.values(routes).some(r => r && (r.bazaar || (r.extensions && r.extensions['bazaar'])));
+  logger.debug('checkIfBazaarNeeded evaluated', { isNeeded, totalRoutes: Object.keys(routes).length });
+  return isNeeded;
 }
 
 /**
@@ -994,24 +1076,40 @@ export function checkIfBazaarNeeded(routes: Record<string, any>): boolean {
  */
 export function validateBazaarRouteExtensions(routes: Record<string, any>): { isValid: boolean; errors: string[] } {
   const errors: string[] = [];
-  if (!routes || typeof routes !== 'object') return { isValid: true, errors };
+  if (!routes || typeof routes !== 'object') {
+    logger.debug('validateBazaarRouteExtensions: empty or non-object routes passed');
+    return { isValid: true, errors };
+  }
+
+  logger.debug('Validating Bazaar route extensions', { routeCount: Object.keys(routes).length });
 
   for (const [path, config] of Object.entries(routes)) {
     // Validate path template syntax: {param}
     const matches = path.match(/\{[^}]*\}/g) || [];
     for (const m of matches) {
       if (m === '{}' || m.includes(' ') || m.includes('/')) {
-        errors.push(`Invalid route parameter syntax in path "${path}": ${m}`);
+        const err = `Invalid route parameter syntax in path "${path}": ${m}`;
+        logger.warn('Bazaar route parameter validation error', { path, error: err });
+        errors.push(err);
       }
     }
 
     const bazaarConfig = config?.bazaar || config?.extensions?.['bazaar'];
     if (bazaarConfig?.input?.type === 'mcp' && !bazaarConfig.input.toolName) {
-      errors.push(`Bazaar MCP route "${path}" missing required toolName`);
+      const err = `Bazaar MCP route "${path}" missing required toolName`;
+      logger.warn('Bazaar MCP route missing toolName', { path });
+      errors.push(err);
     }
   }
 
-  return { isValid: errors.length === 0, errors };
+  const isValid = errors.length === 0;
+  if (!isValid) {
+    logger.warn('validateBazaarRouteExtensions completed with validation errors', { errorsCount: errors.length });
+  } else {
+    logger.debug('validateBazaarRouteExtensions passed successfully');
+  }
+
+  return { isValid, errors };
 }
 
 /**
@@ -1024,6 +1122,12 @@ export function generateBazaarDiscoveryManifest(options: {
   customTools?: any[];
 }): BazaarDiscoveryManifest {
   const { origin, routes = {}, customTools = [] } = options;
+  logger.info('Generating dynamic Bazaar discovery manifest', {
+    origin,
+    routeCount: Object.keys(routes).length,
+    customToolsCount: customTools.length,
+  });
+
   const manifest: BazaarDiscoveryManifest = {
     version: '2',
     timestamp: new Date().toISOString(),
@@ -1068,6 +1172,10 @@ export function generateBazaarDiscoveryManifest(options: {
       });
     }
   }
+
+  logger.info('Generated Bazaar discovery manifest successfully', {
+    totalIndexedResources: manifest.resources.length,
+  });
 
   return manifest;
 }

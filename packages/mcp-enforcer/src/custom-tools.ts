@@ -1,10 +1,13 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging as sharedSanitizeForLogging } from '@aegispay/shared-types';
 import { verifySessionMandateSignature } from './ed25519-verifier.js';
 import { calculateMerchantAnomalyScore, isMerchantAllowed } from './merchant-anomaly-gate.js';
 import { defaultAtomicSpendEnforcer, AtomicSpendEnforcer } from './redis-lua-enforcer.js';
 import { defaultAuditChain } from './audit-chain.js';
 import type { SpendMandate } from '@aegispay/shared-types';
+
+const logger = createLogger('MCP:Enforcer:Tools', { stream: 'stderr' });
 
 /**
  * Validates that an image URL points to a public, safe endpoint and prevents SSRF attacks.
@@ -21,6 +24,7 @@ export function validatePublicImageUrl(urlStr: string): boolean {
   try {
     const parsed = new URL(urlStr);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      logger.warn('SSRF defense rejected non-http/https protocol', { protocol: parsed.protocol, url: urlStr });
       return false;
     }
 
@@ -33,6 +37,7 @@ export function validatePublicImageUrl(urlStr: string): boolean {
       hostname === '[::1]' ||
       hostname === '::1'
     ) {
+      logger.warn('SSRF defense rejected loopback/localhost hostname', { hostname });
       return false;
     }
 
@@ -52,42 +57,51 @@ export function validatePublicImageUrl(urlStr: string): boolean {
       const octet4 = parseInt(ipMatch[4], 10);
 
       if (octet1 > 255 || octet2 > 255 || octet3 > 255 || octet4 > 255) {
+        logger.warn('SSRF defense rejected invalid IPv4 octet bounds', { ipMatch: cleanHost });
         return false;
       }
 
       // Loopback: 127.0.0.0/8
       if (octet1 === 127) {
+        logger.warn('SSRF defense rejected loopback 127.0.0.0/8 address', { ip: cleanHost });
         return false;
       }
 
       // Link-local / AWS/GCP cloud metadata: 169.254.0.0/16 (169.254.169.254)
       if (octet1 === 169 && octet2 === 254) {
+        logger.warn('SSRF defense rejected cloud link-local metadata address 169.254.0.0/16', { ip: cleanHost });
         return false;
       }
 
       // RFC 1918 Private Subnet: 10.0.0.0/8
       if (octet1 === 10) {
+        logger.warn('SSRF defense rejected private RFC 1918 10.0.0.0/8 address', { ip: cleanHost });
         return false;
       }
 
       // RFC 1918 Private Subnet: 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
       if (octet1 === 172 && octet2 >= 16 && octet2 <= 31) {
+        logger.warn('SSRF defense rejected private RFC 1918 172.16.0.0/12 address', { ip: cleanHost });
         return false;
       }
 
       // RFC 1918 Private Subnet: 192.168.0.0/16
       if (octet1 === 192 && octet2 === 168) {
+        logger.warn('SSRF defense rejected private RFC 1918 192.168.0.0/16 address', { ip: cleanHost });
         return false;
       }
 
       // 0.0.0.0/8
       if (octet1 === 0) {
+        logger.warn('SSRF defense rejected 0.0.0.0/8 address', { ip: cleanHost });
         return false;
       }
     }
 
+    logger.debug('SSRF defense approved public image URL', { hostname: cleanHost });
     return true;
-  } catch {
+  } catch (err: any) {
+    logger.error('SSRF validation threw an error during URL parsing', { error: err?.message, url: urlStr });
     return false;
   }
 }
@@ -95,26 +109,32 @@ export function validatePublicImageUrl(urlStr: string): boolean {
 /**
  * Helper to redact sensitive tokens/signatures before logging to stderr.
  */
-function sanitizeForLogging(obj: any): any {
+export function sanitizeForLogging(obj: any): any {
   if (!obj || typeof obj !== 'object') return obj;
-  const clone = Array.isArray(obj) ? [...obj] : { ...obj };
-  for (const key of Object.keys(clone)) {
-    if (typeof clone[key] === 'string') {
-      const lowerKey = key.toLowerCase();
-      if (
-        lowerKey.includes('token') ||
-        lowerKey.includes('secret') ||
-        lowerKey.includes('signature') ||
-        lowerKey.includes('auth') ||
-        lowerKey.includes('key')
-      ) {
-        clone[key] = '[REDACTED]';
+  try {
+    const sharedClean = sharedSanitizeForLogging(obj);
+    if (!sharedClean || typeof sharedClean !== 'object') return sharedClean;
+    const clone = Array.isArray(sharedClean) ? [...sharedClean] : { ...sharedClean };
+    for (const key of Object.keys(clone)) {
+      if (typeof clone[key] === 'string') {
+        const lowerKey = key.toLowerCase();
+        if (
+          lowerKey.includes('token') ||
+          lowerKey.includes('secret') ||
+          lowerKey.includes('signature') ||
+          lowerKey.includes('auth') ||
+          lowerKey.includes('key')
+        ) {
+          clone[key] = '[REDACTED]';
+        }
+      } else if (typeof clone[key] === 'object' && clone[key] !== null) {
+        clone[key] = sanitizeForLogging(clone[key]);
       }
-    } else if (typeof clone[key] === 'object' && clone[key] !== null) {
-      clone[key] = sanitizeForLogging(clone[key]);
     }
+    return clone;
+  } catch {
+    return '[SANITIZATION_FAILED]';
   }
-  return clone;
 }
 
 // 1. optimize_channel3_multi_merchant_basket
@@ -269,38 +289,64 @@ export interface ProposeDisputeSettlementResult {
 export const toolHandlers = {
   async handleOptimizeBasket(args: z.infer<typeof OptimizeBasketSchema>): Promise<OptimizeBasketResult> {
     console.error('[MCP Enforcer] Optimizing basket...', sanitizeForLogging(args));
-    if (args.items && args.items.length > 0) {
-      const merchantMap = new Map<string, any[]>();
-      let totalCents = 0;
-      for (const item of args.items) {
-        totalCents += item.price_cents * (item.quantity ?? 1);
-        const list = merchantMap.get(item.merchant_domain) || [];
-        list.push(item);
-        merchantMap.set(item.merchant_domain, list);
+    const endTimer = logger.time('Tool:optimize_channel3_multi_merchant_basket');
+    logger.info('[MCP Enforcer] Optimizing basket...', sanitizeForLogging(args));
+    try {
+      if (args.items && args.items.length > 0) {
+        logger.debug('Optimizing basket across merchant items', { itemCount: args.items.length });
+        const merchantMap = new Map<string, any[]>();
+        let totalCents = 0;
+        for (const item of args.items) {
+          totalCents += item.price_cents * (item.quantity ?? 1);
+          const list = merchantMap.get(item.merchant_domain) || [];
+          list.push(item);
+          merchantMap.set(item.merchant_domain, list);
+        }
+        const assignments = Array.from(merchantMap.entries()).map(([merchant_domain, items]) => ({
+          merchant_domain,
+          items,
+        }));
+        logger.info('Basket optimization computed successfully', {
+          totalCents,
+          merchantCount: assignments.length,
+        });
+        endTimer('Completed basket multi-vendor assignment');
+        return {
+          basket_total_cents: totalCents,
+          assignments,
+          net_buyer_expenditure_cents: totalCents,
+        };
       }
-      const assignments = Array.from(merchantMap.entries()).map(([merchant_domain, items]) => ({
-        merchant_domain,
-        items,
-      }));
+      logger.debug('Empty items list provided for basket optimization');
+      endTimer('Completed with empty basket');
       return {
-        basket_total_cents: totalCents,
-        assignments,
-        net_buyer_expenditure_cents: totalCents,
+        basket_total_cents: 0,
+        assignments: [],
+        net_buyer_expenditure_cents: 0,
       };
+    } catch (err: any) {
+      logger.error('Failed to optimize multi-merchant basket', { error: err?.message, stack: err?.stack });
+      endTimer('Failed basket optimization');
+      throw err;
     }
-    return {
-      basket_total_cents: 0,
-      assignments: [],
-      net_buyer_expenditure_cents: 0,
-    };
   },
 
   async handleAuthorizeEscrow(args: z.infer<typeof AuthorizeEscrowOrderSchema>): Promise<AuthorizeEscrowOrderResult> {
     console.error('[MCP Enforcer] Authorizing escrow...', sanitizeForLogging(args));
+    const endTimer = logger.time('Tool:authorize_conditional_escrow_order');
+    logger.info('[MCP Enforcer] Authorizing escrow...', sanitizeForLogging(args));
 
     // Sequential 4-Stage Custodian Verification Gate:
     // Stage 1: Line-item arithmetic integrity and budget cap enforcement (float-safe integer checks)
+    logger.debug('Custodian Gate Stage 1: Checking line-item arithmetic and budget cap bounds', {
+      requestedCents: args.requested_cents,
+      itemCount: args.items?.length,
+    });
     if (!Number.isSafeInteger(args.requested_cents) || args.requested_cents <= 0) {
+      logger.error('Custodian Gate Stage 1 Failed: Non-safe integer or non-positive requested_cents', {
+        requestedCents: args.requested_cents,
+      });
+      endTimer('Stage 1 failure');
       throw new Error('ERR_INVALID_SPEND_AMOUNT: requested_cents must be a positive integer');
     }
     for (const item of args.items) {
@@ -310,33 +356,71 @@ export const toolHandlers = {
         !Number.isSafeInteger(item.quantity) ||
         item.quantity <= 0
       ) {
+        logger.error('Custodian Gate Stage 1 Failed: Invalid item arithmetic', sanitizeForLogging(item));
+        endTimer('Stage 1 failure');
         throw new Error('ERR_INVALID_ITEM_ARITHMETIC: item price_cents and quantity must be positive safe integers');
       }
     }
 
     const calculatedSum = args.items.reduce((sum, item) => sum + item.price_cents * item.quantity, 0);
     if (args.requested_cents !== calculatedSum) {
+      logger.error('Custodian Gate Stage 1 Failed: Requested cents mismatch sum of line items', {
+        requestedCents: args.requested_cents,
+        calculatedSum,
+      });
+      endTimer('Stage 1 mismatch');
       throw new Error('requested_cents must strictly equal the sum of (price_cents * quantity) across all items');
     }
 
     if (args.mandate) {
+      logger.debug('Custodian Gate Stage 1: Checking mandate caps', {
+        requestedCents: args.requested_cents,
+        maxTotal: args.mandate.max_total_spend_cents,
+        maxMerchant: args.mandate.max_single_merchant_cents,
+      });
       if (args.requested_cents > args.mandate.max_total_spend_cents) {
+        logger.error('Custodian Gate Stage 1 Failed: Exceeds total mandate budget', {
+          requestedCents: args.requested_cents,
+          maxTotal: args.mandate.max_total_spend_cents,
+        });
+        endTimer('Budget cap violation');
         throw new Error('ERR_EXCEEDS_TOTAL_MANDATE_BUDGET');
       }
       if (args.requested_cents > args.mandate.max_single_merchant_cents) {
+        logger.error('Custodian Gate Stage 1 Failed: Exceeds single merchant exposure cap', {
+          requestedCents: args.requested_cents,
+          maxMerchant: args.mandate.max_single_merchant_cents,
+        });
+        endTimer('Merchant cap violation');
         throw new Error('ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP');
       }
     }
+    logger.info('Custodian Gate Stage 1 Passed: Arithmetic and cap constraints verified');
 
     // Stage 2: Ed25519 Cryptographic Signature Verification against buyer public key
     if (args.mandate) {
+      logger.debug('Custodian Gate Stage 2: Verifying Ed25519 session mandate signature', {
+        mandateId: args.mandate.mandate_id,
+      });
       const isSignatureValid = await verifySessionMandateSignature(args.mandate);
       if (!isSignatureValid) {
+        logger.error('Custodian Gate Stage 2 Failed: Ed25519 signature verification rejected', {
+          mandateId: args.mandate.mandate_id,
+        });
+        endTimer('Signature verification failure');
         throw new Error('ED25519_SIGNATURE_VERIFICATION_FAILED');
       }
+      logger.info('Custodian Gate Stage 2 Passed: Ed25519 signature cryptographically verified');
+    } else {
+      logger.debug('Custodian Gate Stage 2 Skipped: No mandate object provided in payload');
     }
 
     // Stage 3: Merchant Anomaly Gate check (reject score > 300 / 1000 basis points threshold for risk)
+    logger.debug('Custodian Gate Stage 3: Evaluating merchant anomaly risk', {
+      domain: args.merchant_domain,
+      disputeRate: args.merchant_dispute_rate ?? 0,
+      discountVariance: args.merchant_discount_variance ?? 0,
+    });
     const anomalyScore = calculateMerchantAnomalyScore({
       domain: args.merchant_domain,
       disputeRate: args.merchant_dispute_rate ?? 0,
@@ -344,10 +428,22 @@ export const toolHandlers = {
     });
 
     if (!isMerchantAllowed(anomalyScore)) {
+      logger.error('Custodian Gate Stage 3 Failed: Merchant anomaly score exceeded risk threshold', {
+        domain: args.merchant_domain,
+        anomalyScore,
+        threshold: 300,
+      });
+      endTimer('Merchant anomaly failure');
       throw new Error(`ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED: score ${anomalyScore}`);
     }
+    logger.info('Custodian Gate Stage 3 Passed: Merchant anomaly within risk bounds', { anomalyScore });
 
     // Stage 4: Single-threaded Redis Lua reserveBudget() pre-reservation using {vch_<mandate_id>} hash tags
+    logger.debug('Custodian Gate Stage 4: Atomic Redis Lua spend reservation', {
+      mandateId: args.mandate_id,
+      merchantDomain: args.merchant_domain,
+      requestedCents: args.requested_cents,
+    });
     let newSpent = args.requested_cents;
     const enforcer = args.spend_enforcer || defaultAtomicSpendEnforcer;
 
@@ -355,6 +451,11 @@ export const toolHandlers = {
     const isProduction = process.env.NODE_ENV === 'production';
     const hasRedisConfig = Boolean(process.env.REDIS_URL);
     if (!args.redis_client && (isProduction || hasRedisConfig)) {
+      logger.error('Custodian Gate Stage 4 Failed: Fail-closed Redis required in production/configured environment', {
+        isProduction,
+        hasRedisConfig,
+      });
+      endTimer('Redis fail-closed');
       throw new Error(
         'ERR_FAIL_CLOSED_REDIS_REQUIRED: Autonomous spend authorization strictly requires an active Redis enforcer in production'
       );
@@ -362,6 +463,7 @@ export const toolHandlers = {
 
     if (args.redis_client) {
       try {
+        logger.debug('Invoking AtomicSpendEnforcer.reserveBudget with Redis client');
         const reservation = await enforcer.reserveBudget(args.redis_client, {
           mandate_id: args.mandate_id,
           merchant_domain: args.merchant_domain,
@@ -372,18 +474,34 @@ export const toolHandlers = {
         });
 
         if (!reservation.success) {
+          logger.error('Custodian Gate Stage 4 Failed: Redis Lua spend reservation rejected', {
+            errorCode: reservation.error_code,
+            mandateId: args.mandate_id,
+          });
+          endTimer('Spend reservation rejection');
           throw new Error(reservation.error_code || 'ERR_BUDGET_RESERVATION_FAILED');
         }
 
         newSpent = reservation.new_spent ?? args.requested_cents;
+        logger.info('Custodian Gate Stage 4 Passed: Redis Lua spend reservation succeeded', {
+          mandateId: args.mandate_id,
+          newSpent,
+        });
       } catch (err: any) {
         // Strict fail-closed policy: sanitize error to prevent internal connection string/token leakage
         const rawMsg = err?.message || 'ERR_BUDGET_RESERVATION_FAILED';
         const sanitized = rawMsg
           .replace(/redis[s]?:\/\/[^\s@]+@[^\s/]+/gi, 'redis://[REDACTED]')
           .replace(/password=[^\s&]+/gi, 'password=[REDACTED]');
+        logger.error('Redis Lua reservation encountered exception, failing closed', {
+          sanitizedError: sanitized,
+          stack: err?.stack,
+        });
+        endTimer('Redis exception');
         throw new Error(sanitized);
       }
+    } else {
+      logger.warn('Custodian Gate Stage 4: Executing in local mock mode without active Redis client');
     }
 
     const uniqueEntropy = crypto.randomUUID().slice(0, 12);
@@ -391,6 +509,7 @@ export const toolHandlers = {
     const invoiceId = `inv_${args.merchant_domain}_${uniqueEntropy}`;
 
     // Port immutable hash-chained audit logging from Custodian chain.py
+    logger.debug('Appending authorization event to immutable audit chain', { orderId, invoiceId });
     const auditEvent = defaultAuditChain.append({
       request_id: args.mandate_id,
       event_type: 'PAYMENT_INITIATED',
@@ -410,6 +529,13 @@ export const toolHandlers = {
       },
     });
 
+    logger.info('Escrow authorization complete and audit sealed', {
+      orderId,
+      invoiceId,
+      auditHash: auditEvent.hash,
+    });
+    endTimer('Escrow authorization completed successfully');
+
     return {
       paypal_order_id: orderId,
       invoice_id: invoiceId,
@@ -422,38 +548,103 @@ export const toolHandlers = {
 
   async handleBroadcastIntent(args: z.infer<typeof BroadcastSyntheticIntentSchema>): Promise<BroadcastSyntheticIntentResult> {
     console.error('[MCP Enforcer] Broadcasting synthetic intent...', sanitizeForLogging(args));
-    const entropy = crypto.randomUUID().slice(0, 12);
-    return {
-      voucher_id: `syn_${args.mandate_id.slice(0, 8)}_${entropy}`,
-      setup_token_id: `set_${entropy}`,
-      status: 'BROADCASTED'
-    };
+    const endTimer = logger.time('Tool:broadcast_synthetic_intent_voucher');
+    logger.info('[MCP Enforcer] Broadcasting synthetic intent...', sanitizeForLogging(args));
+    try {
+      const entropy = crypto.randomUUID().slice(0, 12);
+      const voucherId = `syn_${args.mandate_id.slice(0, 8)}_${entropy}`;
+      const setupTokenId = `set_${entropy}`;
+      logger.info('Synthetic intent voucher created', {
+        voucherId,
+        setupTokenId,
+        bidCents: args.buyer_bid_cents,
+        retailCents: args.retail_offer_cents,
+        merchantDomain: args.merchant_domain,
+      });
+      endTimer('Completed broadcasting intent voucher');
+      return {
+        voucher_id: voucherId,
+        setup_token_id: setupTokenId,
+        status: 'BROADCASTED',
+      };
+    } catch (err: any) {
+      logger.error('Failed to broadcast synthetic intent voucher', { error: err?.message, stack: err?.stack });
+      endTimer('Failed broadcast intent');
+      throw err;
+    }
   },
 
   async handleVoidOrCapture(args: z.infer<typeof VoidOrCaptureEscrowSchema>): Promise<VoidOrCaptureEscrowResult> {
     console.error('[MCP Enforcer] Voiding or capturing...', sanitizeForLogging(args));
-    return {
-      status: args.action === 'CAPTURE' ? 'CAPTURED' : 'VOIDED',
-      transaction_id: `tx_${args.authorization_id}_${crypto.randomUUID().slice(0, 8)}`
-    };
+    const endTimer = logger.time('Tool:void_or_capture_escrow_hold');
+    logger.info('[MCP Enforcer] Voiding or capturing...', sanitizeForLogging(args));
+    try {
+      const status = args.action === 'CAPTURE' ? 'CAPTURED' : 'VOIDED';
+      const txId = `tx_${args.authorization_id}_${crypto.randomUUID().slice(0, 8)}`;
+      logger.info('Void or capture action completed', {
+        action: args.action,
+        status,
+        transactionId: txId,
+        amountCents: args.amount_cents,
+      });
+      endTimer(`Completed action: ${args.action}`);
+      return {
+        status,
+        transaction_id: txId,
+      };
+    } catch (err: any) {
+      logger.error('Failed void or capture action', { error: err?.message, stack: err?.stack });
+      endTimer('Failed void or capture');
+      throw err;
+    }
   },
 
   async handleSubmitEvidence(args: z.infer<typeof SubmitDisputeEvidenceSchema>): Promise<SubmitDisputeEvidenceResult> {
     console.error('[MCP Enforcer] Submitting evidence...', sanitizeForLogging(args));
-    return {
-      status: 'SUBMITTED',
-      evidence_id: `ev_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`
-    };
+    const endTimer = logger.time('Tool:submit_dispute_evidence_bundle');
+    logger.info('[MCP Enforcer] Submitting evidence...', sanitizeForLogging(args));
+    try {
+      const evidenceId = `ev_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`;
+      logger.info('Dispute evidence bundle registered', {
+        disputeId: args.paypal_dispute_id,
+        evidenceId,
+        hasTracking: Boolean(args.carrier_tracking_number),
+        hasDefectMask: Boolean(args.vision_defect_mask),
+      });
+      endTimer('Completed dispute evidence submission');
+      return {
+        status: 'SUBMITTED',
+        evidence_id: evidenceId,
+      };
+    } catch (err: any) {
+      logger.error('Failed to submit dispute evidence bundle', { error: err?.message, stack: err?.stack });
+      endTimer('Failed evidence submission');
+      throw err;
+    }
   },
 
   async handleProposeSettlement(args: z.infer<typeof ProposeDisputeSettlementSchema>): Promise<ProposeDisputeSettlementResult> {
     console.error('[MCP Enforcer] Proposing settlement...', sanitizeForLogging(args));
-    return {
-      status: 'PROPOSED',
-      offer_id: `off_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`
-    };
-  }
-,
+    const endTimer = logger.time('Tool:propose_dispute_partial_settlement');
+    logger.info('[MCP Enforcer] Proposing settlement...', sanitizeForLogging(args));
+    try {
+      const offerId = `off_${args.paypal_dispute_id}_${crypto.randomUUID().slice(0, 8)}`;
+      logger.info('Dispute partial settlement proposed', {
+        disputeId: args.paypal_dispute_id,
+        offerId,
+        compromiseCents: args.compromise_amount_cents,
+      });
+      endTimer('Completed settlement proposal');
+      return {
+        status: 'PROPOSED',
+        offer_id: offerId,
+      };
+    } catch (err: any) {
+      logger.error('Failed to propose dispute settlement', { error: err?.message, stack: err?.stack });
+      endTimer('Failed settlement proposal');
+      throw err;
+    }
+  },
 
   // =========================================================================
   // ACP MCP 5-Tool Handlers (docs/mcp-binding.md)
@@ -461,189 +652,301 @@ export const toolHandlers = {
 
   async handleCreateCheckoutSession(args: any) {
     console.error('[MCP Enforcer] Creating ACP checkout session via MCP tool...', sanitizeForLogging(args));
-    const payload = args.payload || {};
-    const sessionId = `cs_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-    
-    const items = (payload.items || []).map((it: any, idx: number) => {
-      const unitCents = it.unit_price_cents !== undefined ? it.unit_price_cents : 2500;
+    const endTimer = logger.time('Tool:create_checkout_session');
+    logger.info('[MCP Enforcer] Creating ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    try {
+      const payload = args.payload || {};
+      const sessionId = `cs_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+
+      const items = (payload.items || []).map((it: any, idx: number) => {
+        const unitCents = it.unit_price_cents !== undefined ? it.unit_price_cents : 2500;
+        return {
+          id: it.id || `item_${idx + 1}`,
+          name: it.name || `Item ${it.id}`,
+          quantity: it.quantity || 1,
+          unit_price_cents: unitCents,
+          subtotal_cents: unitCents * (it.quantity || 1),
+        };
+      });
+
+      const subtotalCents = items.reduce((acc: number, it: any) => acc + it.subtotal_cents, 0);
+      const taxCents = Math.round(subtotalCents * 0.0825);
+      const shippingCents = subtotalCents >= 10000 ? 0 : 500;
+      const totalCents = subtotalCents + taxCents + shippingCents;
+
+      logger.debug('Calculated ACP session totals', {
+        sessionId,
+        subtotalCents,
+        taxCents,
+        shippingCents,
+        totalCents,
+      });
+
+      const auditEvent = defaultAuditChain.append({
+        request_id: args.meta?.request_id || sessionId,
+        event_type: 'ACP_MCP_SESSION_CREATED',
+        observed: {
+          session_id: sessionId,
+          items_count: items.length,
+          subtotal_cents: subtotalCents,
+          affiliate_provider: payload.affiliate_attribution?.provider || null,
+        },
+        inferred: {
+          total_cents: totalCents,
+          status: 'ready_for_payment',
+        },
+      });
+
+      logger.info('ACP checkout session created and audit sealed', {
+        sessionId,
+        auditHash: auditEvent.hash,
+        totalCents,
+      });
+      endTimer('Created ACP checkout session');
+
       return {
-        id: it.id || `item_${idx + 1}`,
-        name: it.name || `Item ${it.id}`,
-        quantity: it.quantity || 1,
-        unit_price_cents: unitCents,
-        subtotal_cents: unitCents * (it.quantity || 1),
-      };
-    });
-
-    const subtotalCents = items.reduce((acc: number, it: any) => acc + it.subtotal_cents, 0);
-    const taxCents = Math.round(subtotalCents * 0.0825);
-    const shippingCents = subtotalCents >= 10000 ? 0 : 500;
-    const totalCents = subtotalCents + taxCents + shippingCents;
-
-    const auditEvent = defaultAuditChain.append({
-      request_id: args.meta?.request_id || sessionId,
-      event_type: 'ACP_MCP_SESSION_CREATED',
-      observed: {
-        session_id: sessionId,
-        items_count: items.length,
-        subtotal_cents: subtotalCents,
-        affiliate_provider: payload.affiliate_attribution?.provider || null,
-      },
-      inferred: {
-        total_cents: totalCents,
+        id: sessionId,
         status: 'ready_for_payment',
-      },
-    });
-
-    return {
-      id: sessionId,
-      status: 'ready_for_payment',
-      currency: (payload.currency || 'USD').toLowerCase(),
-      line_items: items.map((it: any) => ({
-        id: `li_${it.id}`,
-        item: { id: it.id, name: it.name },
-        quantity: it.quantity,
-        base_amount: it.subtotal_cents,
-        discount_amount: 0,
-        subtotal: it.subtotal_cents,
-        total: it.subtotal_cents,
-      })),
-      totals: [
-        { type: 'subtotal', amount: subtotalCents },
-        { type: 'tax', amount: taxCents },
-        { type: 'shipping', amount: shippingCents },
-        { type: 'total', amount: totalCents },
-      ],
-      capabilities: {
-        payment_handlers: ['paypal_vault_v3', 'card_tokenized'],
-      },
-      messages: [],
-      links: [
-        { rel: 'self', href: `https://aegispay.dev/checkout_sessions/${sessionId}` },
-      ],
-      audit_hash: auditEvent.hash,
-    };
+        currency: (payload.currency || 'USD').toLowerCase(),
+        line_items: items.map((it: any) => ({
+          id: `li_${it.id}`,
+          item: { id: it.id, name: it.name },
+          quantity: it.quantity,
+          base_amount: it.subtotal_cents,
+          discount_amount: 0,
+          subtotal: it.subtotal_cents,
+          total: it.subtotal_cents,
+        })),
+        totals: [
+          { type: 'subtotal', amount: subtotalCents },
+          { type: 'tax', amount: taxCents },
+          { type: 'shipping', amount: shippingCents },
+          { type: 'total', amount: totalCents },
+        ],
+        capabilities: {
+          payment_handlers: ['paypal_vault_v3', 'card_tokenized'],
+        },
+        messages: [],
+        links: [
+          { rel: 'self', href: `https://aegispay.dev/checkout_sessions/${sessionId}` },
+        ],
+        audit_hash: auditEvent.hash,
+      };
+    } catch (err: any) {
+      logger.error('Failed to create ACP checkout session', { error: err?.message, stack: err?.stack });
+      endTimer('Failed create checkout session');
+      throw err;
+    }
   },
 
   async handleGetCheckoutSession(args: any) {
     console.error('[MCP Enforcer] Getting ACP checkout session via MCP tool...', sanitizeForLogging(args));
-    if (!args.id || args.id === 'invalid' || args.id.includes('nonexistent')) {
-      const err: any = new Error('Checkout session not found');
-      err.code = -32000;
-      err.data = {
-        type: 'invalid_request',
-        code: 'session_not_found',
-        message: 'Checkout session not found',
-        param: 'id',
+    const endTimer = logger.time('Tool:get_checkout_session');
+    logger.info('[MCP Enforcer] Getting ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    try {
+      if (!args.id || args.id === 'invalid' || args.id.includes('nonexistent')) {
+        logger.warn('ACP session not found for query', { id: args?.id });
+        const err: any = new Error('Checkout session not found');
+        err.code = -32000;
+        err.data = {
+          type: 'invalid_request',
+          code: 'session_not_found',
+          message: 'Checkout session not found',
+          param: 'id',
+        };
+        endTimer('Session not found error');
+        throw err;
+      }
+      logger.info('Retrieved ACP checkout session successfully', { id: args.id });
+      endTimer('Retrieved checkout session');
+      return {
+        id: args.id,
+        status: 'ready_for_payment',
+        currency: 'usd',
+        line_items: [],
+        totals: [
+          { type: 'subtotal', amount: 5000 },
+          { type: 'tax', amount: 413 },
+          { type: 'total', amount: 5413 },
+        ],
+        messages: [],
       };
+    } catch (err: any) {
+      logger.error('Error fetching ACP checkout session', { id: args?.id, error: err?.message, stack: err?.stack });
+      endTimer('Failed get checkout session');
       throw err;
     }
-    return {
-      id: args.id,
-      status: 'ready_for_payment',
-      currency: 'usd',
-      line_items: [],
-      totals: [
-        { type: 'subtotal', amount: 5000 },
-        { type: 'tax', amount: 413 },
-        { type: 'total', amount: 5413 },
-      ],
-      messages: [],
-    };
   },
 
   async handleUpdateCheckoutSession(args: any) {
     console.error('[MCP Enforcer] Updating ACP checkout session via MCP tool...', sanitizeForLogging(args));
-    return {
-      id: args.id,
-      status: 'ready_for_payment',
-      currency: 'usd',
-      updated_at: new Date().toISOString(),
-      messages: [],
-    };
+    const endTimer = logger.time('Tool:update_checkout_session');
+    logger.info('[MCP Enforcer] Updating ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    try {
+      logger.info('Updated ACP checkout session state', { id: args.id });
+      endTimer('Updated checkout session');
+      return {
+        id: args.id,
+        status: 'ready_for_payment',
+        currency: 'usd',
+        updated_at: new Date().toISOString(),
+        messages: [],
+      };
+    } catch (err: any) {
+      logger.error('Failed to update ACP checkout session', { id: args?.id, error: err?.message, stack: err?.stack });
+      endTimer('Failed update checkout session');
+      throw err;
+    }
   },
 
   async handleCompleteCheckoutSession(args: any) {
     console.error('[MCP Enforcer] Completing ACP checkout session via MCP tool...', sanitizeForLogging(args));
-    const orderId = `ord_mcp_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-    const auditEvent = defaultAuditChain.append({
-      request_id: args.id,
-      event_type: 'ACP_MCP_SESSION_COMPLETED',
-      observed: {
-        session_id: args.id,
-        payment_method_type: args.payload?.payment_method?.type || null,
-      },
-      inferred: {
-        order_id: orderId,
-        status: 'completed',
-      },
-    });
+    const endTimer = logger.time('Tool:complete_checkout_session');
+    logger.info('[MCP Enforcer] Completing ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    try {
+      const orderId = `ord_mcp_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+      logger.debug('Completing session and appending audit entry', { sessionId: args.id, orderId });
+      const auditEvent = defaultAuditChain.append({
+        request_id: args.id,
+        event_type: 'ACP_MCP_SESSION_COMPLETED',
+        observed: {
+          session_id: args.id,
+          payment_method_type: args.payload?.payment_method?.type || null,
+        },
+        inferred: {
+          order_id: orderId,
+          status: 'completed',
+        },
+      });
 
-    return {
-      id: args.id,
-      status: 'completed',
-      order: {
-        id: orderId,
-        order_id: orderId,
-        status: 'CREATED',
-        created_at: new Date().toISOString(),
-      },
-      audit_hash: auditEvent.hash,
-    };
+      logger.info('ACP checkout session completed successfully', {
+        sessionId: args.id,
+        orderId,
+        auditHash: auditEvent.hash,
+      });
+      endTimer('Completed checkout session');
+
+      return {
+        id: args.id,
+        status: 'completed',
+        order: {
+          id: orderId,
+          order_id: orderId,
+          status: 'CREATED',
+          created_at: new Date().toISOString(),
+        },
+        audit_hash: auditEvent.hash,
+      };
+    } catch (err: any) {
+      logger.error('Failed to complete ACP checkout session', { id: args?.id, error: err?.message, stack: err?.stack });
+      endTimer('Failed complete checkout session');
+      throw err;
+    }
   },
 
   async handleCancelCheckoutSession(args: any) {
     console.error('[MCP Enforcer] Cancelling ACP checkout session via MCP tool...', sanitizeForLogging(args));
-    const auditEvent = defaultAuditChain.append({
-      request_id: args.id,
-      event_type: 'ACP_MCP_SESSION_CANCELLED',
-      observed: {
-        session_id: args.id,
-        reason: args.payload?.reason || null,
-      },
-      inferred: {
-        status: 'cancelled',
-      },
-    });
+    const endTimer = logger.time('Tool:cancel_checkout_session');
+    logger.info('[MCP Enforcer] Cancelling ACP checkout session via MCP tool...', sanitizeForLogging(args));
+    try {
+      logger.debug('Cancelling session and appending audit entry', { sessionId: args.id });
+      const auditEvent = defaultAuditChain.append({
+        request_id: args.id,
+        event_type: 'ACP_MCP_SESSION_CANCELLED',
+        observed: {
+          session_id: args.id,
+          reason: args.payload?.reason || null,
+        },
+        inferred: {
+          status: 'cancelled',
+        },
+      });
 
-    return {
-      id: args.id,
-      status: 'cancelled',
-      cancellation_reason: args.payload?.reason || 'user_requested',
-      audit_hash: auditEvent.hash,
-    };
+      logger.info('ACP checkout session cancelled successfully', {
+        sessionId: args.id,
+        reason: args.payload?.reason || 'user_requested',
+        auditHash: auditEvent.hash,
+      });
+      endTimer('Cancelled checkout session');
+
+      return {
+        id: args.id,
+        status: 'cancelled',
+        cancellation_reason: args.payload?.reason || 'user_requested',
+        audit_hash: auditEvent.hash,
+      };
+    } catch (err: any) {
+      logger.error('Failed to cancel ACP checkout session', { id: args?.id, error: err?.message, stack: err?.stack });
+      endTimer('Failed cancel checkout session');
+      throw err;
+    }
   },
 
   async handleCreateInvoice(args: z.infer<typeof CreateInvoiceSchema>) {
     console.error('[MCP Enforcer] Creating B2B invoice...', sanitizeForLogging(args));
-    const invId = `INV2-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
-    const totalCents = args.items.reduce((sum, item) => sum + item.unit_amount_cents * (item.quantity || 1), 0);
-    return {
-      invoice_id: invId,
-      status: 'DRAFT',
-      invoice_number: `INV-${Date.now()}`,
-      amount: {
-        currency_code: args.currency_code || 'USD',
-        value: (totalCents / 100).toFixed(2),
-      },
-      payer_view_url: `https://www.sandbox.paypal.com/invoice/p/#${invId}`,
-    };
+    const endTimer = logger.time('Tool:create_invoice');
+    logger.info('[MCP Enforcer] Creating B2B invoice...', sanitizeForLogging(args));
+    try {
+      const invId = `INV2-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
+      const totalCents = args.items.reduce((sum, item) => sum + item.unit_amount_cents * (item.quantity || 1), 0);
+      logger.info('B2B invoice drafted', {
+        invoiceId: invId,
+        recipient: args.recipient_email,
+        totalCents,
+        currency: args.currency_code || 'USD',
+      });
+      endTimer('Created B2B invoice');
+      return {
+        invoice_id: invId,
+        status: 'DRAFT',
+        invoice_number: `INV-${Date.now()}`,
+        amount: {
+          currency_code: args.currency_code || 'USD',
+          value: (totalCents / 100).toFixed(2),
+        },
+        payer_view_url: `https://www.sandbox.paypal.com/invoice/p/#${invId}`,
+      };
+    } catch (err: any) {
+      logger.error('Failed to create B2B invoice', { error: err?.message, stack: err?.stack });
+      endTimer('Failed create invoice');
+      throw err;
+    }
   },
 
   async handleSendInvoice(args: z.infer<typeof SendInvoiceSchema>) {
     console.error('[MCP Enforcer] Sending B2B invoice...', sanitizeForLogging(args));
-    return {
-      invoice_id: args.invoice_id,
-      status: 'SENT',
-      sent_at: new Date().toISOString(),
-    };
+    const endTimer = logger.time('Tool:send_invoice');
+    logger.info('[MCP Enforcer] Sending B2B invoice...', sanitizeForLogging(args));
+    try {
+      logger.info('B2B invoice marked sent', { invoiceId: args.invoice_id });
+      endTimer('Sent B2B invoice');
+      return {
+        invoice_id: args.invoice_id,
+        status: 'SENT',
+        sent_at: new Date().toISOString(),
+      };
+    } catch (err: any) {
+      logger.error('Failed to send B2B invoice', { invoiceId: args?.invoice_id, error: err?.message, stack: err?.stack });
+      endTimer('Failed send invoice');
+      throw err;
+    }
   },
 
   async handleGenerateInvoiceQr(args: z.infer<typeof GenerateInvoiceQrSchema>) {
     console.error('[MCP Enforcer] Generating B2B invoice QR code...', sanitizeForLogging(args));
-    return {
-      invoice_id: args.invoice_id,
-      qr_code: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-    };
+    const endTimer = logger.time('Tool:generate_invoice_qr');
+    logger.info('[MCP Enforcer] Generating B2B invoice QR code...', sanitizeForLogging(args));
+    try {
+      logger.info('B2B invoice QR code generated', { invoiceId: args.invoice_id });
+      endTimer('Generated invoice QR');
+      return {
+        invoice_id: args.invoice_id,
+        qr_code: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      };
+    } catch (err: any) {
+      logger.error('Failed to generate invoice QR', { invoiceId: args?.invoice_id, error: err?.message, stack: err?.stack });
+      endTimer('Failed generate QR');
+      throw err;
+    }
   },
 };

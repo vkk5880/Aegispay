@@ -1,4 +1,7 @@
 import type { Redis } from 'ioredis';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('MCP:Enforcer:RedisLua', { stream: 'stderr' });
 
 export const LUA_SCRIPT = `
 -- KEYS[1]: "aegis:{vch_" .. mandate_id .. "}:mandate"
@@ -145,7 +148,14 @@ export class AtomicSpendEnforcer {
   }
 
   async reserveBudget(redisClient: Redis, params: ReservationParams): Promise<ReservationResult> {
+    const endTimer = logger.time(`RedisLua:reserveBudget:${params.mandate_id}`);
+    logger.info('Executing atomic Redis Lua reserveBudget', sanitizeForLogging(params));
+
     if (params.requested_cents <= 0) {
+      logger.warn('Redis Lua reservation rejected: non-positive spend amount', {
+        requestedCents: params.requested_cents,
+      });
+      endTimer('Rejected non-positive spend');
       return {
         success: false,
         error_code: 'ERR_INVALID_SPEND_AMOUNT'
@@ -165,13 +175,22 @@ export class AtomicSpendEnforcer {
       params.merchant_anomaly_score.toString()
     ];
 
+    logger.debug('Prepared Redis cluster slot keys and Lua arguments', {
+      tag,
+      keys,
+      argv: sanitizeForLogging(argv),
+    });
+
     if (!this.scriptSha) {
+      logger.debug('Lua script SHA cache miss, loading atomic script into Redis');
       this.scriptSha = await redisClient.script('LOAD', LUA_SCRIPT) as string;
+      logger.info('Loaded Redis Lua script SHA', { sha: this.scriptSha });
     }
 
     try {
       let result: [number, string];
       try {
+        logger.debug('Calling evalsha with scriptSha', { sha: this.scriptSha });
         result = await redisClient.evalsha(
           this.scriptSha,
           keys.length,
@@ -180,6 +199,9 @@ export class AtomicSpendEnforcer {
         ) as [number, string];
       } catch (shaErr: any) {
         if (shaErr.message && shaErr.message.includes('NOSCRIPT')) {
+          logger.warn('NOSCRIPT encountered during evalsha, falling back to direct eval', {
+            error: shaErr.message,
+          });
           result = await redisClient.eval(
             LUA_SCRIPT,
             keys.length,
@@ -187,31 +209,64 @@ export class AtomicSpendEnforcer {
             ...argv
           ) as [number, string];
         } else {
+          logger.error('Unexpected error during Lua script evaluation', {
+            error: shaErr?.message,
+            stack: shaErr?.stack,
+          });
           throw shaErr;
         }
       }
 
       const [status, data] = result;
+      logger.debug('Evaluated Lua script execution outcome', { status, data });
 
       if (status === 1) {
+        const newSpent = parseInt(data, 10);
+        logger.info('Atomic Redis Lua budget reservation granted', {
+          mandateId: params.mandate_id,
+          merchantDomain: params.merchant_domain,
+          newSpent,
+        });
+        endTimer('Reservation granted');
         return {
           success: true,
-          new_spent: parseInt(data, 10)
+          new_spent: newSpent
         };
       }
 
+      logger.warn('Atomic Redis Lua budget reservation rejected by script', {
+        mandateId: params.mandate_id,
+        errorCode: data,
+      });
+
       // If Redis has no mandate (cold restart or eviction), fallback to PostgreSQL state recovery
       if (data === 'ERR_MANDATE_NOT_FOUND' && this.dbFallback) {
+        logger.info('Mandate not found in Redis, triggering PostgreSQL authoritative state recovery fallback', {
+          mandateId: params.mandate_id,
+        });
         try {
           const dbRecord = await this.dbFallback(params.mandate_id);
           if (!dbRecord) {
+            logger.warn('Authoritative DB fallback returned null record for mandate', {
+              mandateId: params.mandate_id,
+            });
+            endTimer('DB fallback mandate not found');
             return {
               success: false,
               error_code: 'ERR_MANDATE_NOT_FOUND'
             };
           }
 
+          logger.debug('DB record found, validating mandate constraints in fallback', {
+            mandateId: params.mandate_id,
+            status: dbRecord.status,
+            maxTotal: dbRecord.max_total_cents,
+            spent: dbRecord.spent_cents,
+          });
+
           if (dbRecord.status !== 'ACTIVE') {
+            logger.warn('DB mandate status is not ACTIVE', { status: dbRecord.status });
+            endTimer('DB mandate inactive');
             return {
               success: false,
               error_code: `ERR_MANDATE_STATUS_${dbRecord.status}`
@@ -220,6 +275,11 @@ export class AtomicSpendEnforcer {
 
           const expiresMs = new Date(dbRecord.expires_at).getTime();
           if (params.current_unix_ms > expiresMs) {
+            logger.warn('DB mandate has expired', {
+              currentUnixMs: params.current_unix_ms,
+              expiresMs,
+            });
+            endTimer('DB mandate expired');
             return {
               success: false,
               error_code: 'ERR_MANDATE_EXPIRED'
@@ -227,6 +287,10 @@ export class AtomicSpendEnforcer {
           }
 
           if (params.merchant_anomaly_score > 300) {
+            logger.warn('Merchant anomaly score exceeded 300 threshold in DB fallback', {
+              anomalyScore: params.merchant_anomaly_score,
+            });
+            endTimer('DB fallback anomaly exceeded');
             return {
               success: false,
               error_code: 'ERR_MERCHANT_ANOMALY_THRESHOLD_EXCEEDED'
@@ -239,6 +303,11 @@ export class AtomicSpendEnforcer {
             !dbRecord.allowed_categories.includes('*') &&
             !dbRecord.allowed_categories.includes(params.category_id)
           ) {
+            logger.warn('Category not authorized in DB fallback', {
+              categoryId: params.category_id,
+              allowedCategories: dbRecord.allowed_categories,
+            });
+            endTimer('DB fallback category unauthorized');
             return {
               success: false,
               error_code: `ERR_CATEGORY_NOT_AUTHORIZED:${params.category_id}`
@@ -246,6 +315,11 @@ export class AtomicSpendEnforcer {
           }
 
           if (params.requested_cents > dbRecord.max_single_merchant_cents) {
+            logger.warn('Requested amount exceeds DB max_single_merchant_cents cap', {
+              requestedCents: params.requested_cents,
+              maxMerchant: dbRecord.max_single_merchant_cents,
+            });
+            endTimer('DB fallback merchant cap exceeded');
             return {
               success: false,
               error_code: 'ERR_EXCEEDS_SINGLE_MERCHANT_EXPOSURE_CAP'
@@ -253,6 +327,11 @@ export class AtomicSpendEnforcer {
           }
 
           if (dbRecord.spent_cents + params.requested_cents > dbRecord.max_total_cents) {
+            logger.warn('Requested amount exceeds DB max_total_cents total budget', {
+              newTotal: dbRecord.spent_cents + params.requested_cents,
+              maxTotal: dbRecord.max_total_cents,
+            });
+            endTimer('DB fallback total budget exceeded');
             return {
               success: false,
               error_code: 'ERR_EXCEEDS_TOTAL_MANDATE_BUDGET'
@@ -260,6 +339,10 @@ export class AtomicSpendEnforcer {
           }
 
           // Hydrate Redis with PostgreSQL authoritative state
+          logger.info('Hydrating Redis state from PostgreSQL DB record', {
+            mandateId: params.mandate_id,
+            keys,
+          });
           const allowedCatsStr = dbRecord.allowed_categories ? dbRecord.allowed_categories.join(',') : '*';
           await redisClient.hmset(keys[0], {
             max_total: dbRecord.max_total_cents.toString(),
@@ -275,18 +358,33 @@ export class AtomicSpendEnforcer {
           await redisClient.expire(keys[0], ttlSeconds);
           await redisClient.expire(keys[1], ttlSeconds);
 
+          logger.info('Redis successfully hydrated from DB fallback', {
+            mandateId: params.mandate_id,
+            newSpent: dbRecord.spent_cents + params.requested_cents,
+            ttlSeconds,
+          });
+          endTimer('DB fallback hydration succeeded');
+
           return {
             success: true,
             new_spent: dbRecord.spent_cents + params.requested_cents
           };
-        } catch {
+        } catch (dbErr: any) {
+          logger.error('Error during DB fallback hydration for mandate', {
+            mandateId: params.mandate_id,
+            error: dbErr?.message,
+            stack: dbErr?.stack,
+          });
           // Guardrail 3: Fail closed if both Redis and PostgreSQL fail
           if (process.env.NODE_ENV === 'production') {
+            logger.error('Production fail-closed triggered: Custodian unreachable');
+            endTimer('Production fail-closed');
             return {
               success: false,
               error_code: 'ERR_FAIL_CLOSED_CUSTODIAN_UNREACHABLE'
             };
           }
+          endTimer('DB fallback error');
           return {
             success: false,
             error_code: 'ERR_MANDATE_NOT_FOUND'
@@ -294,18 +392,27 @@ export class AtomicSpendEnforcer {
         }
       }
 
+      endTimer(`Rejected with ${data}`);
       return {
         success: false,
         error_code: data
       };
     } catch (e: any) {
+      logger.error('Exception during Redis Lua budget reservation execution', {
+        mandateId: params.mandate_id,
+        error: e?.message,
+        stack: e?.stack,
+      });
       // Guardrail 3: Fail closed if Redis is unreachable in production
       if (process.env.NODE_ENV === 'production') {
+        logger.error('Production environment: failing closed due to Redis exception');
+        endTimer('Production fail-closed exception');
         return {
           success: false,
           error_code: 'ERR_FAIL_CLOSED_CUSTODIAN_UNREACHABLE'
         };
       }
+      endTimer('Exception thrown');
       throw e;
     }
   }
@@ -339,8 +446,17 @@ export class AtomicSpendEnforcer {
       domain = merchantDomain;
     }
 
+    const endTimer = logger.time(`RedisLua:rollbackReservation:${mandateId}`);
+    logger.info('Executing atomic compensating rollback', {
+      mandateId,
+      reqCents,
+      merchantDomain: domain,
+      hasRedisClient: Boolean(client),
+    });
+
     if (!client) {
-      // Gracefully succeed if no Redis client configured in current runtime
+      logger.warn('No Redis client configured, skipping rollback and gracefully returning true');
+      endTimer('Graceful no-op rollback');
       return true;
     }
 
@@ -351,31 +467,58 @@ export class AtomicSpendEnforcer {
     }
 
     const argv = [reqCents.toString()];
+    logger.debug('Prepared rollback keys and args', { tag, keys, argv });
 
     try {
       if (!this.rollbackSha) {
+        logger.debug('Rollback Lua script SHA cache miss, loading into Redis');
         this.rollbackSha = await client.script('LOAD', ROLLBACK_LUA_SCRIPT) as string;
+        logger.info('Loaded rollback Lua script SHA', { sha: this.rollbackSha });
       }
 
-      const result = await client.evalsha(
-        this.rollbackSha,
-        keys.length,
-        ...keys,
-        ...argv
-      ) as [number, string];
-
-      return result[0] === 1;
-    } catch (e: any) {
-      if (e.message && e.message.includes('NOSCRIPT')) {
-        const result = await client.eval(
-          ROLLBACK_LUA_SCRIPT,
+      let result: [number, string];
+      try {
+        result = await client.evalsha(
+          this.rollbackSha,
           keys.length,
           ...keys,
           ...argv
         ) as [number, string];
-
-        return result[0] === 1;
+      } catch (evalShaErr: any) {
+        if (evalShaErr.message && evalShaErr.message.includes('NOSCRIPT')) {
+          logger.warn('NOSCRIPT encountered during rollback evalsha, executing direct eval', {
+            error: evalShaErr.message,
+          });
+          result = await client.eval(
+            ROLLBACK_LUA_SCRIPT,
+            keys.length,
+            ...keys,
+            ...argv
+          ) as [number, string];
+        } else {
+          logger.error('Unexpected error during rollback evalsha', {
+            error: evalShaErr?.message,
+            stack: evalShaErr?.stack,
+          });
+          throw evalShaErr;
+        }
       }
+
+      const success = result[0] === 1;
+      logger.info('Compensating rollback execution finished', {
+        mandateId,
+        success,
+        newSpent: result[1],
+      });
+      endTimer(`Rollback complete: success=${success}`);
+      return success;
+    } catch (e: any) {
+      logger.error('Exception during compensating rollback execution', {
+        mandateId,
+        error: e?.message,
+        stack: e?.stack,
+      });
+      endTimer('Rollback exception');
       throw e;
     }
   }

@@ -9,6 +9,9 @@ import {
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { JSONRPCMessageSchema } from '@modelcontextprotocol/core';
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('MCP:Enforcer:Server', { stream: 'stderr' });
 
 export interface JSONRPCMessage {
   jsonrpc: string;
@@ -314,23 +317,39 @@ export class HardenedStdioServerTransport {
 
   async start(): Promise<void> {
     if (this._started) {
+      logger.error('HardenedStdioServerTransport start failed: already started');
       throw new Error('HardenedStdioServerTransport already started!');
     }
     this._started = true;
+    logger.info('HardenedStdioServerTransport started', { maxBufferSize: this._maxBufferSize });
 
     this._stdin.on('data', this._handleData);
     this._stdin.on('error', this._handleError);
   }
 
   private _handleError = (error: Error) => {
+    logger.error('HardenedStdioServerTransport stdin error', {
+      error: error.message,
+      stack: error.stack,
+    });
     this.onerror?.(error);
   };
 
   private _handleData = (chunk: Buffer) => {
     const currentSize = this._buffer ? this._buffer.length : 0;
     const newSize = currentSize + chunk.length;
+    logger.debug('HardenedStdioServerTransport received data chunk', {
+      chunkLength: chunk.length,
+      currentSize,
+      newSize,
+      maxBufferSize: this._maxBufferSize,
+    });
 
     if (newSize > this._maxBufferSize) {
+      logger.error('HardenedStdioServerTransport buffer overflow', {
+        newSize,
+        maxBufferSize: this._maxBufferSize,
+      });
       this._buffer = null;
       const overflowError = new McpError(
         ErrorCode.ParseError,
@@ -363,6 +382,10 @@ export class HardenedStdioServerTransport {
       try {
         parsedJson = JSON.parse(rawLine);
       } catch (err: any) {
+        logger.error('HardenedStdioServerTransport JSON parse error', {
+          error: err?.message,
+          rawLineLength: rawLine.length,
+        });
         this._sendProtocolError(null, ErrorCode.ParseError, `Parse error: ${err.message || 'Invalid JSON'}`);
         this.onerror?.(new McpError(ErrorCode.ParseError, `Parse error: ${err.message}`));
         continue;
@@ -370,6 +393,10 @@ export class HardenedStdioServerTransport {
 
       const validated = JSONRPCMessageSchema.safeParse(parsedJson);
       if (!validated.success) {
+        logger.error('HardenedStdioServerTransport invalid JSON-RPC 2.0 message schema', {
+          issues: validated.error.issues,
+          id: parsedJson?.id,
+        });
         const id = (parsedJson && typeof parsedJson === 'object' && 'id' in parsedJson)
           ? parsedJson.id
           : null;
@@ -379,14 +406,24 @@ export class HardenedStdioServerTransport {
       }
 
       try {
+        const msg = validated.data as any;
+        logger.debug('HardenedStdioServerTransport dispatching valid JSON-RPC message', {
+          id: msg?.id,
+          method: msg?.method,
+        });
         this.onmessage?.(validated.data as JSONRPCMessage);
       } catch (err: any) {
+        logger.error('HardenedStdioServerTransport error in onmessage handler', {
+          error: err?.message,
+          stack: err?.stack,
+        });
         this.onerror?.(err);
       }
     }
   }
 
   private _sendProtocolError(id: string | number | null, code: number, message: string): void {
+    logger.warn('Sending JSON-RPC protocol error to stdout', { id, code, message });
     const errorResponse = {
       jsonrpc: '2.0',
       id: id ?? null,
@@ -397,12 +434,17 @@ export class HardenedStdioServerTransport {
     };
     try {
       this._stdout.write(JSON.stringify(errorResponse) + '\n');
-    } catch {
-      // stdout write error handled silently
+    } catch (writeErr: any) {
+      logger.error('Failed to write JSON-RPC protocol error to stdout', { error: writeErr?.message });
     }
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
+    logger.debug('HardenedStdioServerTransport sending response message', {
+      id: message.id,
+      hasResult: Boolean(message.result),
+      hasError: Boolean(message.error),
+    });
     return new Promise((resolve) => {
       const json = JSON.stringify(message) + '\n';
       if ((this._stdout as any).write(json)) {
@@ -414,6 +456,7 @@ export class HardenedStdioServerTransport {
   }
 
   async close(): Promise<void> {
+    logger.info('Closing HardenedStdioServerTransport');
     this._stdin.off('data', this._handleData);
     this._stdin.off('error', this._handleError);
     this._buffer = null;
@@ -426,6 +469,12 @@ export class HardenedStdioServerTransport {
  * Implements MCP TypeScript SDK v2 specification and 2026-07-28 protocol revision.
  */
 export function createMCPServer(options: MCPServerOptions = {}): McpServer {
+  logger.info('Creating McpServer instance', {
+    version: '0.2.0',
+    hasRedisClient: Boolean(options.redisClient),
+    enableToolkitBridge: Boolean(options.enableToolkitBridge),
+  });
+
   const server = new McpServer(
     {
       name: 'aegispay-mcp-enforcer',
@@ -445,6 +494,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.optimizeBasket, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: optimize_channel3_multi_merchant_basket', sanitizeForLogging(args));
       const result = await toolHandlers.handleOptimizeBasket(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -478,12 +528,23 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.authorizeEscrow, { type: 'object' }),
     },
     async (args: any, ctx) => {
+      logger.info('McpServer tool dispatch: authorize_conditional_escrow_order', sanitizeForLogging(args));
       // Human-in-the-loop elicitation (SDK v2 2026-07-28 input_required)
       // High-stakes operations exceeding $500 (50,000 cents) or requiring 3DS challenge
       const accepted = acceptedContent(ctx?.mcpReq?.inputResponses, 'approval', EscrowApprovalSchema);
       const isApproved = accepted?.approved === true || args.confirmed === true;
 
+      logger.debug('Evaluating HITL elicitation condition for escrow authorization', {
+        requestedCents: args.requested_cents,
+        requires3ds: args.requires_3ds,
+        isApproved,
+      });
+
       if ((args.requested_cents > 50000 || args.requires_3ds === true) && !isApproved) {
+        logger.warn('Triggering HITL input_required elicitation for high-value/3DS order', {
+          requestedCents: args.requested_cents,
+          requires3ds: args.requires_3ds,
+        });
         return inputRequired({
           inputRequests: {
             approval: inputRequired.elicit({
@@ -496,6 +557,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
 
       // Check abort signal from caller/HTTP stream
       if (ctx?.mcpReq?.signal?.aborted) {
+        logger.error('Escrow authorization aborted: Client disconnected or signal aborted');
         throw new McpError(ErrorCode.InternalError, 'Escrow authorization aborted by client disconnect');
       }
 
@@ -520,6 +582,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.broadcastIntent, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: broadcast_synthetic_intent_voucher', sanitizeForLogging(args));
       const result = await toolHandlers.handleBroadcastIntent(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -537,6 +600,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.voidOrCapture, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: void_or_capture_escrow_hold', sanitizeForLogging(args));
       const result = await toolHandlers.handleVoidOrCapture(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -554,6 +618,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.submitEvidence, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: submit_dispute_evidence_bundle', sanitizeForLogging(args));
       const result = await toolHandlers.handleSubmitEvidence(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -571,6 +636,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.proposeSettlement, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: propose_dispute_partial_settlement', sanitizeForLogging(args));
       const result = await toolHandlers.handleProposeSettlement(args);
       return {
         content: [{ type: 'text', text: JSON.stringify(result) }],
@@ -588,6 +654,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.acpSession, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: create_checkout_session', sanitizeForLogging(args));
       const result = await executeACPAction('create_checkout_session', args || {});
       const session = result.result || result;
       return {
@@ -606,6 +673,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.acpSession, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: get_checkout_session', sanitizeForLogging(args));
       const result = await executeACPAction('get_checkout_session', args || {});
       const session = result.result || result;
       return {
@@ -624,6 +692,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.acpSession, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: update_checkout_session', sanitizeForLogging(args));
       const result = await executeACPAction('update_checkout_session', args || {});
       const session = result.result || result;
       return {
@@ -642,6 +711,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.acpSession, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: complete_checkout_session', sanitizeForLogging(args));
       const result = await executeACPAction('complete_checkout_session', args || {});
       const session = result.result || result;
       return {
@@ -660,6 +730,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
       outputSchema: toMcpSchema(OutputSchemas.acpSession, { type: 'object' }),
     },
     async (args: any, _ctx) => {
+      logger.info('McpServer tool dispatch: cancel_checkout_session', sanitizeForLogging(args));
       const result = await executeACPAction('cancel_checkout_session', args || {});
       const session = result.result || result;
       return {
@@ -671,6 +742,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
 
   // Optional: Official PayPal Agent Toolkit Bridge Tools
   if (options.enableToolkitBridge) {
+    logger.info('Enabling PayPalToolkitBridge in McpServer');
     const bridge = new PayPalToolkitBridge({
       ...options.toolkitBridgeOptions,
       redisClient: options.redisClient ?? options.toolkitBridgeOptions?.redisClient,
@@ -678,6 +750,7 @@ export function createMCPServer(options: MCPServerOptions = {}): McpServer {
     registerPayPalToolkitBridgeTools(server, bridge);
   }
 
+  logger.info('McpServer initialization complete with all 11 core tools registered');
   return server;
 }
 
@@ -705,10 +778,12 @@ export function createAegispayMcpHandler(options: MCPServerOptions = {}) {
  * Runs the MCP server with Stdio transport
  */
 export async function runServer(options: MCPServerOptions = {}) {
+  logger.info('Starting AegisPay MCP Enforcer Server v0.2.0 on native SDK v2 stdio transport');
   const server = createMCPServer(options);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('AegisPay MCP Enforcer Server v0.2.0 running on native SDK v2 stdio transport');
+  logger.info('AegisPay MCP Enforcer Server connected to Stdio transport successfully');
 }
 
 /**
@@ -716,10 +791,12 @@ export async function runServer(options: MCPServerOptions = {}) {
  */
 export async function serveStdio(
   serverFactory: () => McpServer = () => createMCPServer(),
-  _options: MCPServerOptions = {}
+  options: MCPServerOptions = {}
 ) {
+  logger.info('Starting AegisPay MCP Enforcer Server via serveStdio');
   const server = serverFactory();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('AegisPay MCP Enforcer Server running via serveStdio');
+  logger.info('serveStdio server connected successfully');
 }

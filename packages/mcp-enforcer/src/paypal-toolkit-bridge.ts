@@ -1,6 +1,9 @@
 import { PayPalMCPToolkit, type Tool, type PayPalAPI } from '@paypal/agent-toolkit/mcp';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import type { SpendMandate } from '@aegispay/shared-types';
 import { verifySessionMandateSignature } from './ed25519-verifier.js';
+
+const logger = createLogger('MCP:Enforcer:ToolkitBridge', { stream: 'stderr' });
 import {
   AtomicSpendEnforcer,
   defaultAtomicSpendEnforcer,
@@ -96,6 +99,12 @@ export class PayPalToolkitBridge {
     this.spendEnforcer = options.atomicSpendEnforcer ?? defaultAtomicSpendEnforcer;
     this.actions = options.actions ?? DEFAULT_TOOLKIT_ACTIONS;
 
+    logger.info('Initializing PayPalToolkitBridge', {
+      isSandbox: this.isSandbox,
+      hasRedisClient: Boolean(this.redisClient),
+      actionModulesCount: Object.keys(this.actions).length,
+    });
+
     this.toolkit = new PayPalMCPToolkit({
       accessToken: options.accessToken || process.env.PAYPAL_ACCESS_TOKEN || 'SANDBOX_MOCK_TOKEN',
       configuration: {
@@ -113,7 +122,9 @@ export class PayPalToolkitBridge {
    * Retrieves all available tools exposed by the underlying PayPal Agent Toolkit.
    */
   getAvailableTools(): Tool[] {
-    return this.toolkit.getTools();
+    const tools = this.toolkit.getTools();
+    logger.debug('Retrieved available tools from underlying toolkit', { count: tools.length });
+    return tools;
   }
 
   /**
@@ -131,13 +142,23 @@ export class PayPalToolkitBridge {
     args: any,
     context?: SpendEnforcerContext
   ): Promise<ToolkitBridgeExecutionResult> {
+    const endTimer = logger.time(`ToolkitBridge:${method}`);
     const isSpendMutating = SPEND_MUTATING_ACTIONS.has(method);
+
+    logger.info(`Intercepted PayPal toolkit tool call: ${method}`, {
+      isSpendMutating,
+      args: sanitizeForLogging(args),
+      context: sanitizeForLogging(context),
+    });
 
     // 1. Zero-Trust Cryptographic Mandate & Spend Gate for mutating operations
     let reservationResult: ReservationResult | undefined;
 
     if (isSpendMutating) {
+      logger.debug('Enforcing zero-trust checks for spend-mutating tool', { method });
       if (!context?.mandate && !context?.mandate_id) {
+        logger.error('Blocked spend-mutating tool: No SessionMandate provided', { method });
+        endTimer('Blocked: Missing SessionMandate');
         return {
           isError: true,
           content: [
@@ -156,8 +177,16 @@ export class PayPalToolkitBridge {
 
       // If full mandate provided, cryptographically verify Ed25519 signature
       if (context.mandate) {
+        logger.debug('Verifying Ed25519 signature for mandate in toolkit bridge', {
+          mandateId: context.mandate.mandate_id,
+        });
         const isSignatureValid = await verifySessionMandateSignature(context.mandate);
         if (!isSignatureValid) {
+          logger.error('Blocked spend-mutating tool: Ed25519 signature verification failed', {
+            mandateId: context.mandate.mandate_id,
+            method,
+          });
+          endTimer('Blocked: Invalid signature');
           return {
             isError: true,
             content: [
@@ -172,6 +201,9 @@ export class PayPalToolkitBridge {
             },
           };
         }
+        logger.info('Ed25519 signature verified for toolkit bridge execution', {
+          mandateId: context.mandate.mandate_id,
+        });
       }
 
       // Determine requested cents
@@ -184,7 +216,19 @@ export class PayPalToolkitBridge {
       const merchantDomain = context.merchant_domain || args?.merchant_domain || 'sandbox.paypal.com';
       const anomalyScore = context.merchant_anomaly_score ?? 0;
 
+      logger.debug('Resolved spend parameters for toolkit reservation', {
+        mandateId,
+        requestedCents,
+        categoryId,
+        merchantDomain,
+        anomalyScore,
+      });
+
       if (this.redisClient && requestedCents > 0) {
+        logger.debug('Reserving budget via spend enforcer for toolkit tool', {
+          mandateId,
+          requestedCents,
+        });
         reservationResult = await this.spendEnforcer.reserveBudget(this.redisClient, {
           mandate_id: mandateId,
           requested_cents: requestedCents,
@@ -195,6 +239,12 @@ export class PayPalToolkitBridge {
         });
 
         if (!reservationResult.success) {
+          logger.warn('Blocked spend-mutating tool: Spend enforcer budget reservation rejected', {
+            errorCode: reservationResult.error_code,
+            mandateId,
+            requestedCents,
+          });
+          endTimer('Blocked: Budget exceeded');
           return {
             isError: true,
             content: [
@@ -211,11 +261,16 @@ export class PayPalToolkitBridge {
             spendReservation: reservationResult,
           };
         }
+        logger.info('Spend budget reservation approved for toolkit bridge tool', {
+          mandateId,
+          newSpent: reservationResult.new_spent,
+        });
       }
     }
 
     // 2. Execute the underlying tool via PayPal Agent Toolkit
     try {
+      logger.debug('Calling underlying PayPal API service tool runner', { method });
       const apiService = this.toolkit.getPaypalAPIService();
       const rawResult = await apiService.run(method, args);
 
@@ -228,8 +283,15 @@ export class PayPalToolkitBridge {
 
       // If PayPal API returned an authentication/network error in offline/sandbox testing, use high-fidelity simulated response
       if (parsed && (parsed.ok === false || parsed.code === 'PAYPAL_API_HTTP_ERROR' || parsed.error)) {
+        logger.warn('Underlying PayPal API returned error, evaluating sandbox fallback', {
+          method,
+          code: parsed.code,
+          error: parsed.error,
+        });
         const fallbackResult = this.generateSandboxFallback(method, args, context);
         if (fallbackResult) {
+          logger.info('Dispatched high-fidelity sandbox fallback response', { method });
+          endTimer('Completed with sandbox fallback');
           return {
             content: [
               {
@@ -243,6 +305,8 @@ export class PayPalToolkitBridge {
         }
       }
 
+      logger.info('Underlying PayPal toolkit tool executed successfully', { method });
+      endTimer('Completed underlying API execution');
       return {
         content: [
           {
@@ -254,9 +318,15 @@ export class PayPalToolkitBridge {
         spendReservation: reservationResult,
       };
     } catch (err: any) {
+      logger.warn('Caught exception from underlying PayPal toolkit tool, checking sandbox fallback', {
+        method,
+        error: err?.message,
+      });
       // In sandbox/offline testing without live PayPal network credentials, provide structured simulated fallbacks
       const fallbackResult = this.generateSandboxFallback(method, args, context);
       if (fallbackResult) {
+        logger.info('Dispatched high-fidelity sandbox fallback after exception', { method });
+        endTimer('Completed with exception sandbox fallback');
         return {
           content: [
             {
@@ -269,6 +339,12 @@ export class PayPalToolkitBridge {
         };
       }
 
+      logger.error('PayPal toolkit tool execution completely failed with error', {
+        method,
+        error: err?.message,
+        stack: err?.stack,
+      });
+      endTimer('Failed execution');
       return {
         isError: true,
         content: [
@@ -291,6 +367,7 @@ export class PayPalToolkitBridge {
    */
   private generateSandboxFallback(method: string, args: any, context?: SpendEnforcerContext): any {
     const timestamp = Date.now();
+    logger.debug('Generating sandbox fallback response for method', { method, timestamp });
     switch (method) {
       case 'create_order':
         return {
@@ -454,6 +531,8 @@ export function registerPayPalToolkitBridgeTools(
   server: McpServer,
   bridge: PayPalToolkitBridge
 ): void {
+  logger.info('Registering PayPal Agent Toolkit Bridge tools in McpServer');
+
   // 1. paypal_create_order (spend-mutating)
   server.registerTool(
     'paypal_create_order',
@@ -471,6 +550,7 @@ export function registerPayPalToolkitBridgeTools(
       }),
     },
     async (args: any) => {
+      logger.info('Invoked registered tool: paypal_create_order');
       const result = await bridge.executeInterceptedTool('create_order', args, {
         mandate: args.mandate,
         mandate_id: args.mandate_id,
@@ -502,6 +582,7 @@ export function registerPayPalToolkitBridgeTools(
       }),
     },
     async (args: any) => {
+      logger.info('Invoked registered tool: paypal_create_invoice');
       const result = await bridge.executeInterceptedTool('create_invoice', args, {
         mandate: args.mandate,
         mandate_id: args.mandate_id,
@@ -530,6 +611,7 @@ export function registerPayPalToolkitBridgeTools(
       }),
     },
     async (args: any) => {
+      logger.info('Invoked registered tool: paypal_get_dispute');
       const result = await bridge.executeInterceptedTool('get_dispute', args);
       return {
         content: result.content,
@@ -555,6 +637,7 @@ export function registerPayPalToolkitBridgeTools(
       }),
     },
     async (args: any) => {
+      logger.info('Invoked registered tool: paypal_create_shipment_tracking');
       const result = await bridge.executeInterceptedTool('create_shipment_tracking', args);
       return {
         content: result.content,
