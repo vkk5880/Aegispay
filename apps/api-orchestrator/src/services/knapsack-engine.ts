@@ -1,5 +1,8 @@
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { defaultTaxEstimator } from './tax-estimator.js';
 import { Channel3Offer, Channel3ProductDetail } from './channel3.client.js';
+
+const logger = createLogger('API:Services:CatalogAndDisputes');
 
 export interface RequiredShoppingItem {
   product_id: string;
@@ -99,6 +102,11 @@ export class KnapsackEngine {
   constructor(options?: KnapsackOptions) {
     this.alpha = options?.alpha ?? 0.75;
     this.lambdaAnomaly = options?.lambdaAnomaly ?? 5000;
+
+    logger.debug('[KnapsackEngine] KnapsackEngine instantiated', {
+      alpha: this.alpha,
+      lambdaAnomaly: this.lambdaAnomaly,
+    });
   }
 
   solve(
@@ -110,7 +118,17 @@ export class KnapsackEngine {
     const lambda = Math.max(0, options?.lambdaAnomaly ?? this.lambdaAnomaly);
     const budgetCap = options?.budgetCapCents !== undefined ? Math.max(0, options.budgetCapCents) : undefined;
 
+    logger.info('[KnapsackEngine] Starting knapsack optimization', {
+      productsCount: products?.length || 0,
+      requirementsCount: requirements?.length || 0,
+      alpha,
+      lambdaAnomaly: lambda,
+      budgetCapCents: budgetCap,
+      zipCode: options?.zipCode,
+    });
+
     if (!requirements || requirements.length === 0) {
+      logger.error('[KnapsackEngine] Requirements list is empty');
       throw new Error('Requirements list cannot be empty.');
     }
 
@@ -118,21 +136,36 @@ export class KnapsackEngine {
 
     for (const req of requirements) {
       if (!req.quantity || req.quantity <= 0 || !Number.isInteger(req.quantity)) {
+        logger.error('[KnapsackEngine] Invalid item quantity', {
+          productId: req.product_id,
+          quantity: req.quantity,
+        });
         throw new Error(`Invalid item quantity for product ${req.product_id}: quantity must be a positive integer.`);
       }
 
       const prod = products.find(p => p.product_id === req.product_id);
       if (!prod || !prod.offers || prod.offers.length === 0) {
+        logger.error('[KnapsackEngine] Product has no available offers in catalog', {
+          productId: req.product_id,
+        });
         throw new Error(`Product ${req.product_id} has no available merchant offers in Channel3 catalog.`);
       }
 
       const availableOffers: CandidateOfferWithProduct[] = [];
+      let outOfStockCount = 0;
+
       for (const offer of prod.offers) {
         if (offer.stock_status === 'OUT_OF_STOCK') {
+          outOfStockCount++;
           continue;
         }
 
         if (offer.price === undefined || offer.price < 0 || !Number.isFinite(offer.price)) {
+          logger.error('[KnapsackEngine] Invalid offer price detected', {
+            productId: req.product_id,
+            merchantDomain: offer.domain,
+            price: offer.price,
+          });
           throw new Error(`Invalid offer price for product ${req.product_id} from ${offer.domain}: price cannot be negative.`);
         }
 
@@ -153,7 +186,16 @@ export class KnapsackEngine {
         });
       }
 
+      logger.debug('[KnapsackEngine] Candidate offers evaluated for requirement', {
+        productId: req.product_id,
+        availableCount: availableOffers.length,
+        outOfStockCount,
+      });
+
       if (availableOffers.length === 0) {
+        logger.error('[KnapsackEngine] Product out of stock across all merchants', {
+          productId: req.product_id,
+        });
         throw new Error(`Product ${req.product_id} is out of stock across all merchants.`);
       }
 
@@ -178,6 +220,10 @@ export class KnapsackEngine {
       );
       suffixMinNetCost[i] = suffixMinNetCost[i + 1] + minChoiceCost;
     }
+
+    logger.debug('[KnapsackEngine] Suffix min net costs computed for branch-and-bound pruning', {
+      suffixMinNetCost,
+    });
 
     const evaluateCombination = (combination: CandidateOfferWithProduct[]): number => {
       const merchantSpendMap = new Map<string, {
@@ -221,21 +267,40 @@ export class KnapsackEngine {
       return netTotal;
     };
 
+    let prunedBranchesCount = 0;
+    let evaluatedCombinationsCount = 0;
+
     if (candidateChoicesPerItem.length === 1) {
+      logger.debug('[KnapsackEngine] Single requirement detected; evaluating candidate choices directly');
       for (const candidate of candidateChoicesPerItem[0]) {
+        evaluatedCombinationsCount++;
         const netCost = evaluateCombination([candidate]);
         if (netCost < minNetCost) {
+          logger.debug('[KnapsackEngine] Found new best assignment (single item)', {
+            candidateMerchant: candidate.offer.domain,
+            netCost,
+            prevMinCost: minNetCost === Infinity ? 'Infinity' : minNetCost,
+          });
           minNetCost = netCost;
           bestAssignment = [candidate];
         }
       }
     } else {
+      logger.debug('[KnapsackEngine] Multi-requirement branch-and-bound search initiated', {
+        slotCount: candidateChoicesPerItem.length,
+      });
+
       const currentChoice: CandidateOfferWithProduct[] = [];
 
       const search = (slotIndex: number, currentSpendEstimate: number) => {
         if (slotIndex === candidateChoicesPerItem.length) {
+          evaluatedCombinationsCount++;
           const netCost = evaluateCombination(currentChoice);
           if (netCost < minNetCost) {
+            logger.debug('[KnapsackEngine] Found improved assignment combination', {
+              netCost,
+              previousMinCost: minNetCost === Infinity ? 'Infinity' : minNetCost,
+            });
             minNetCost = netCost;
             bestAssignment = [...currentChoice];
           }
@@ -243,6 +308,7 @@ export class KnapsackEngine {
         }
 
         if (currentSpendEstimate + suffixMinNetCost[slotIndex] >= minNetCost) {
+          prunedBranchesCount++;
           return;
         }
 
@@ -257,7 +323,14 @@ export class KnapsackEngine {
       search(0, 0);
     }
 
+    logger.info('[KnapsackEngine] Optimization search completed', {
+      evaluatedCombinationsCount,
+      prunedBranchesCount,
+      minNetCost,
+    });
+
     if (!bestAssignment) {
+      logger.error('[KnapsackEngine] Failed to compute optimal cart assignment');
       throw new Error('Failed to compute optimal cart assignment.');
     }
 
@@ -316,9 +389,18 @@ export class KnapsackEngine {
     for (const group of merchantGroups.values()) {
       if (group.shipping_waived) {
         totalShippingSaved += group.shipping_fee_cents;
+        logger.debug('[KnapsackEngine] Shipping fee waived for merchant group', {
+          merchantDomain: group.merchant_domain,
+          subtotalCents: group.subtotal_cents,
+          savedShippingCents: group.shipping_fee_cents,
+        });
         group.shipping_fee_cents = 0;
       } else {
         totalShipping += group.shipping_fee_cents;
+        logger.debug('[KnapsackEngine] Standard shipping applied for merchant group', {
+          merchantDomain: group.merchant_domain,
+          shippingFeeCents: group.shipping_fee_cents,
+        });
       }
 
       const taxRes = defaultTaxEstimator.calculateTax(group.subtotal_cents, options?.zipCode);
@@ -352,9 +434,20 @@ export class KnapsackEngine {
       if (netBuyerExpenditure > budgetCap) {
         isWithinBudget = false;
         overagePercentage = Number((((netBuyerExpenditure - budgetCap) / budgetCap) * 100).toFixed(2));
+        logger.warn('[KnapsackEngine] Net buyer expenditure exceeds budget cap', {
+          netBuyerExpenditure,
+          budgetCap,
+          overagePercentage,
+        });
+      } else {
+        logger.info('[KnapsackEngine] Net buyer expenditure is within budget cap', {
+          netBuyerExpenditure,
+          budgetCap,
+        });
       }
     }
 
+    logger.debug('[KnapsackEngine] Constructing PayPal Orders v2 multi-purchase units');
     const paypalPurchaseUnits = assignedMerchants.map((merchant, idx) => {
       const itemTotalVal = (merchant.subtotal_cents / 100).toFixed(2);
       const shippingVal = (merchant.shipping_fee_cents / 100).toFixed(2);
@@ -396,7 +489,7 @@ export class KnapsackEngine {
       };
     });
 
-    return {
+    const optimizationResult: KnapsackOptimizationResult = {
       assigned_merchants: assignedMerchants,
       gross_subtotal_cents: grossSubtotal,
       total_commission_rebate_cents: totalRebate,
@@ -413,6 +506,17 @@ export class KnapsackEngine {
       zip_code: options?.zipCode,
       paypal_purchase_units: paypalPurchaseUnits,
     };
+
+    logger.info('[KnapsackEngine] Knapsack optimization solved successfully', {
+      assignedVendorsCount: assignedMerchants.length,
+      grossSubtotalCents: grossSubtotal,
+      netBuyerExpenditureCents: netBuyerExpenditure,
+      savingsPercentage,
+      isWithinBudget,
+      overagePercentage,
+    });
+
+    return optimizationResult;
   }
 }
 

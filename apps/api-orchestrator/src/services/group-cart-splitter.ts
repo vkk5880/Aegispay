@@ -1,4 +1,6 @@
-import { GroupExpenseSplit, GroupSplitParticipant } from '@aegispay/shared-types';
+import { GroupExpenseSplit, GroupSplitParticipant, createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('API:Services:CatalogAndDisputes');
 
 export interface SplitOptions {
   total_cents: number;
@@ -18,16 +20,35 @@ export interface SplitOptions {
 export function splitGroupExpense(options: SplitOptions): GroupExpenseSplit {
   const { total_cents, tip_cents = 0, tax_cents = 0, participants } = options;
 
+  logger.info('[GroupCartSplitter] splitGroupExpense invoked', {
+    total_cents,
+    tip_cents,
+    tax_cents,
+    participantCount: participants?.length || 0,
+    participants: sanitizeForLogging(participants),
+  });
+
   if (!participants || participants.length === 0) {
+    logger.error('[GroupCartSplitter] Cannot split expense: empty or undefined participants array');
     throw new Error('At least one participant is required to split an expense');
   }
 
   const grandTotalCents = Math.round(total_cents + tip_cents + tax_cents);
   if (grandTotalCents <= 0) {
+    logger.error('[GroupCartSplitter] Invalid split grand total', {
+      grandTotalCents,
+      total_cents,
+      tip_cents,
+      tax_cents,
+    });
     throw new Error('Total split amount must be greater than zero');
   }
 
   const totalWeight = participants.reduce((sum, p) => sum + (p.weight || 1), 0);
+  logger.debug('[GroupCartSplitter] Calculated total weight for split allocation', {
+    totalWeight,
+    grandTotalCents,
+  });
 
   // Initial integer floor allocation and fractional remainder tracking
   let allocatedCents = 0;
@@ -52,10 +73,24 @@ export function splitGroupExpense(options: SplitOptions): GroupExpenseSplit {
       fractional_remainder: remainder,
       percentage: Number((proportion * 100).toFixed(2)),
     });
+
+    logger.debug('[GroupCartSplitter] Initial participant share computed', {
+      participantId: p.id,
+      weight,
+      proportion,
+      floorShare,
+      fractionalRemainder: remainder,
+    });
   }
 
   // Distribute residual cents to participants with highest fractional remainder
   let residualCents = grandTotalCents - allocatedCents;
+  logger.debug('[GroupCartSplitter] Residual cents to allocate', {
+    grandTotalCents,
+    allocatedCents,
+    residualCents,
+  });
+
   const sortedIndices = participantShares
     .map((item, idx) => ({ idx, remainder: item.fractional_remainder }))
     .sort((a, b) => b.remainder - a.remainder);
@@ -64,11 +99,16 @@ export function splitGroupExpense(options: SplitOptions): GroupExpenseSplit {
   while (residualCents > 0) {
     const targetIdx = sortedIndices[currentRank % sortedIndices.length].idx;
     participantShares[targetIdx].share_cents += 1;
+    logger.debug('[GroupCartSplitter] Distributed residual cent', {
+      recipientId: participantShares[targetIdx].participant_id,
+      newShareCents: participantShares[targetIdx].share_cents,
+      remainingResidual: residualCents - 1,
+    });
     residualCents -= 1;
     currentRank++;
   }
 
-  return {
+  const splitResult: GroupExpenseSplit = {
     total_cents: grandTotalCents,
     tip_cents,
     tax_cents,
@@ -84,4 +124,23 @@ export function splitGroupExpense(options: SplitOptions): GroupExpenseSplit {
     })),
     rounding_residual_cents: 0,
   };
+
+  const verificationSum = splitResult.shares.reduce((acc, s) => acc + s.share_cents, 0);
+  const isExactConservation = verificationSum === grandTotalCents;
+
+  if (!isExactConservation) {
+    logger.error('[GroupCartSplitter] Monetary conservation violation detected!', {
+      grandTotalCents,
+      verificationSum,
+      difference: grandTotalCents - verificationSum,
+    });
+  } else {
+    logger.info('[GroupCartSplitter] Group expense split completed with exact monetary conservation', {
+      grandTotalCents,
+      participantsCount: splitResult.participants.length,
+      verificationSum,
+    });
+  }
+
+  return splitResult;
 }

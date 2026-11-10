@@ -1,7 +1,10 @@
 import { FastifyPluginAsync } from 'fastify';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultChannel3Client } from '../services/channel3.client.js';
 import { createDb, sql } from '@aegispay/database';
+
+const logger = createLogger('API:Services:CatalogAndDisputes');
 
 export const integrationsVerifyRoutes: FastifyPluginAsync = async (fastify) => {
   /**
@@ -16,32 +19,67 @@ export const integrationsVerifyRoutes: FastifyPluginAsync = async (fastify) => {
    * 7. DuckDB-WASM (Sub-10ms in-browser OLAP queries, memory-optimized Arrow projections)
    */
   fastify.get('/api/integrations/verify', async (request, reply) => {
+    logger.info('[GET /api/integrations/verify] Inbound 7-sponsor health check invocation');
+
     let paypalStatus = 'UNKNOWN';
     let paypalError: string | null = null;
     let paypalReadbackSample: any = null;
 
+    logger.debug('[GET /api/integrations/verify] Initiating PayPal connectivity and access token verification');
     try {
       const token = await defaultPayPalClient.getAccessToken();
       paypalStatus = token ? 'CONNECTED' : 'DISCONNECTED';
+      logger.info('[GET /api/integrations/verify] PayPal OAuth token retrieved', {
+        status: paypalStatus,
+        tokenPresent: Boolean(token),
+      });
+
       // Read-back on sample order to verify REST ledger pipeline
       try {
+        logger.debug('[GET /api/integrations/verify] Performing PayPal sample read-back check');
         paypalReadbackSample = await defaultPayPalClient.getOrder('SAMPLE_READBACK_CHECK');
-      } catch {
+        logger.info('[GET /api/integrations/verify] PayPal sample read-back check succeeded', {
+          sample: sanitizeForLogging(paypalReadbackSample),
+        });
+      } catch (readbackErr: any) {
+        logger.warn('[GET /api/integrations/verify] PayPal sample read-back fell back to sandbox simulated structure', {
+          errorMessage: readbackErr?.message,
+          errorCode: readbackErr?.code || 'READBACK_FALLBACK',
+          path: '/api/integrations/verify',
+          stack: readbackErr?.stack,
+        });
         paypalReadbackSample = { verified: true, status: 'CONNECTED_SANDBOX' };
       }
     } catch (err: any) {
       paypalStatus = 'ERROR';
       paypalError = err.message;
+      logger.error('[GET /api/integrations/verify] PayPal access token retrieval failed', {
+        errorMessage: err.message,
+        errorCode: err.code || 'PAYPAL_AUTH_ERROR',
+        path: '/api/integrations/verify',
+        stack: err.stack,
+      });
     }
 
     let channel3Status = 'UNKNOWN';
     let channel3ItemCount = 0;
+    logger.debug('[GET /api/integrations/verify] Checking Channel3 multi-merchant catalog connectivity');
     try {
       const searchRes = await defaultChannel3Client.search({ query: 'headphones', limit: 5 });
       channel3Status = 'CONNECTED';
       channel3ItemCount = searchRes.total;
+      logger.info('[GET /api/integrations/verify] Channel3 search check succeeded', {
+        status: channel3Status,
+        itemCount: channel3ItemCount,
+      });
     } catch (err: any) {
       channel3Status = 'OFFLINE_MOCK_FALLBACK';
+      logger.error('[GET /api/integrations/verify] Channel3 catalog search probe failed, using fallback', {
+        errorMessage: err.message,
+        errorCode: err.code || 'CHANNEL3_FALLBACK',
+        path: '/api/integrations/verify',
+        stack: err.stack,
+      });
     }
 
     // Render Cloud Container Telemetry
@@ -51,9 +89,18 @@ export const integrationsVerifyRoutes: FastifyPluginAsync = async (fastify) => {
     const renderServiceName = process.env.RENDER_SERVICE_NAME || 'aegispay-api-orchestrator';
     const renderExternalUrl = process.env.RENDER_EXTERNAL_URL || 'http://localhost:4000';
 
+    logger.debug('[GET /api/integrations/verify] Render environment diagnostics', {
+      isRenderDeployed,
+      renderServiceId,
+      renderInstanceId,
+      renderServiceName,
+      renderExternalUrl,
+    });
+
     let pgLatencyMs = 0;
     let pgStatus = 'DISCONNECTED';
     if (process.env.DATABASE_URL) {
+      logger.debug('[GET /api/integrations/verify] Probing PostgreSQL database connectivity and query latency');
       try {
         const startPg = performance.now();
         const db = createDb(process.env.DATABASE_URL);
@@ -61,12 +108,24 @@ export const integrationsVerifyRoutes: FastifyPluginAsync = async (fastify) => {
         await db.execute(sql`SELECT 1`);
         pgLatencyMs = Number((performance.now() - startPg).toFixed(2));
         pgStatus = 'CONNECTED';
-      } catch {
+        logger.info('[GET /api/integrations/verify] PostgreSQL database probe passed', {
+          latencyMs: pgLatencyMs,
+          status: pgStatus,
+        });
+      } catch (dbErr: any) {
         pgStatus = 'OFFLINE_MOCK_FALLBACK';
+        logger.error('[GET /api/integrations/verify] PostgreSQL database query probe failed', {
+          errorMessage: dbErr.message,
+          errorCode: dbErr.code || 'DB_PROBE_ERROR',
+          path: '/api/integrations/verify',
+          stack: dbErr.stack,
+        });
       }
+    } else {
+      logger.debug('[GET /api/integrations/verify] DATABASE_URL not set; PostgreSQL probe skipped');
     }
 
-    return reply.send({
+    const payload = {
       status: 'HEALTHY',
       timestamp: new Date().toISOString(),
       service: '@aegispay/api-orchestrator',
@@ -163,6 +222,16 @@ export const integrationsVerifyRoutes: FastifyPluginAsync = async (fastify) => {
           double_entry_verified: true,
         },
       },
+    };
+
+    logger.info('[GET /api/integrations/verify] 7-sponsor health check execution complete', {
+      overallStatus: payload.status,
+      paypal: payload.integrations.paypal.status,
+      channel3: payload.integrations.channel3.status,
+      postgres: payload.integrations.postgres_drizzle.status,
+      render: payload.integrations.render.status,
     });
+
+    return reply.send(payload);
   });
 };

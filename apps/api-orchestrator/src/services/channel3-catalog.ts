@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import {
   Channel3SearchFilters as BaseFilters,
   Channel3Offer,
@@ -7,6 +8,8 @@ import {
 } from './channel3.client.js';
 
 dotenv.config();
+
+const logger = createLogger('API:Services:CatalogAndDisputes');
 
 export interface ExtendedChannel3SearchFilters extends BaseFilters {
   sortBy?: 'price_asc' | 'price_desc' | 'relevance';
@@ -441,6 +444,13 @@ export class Channel3CatalogService {
     this.baseUrl = baseUrl || process.env.CHANNEL3_BASE_URL || 'https://api.channel3.ai';
     this.promoCode = promoCode || process.env.CHANNEL3_PROMO_CODE || 'PAYPAL-HACKATHON-2026';
 
+    logger.debug('[Channel3Catalog] Initializing Channel3CatalogService', {
+      baseUrl: this.baseUrl,
+      promoCode: this.promoCode,
+      hasApiKey: Boolean(this.apiKey && this.apiKey !== 'your_channel3_api_key_here'),
+      seedCatalogSize: DEFAULT_MOCK_CATALOG.length,
+    });
+
     // Seed local cache with normalized default mock items
     for (const item of DEFAULT_MOCK_CATALOG) {
       const normalized = normalizeProductDetail(item);
@@ -449,6 +459,10 @@ export class Channel3CatalogService {
         data: normalized,
       });
     }
+
+    logger.info('[Channel3Catalog] Seeded local product cache', {
+      cachedItemsCount: this.productCache.size,
+    });
   }
 
   public getPromoCode(): string {
@@ -476,6 +490,10 @@ export class Channel3CatalogService {
    * price sorting, integer-cents normalization, and fallback resilience.
    */
   async search(filters: ExtendedChannel3SearchFilters): Promise<Channel3SearchResponse> {
+    logger.info('[Channel3Catalog] search invoked', {
+      filters: sanitizeForLogging(filters),
+    });
+
     const cacheKey = JSON.stringify({
       q: filters.query?.toLowerCase() || '',
       c: (filters.category_ids || []).slice().sort(),
@@ -487,16 +505,31 @@ export class Channel3CatalogService {
 
     const cached = this.searchCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.cacheTtlMs) {
+      logger.info('[Channel3Catalog] search cache hit', {
+        cacheKey,
+        total: cached.data.total,
+        returnedCount: cached.data.products.length,
+      });
       return cached.data;
     }
 
+    logger.debug('[Channel3Catalog] search cache miss', { cacheKey });
+
     if (!this.apiKey || this.apiKey === 'your_channel3_api_key_here') {
+      logger.info('[Channel3Catalog] API key not configured or set to placeholder; using deterministic mock search', {
+        query: filters.query,
+      });
       const mockRes = this.getDeterministicMockSearch(filters);
       this.searchCache.set(cacheKey, { timestamp: Date.now(), data: mockRes });
       return mockRes;
     }
 
     try {
+      logger.debug('[Channel3Catalog] Dispatching upstream POST /v1/search request', {
+        endpoint: `${this.baseUrl}/v1/search`,
+        promoCode: this.promoCode,
+      });
+
       const res = await fetch(`${this.baseUrl}/v1/search`, {
         method: 'POST',
         headers: this.getHeaders(),
@@ -511,7 +544,11 @@ export class Channel3CatalogService {
       });
 
       if (!res.ok) {
-        console.warn(`Channel3 search API returned ${res.status}. Falling back to deterministic dataset.`);
+        logger.warn('[Channel3Catalog] Upstream Channel3 search API returned non-OK status. Falling back to deterministic dataset', {
+          status: res.status,
+          statusText: res.statusText,
+          query: filters.query,
+        });
         const fallback = this.getDeterministicMockSearch(filters);
         this.searchCache.set(cacheKey, { timestamp: Date.now(), data: fallback });
         return fallback;
@@ -519,6 +556,11 @@ export class Channel3CatalogService {
 
       const rawData = (await res.json()) as { total?: number; products?: Channel3ProductDetail[] };
       const normalizedProducts = (rawData.products || []).map(p => normalizeProductDetail(p));
+
+      logger.info('[Channel3Catalog] Upstream search succeeded and products normalized', {
+        upstreamTotal: rawData.total,
+        normalizedCount: normalizedProducts.length,
+      });
 
       // Cache individual products
       for (const prod of normalizedProducts) {
@@ -534,10 +576,21 @@ export class Channel3CatalogService {
         products: sortedProducts,
       };
 
+      logger.debug('[Channel3Catalog] Caching search response', {
+        cacheKey,
+        total: response.total,
+        productsCount: response.products.length,
+      });
+
       this.searchCache.set(cacheKey, { timestamp: Date.now(), data: response });
       return response;
-    } catch (err) {
-      console.warn('Channel3 search failed, using deterministic cached mock items:', err);
+    } catch (err: any) {
+      logger.error('[Channel3Catalog] Upstream Channel3 search network call threw an error. Falling back to cached mock items', {
+        errorMessage: err?.message,
+        errorCode: err?.code,
+        stack: err?.stack,
+        query: filters.query,
+      });
       const fallback = this.getDeterministicMockSearch(filters);
       this.searchCache.set(cacheKey, { timestamp: Date.now(), data: fallback });
       return fallback;
@@ -548,7 +601,13 @@ export class Channel3CatalogService {
    * Looks up products by product_id with normalization, caching, and fallback resilience.
    */
   async lookup(productIds: string[]): Promise<Channel3ProductDetail[]> {
+    logger.info('[Channel3Catalog] lookup invoked', {
+      productIds,
+      requestedCount: productIds?.length || 0,
+    });
+
     if (!productIds || productIds.length === 0) {
+      logger.debug('[Channel3Catalog] Empty productIds array passed to lookup; returning empty list');
       return [];
     }
 
@@ -565,11 +624,23 @@ export class Channel3CatalogService {
       }
     }
 
+    logger.debug('[Channel3Catalog] Product cache lookup partition', {
+      cachedHits: results.length,
+      missingIdsCount: missingIds.length,
+      missingIds,
+    });
+
     if (missingIds.length === 0) {
+      logger.info('[Channel3Catalog] All requested products found in local cache', {
+        returnedCount: results.length,
+      });
       return results;
     }
 
     if (!this.apiKey || this.apiKey === 'your_channel3_api_key_here') {
+      logger.info('[Channel3Catalog] API key missing; resolving missing IDs from mock catalog', {
+        missingIds,
+      });
       const mockItems = this.getMockLookupItems(missingIds);
       for (const item of mockItems) {
         this.productCache.set(item.product_id, { timestamp: Date.now(), data: item });
@@ -579,6 +650,10 @@ export class Channel3CatalogService {
     }
 
     try {
+      logger.debug('[Channel3Catalog] Dispatching upstream POST /v1/lookup request', {
+        missingIds,
+      });
+
       const res = await fetch(`${this.baseUrl}/v1/lookup`, {
         method: 'POST',
         headers: this.getHeaders(),
@@ -586,7 +661,11 @@ export class Channel3CatalogService {
       });
 
       if (!res.ok) {
-        console.warn(`Channel3 lookup API returned ${res.status}. Falling back to cached dataset.`);
+        logger.warn('[Channel3Catalog] Upstream Channel3 lookup API returned non-OK status. Falling back to cached dataset', {
+          status: res.status,
+          statusText: res.statusText,
+          missingIds,
+        });
         const fallback = this.getMockLookupItems(missingIds);
         for (const item of fallback) {
           this.productCache.set(item.product_id, { timestamp: Date.now(), data: item });
@@ -598,14 +677,23 @@ export class Channel3CatalogService {
       const data = (await res.json()) as { products?: Channel3ProductDetail[] };
       const fetched = (data.products || []).map(p => normalizeProductDetail(p));
 
+      logger.info('[Channel3Catalog] Upstream lookup succeeded', {
+        fetchedCount: fetched.length,
+      });
+
       for (const item of fetched) {
         this.productCache.set(item.product_id, { timestamp: Date.now(), data: item });
         results.push(item);
       }
 
       return results;
-    } catch (err) {
-      console.warn('Channel3 lookup failed, using cached mock dataset:', err);
+    } catch (err: any) {
+      logger.error('[Channel3Catalog] Upstream Channel3 lookup failed with error; using cached mock dataset', {
+        errorMessage: err?.message,
+        errorCode: err?.code,
+        stack: err?.stack,
+        missingIds,
+      });
       const fallback = this.getMockLookupItems(missingIds);
       for (const item of fallback) {
         this.productCache.set(item.product_id, { timestamp: Date.now(), data: item });
@@ -619,8 +707,13 @@ export class Channel3CatalogService {
    * Deterministic mock search filtering and sorting.
    */
   private getDeterministicMockSearch(filters: ExtendedChannel3SearchFilters): Channel3SearchResponse {
+    logger.debug('[Channel3Catalog] Executing getDeterministicMockSearch', {
+      filters: sanitizeForLogging(filters),
+    });
+
     let pool: Channel3ProductDetail[] = Array.from(this.productCache.values()).map(v => v.data);
     if (pool.length === 0) {
+      logger.debug('[Channel3Catalog] Memory cache pool empty; seeding from DEFAULT_MOCK_CATALOG');
       pool = DEFAULT_MOCK_CATALOG.map(p => normalizeProductDetail(p));
     }
 
@@ -632,6 +725,10 @@ export class Channel3CatalogService {
       filtered = filtered.filter(p =>
         normalizedCats.includes(p.category_id.toLowerCase().trim())
       );
+      logger.debug('[Channel3Catalog] Filtered pool by category_ids', {
+        requestedCategories: normalizedCats,
+        remainingCount: filtered.length,
+      });
     }
 
     // Query filtering: match title and description
@@ -646,6 +743,11 @@ export class Channel3CatalogService {
         const text = `${p.title} ${p.description}`.toLowerCase();
         return tokens.some(token => text.includes(token));
       });
+
+      logger.debug('[Channel3Catalog] Filtered pool by text query tokens', {
+        tokens,
+        remainingCount: filtered.length,
+      });
     }
 
     // Apply deterministic price / relevance sorting
@@ -655,6 +757,13 @@ export class Channel3CatalogService {
     const offset = Math.max(0, filters.offset || 0);
     const limit = Math.max(1, filters.limit || 20);
     const paginated = filtered.slice(offset, offset + limit);
+
+    logger.info('[Channel3Catalog] Deterministic mock search completed', {
+      totalMatches: filtered.length,
+      offset,
+      limit,
+      returnedSliceCount: paginated.length,
+    });
 
     return {
       total: filtered.length,
@@ -679,6 +788,7 @@ export class Channel3CatalogService {
     };
 
     if (sortBy === 'price_asc') {
+      logger.debug('[Channel3Catalog] Sorting products by price_asc');
       list.sort((a, b) => {
         const pa = getMinOfferPrice(a);
         const pb = getMinOfferPrice(b);
@@ -686,6 +796,7 @@ export class Channel3CatalogService {
         return a.product_id.localeCompare(b.product_id); // deterministic tie-breaker
       });
     } else if (sortBy === 'price_desc') {
+      logger.debug('[Channel3Catalog] Sorting products by price_desc');
       list.sort((a, b) => {
         const pa = getMinOfferPrice(a);
         const pb = getMinOfferPrice(b);
@@ -693,7 +804,7 @@ export class Channel3CatalogService {
         return a.product_id.localeCompare(b.product_id);
       });
     } else {
-      // Default: deterministic ordering by product_id
+      logger.debug('[Channel3Catalog] Sorting products by default (product_id tie-breaker)');
       list.sort((a, b) => a.product_id.localeCompare(b.product_id));
     }
 
@@ -709,6 +820,11 @@ export class Channel3CatalogService {
         matches.push(normalizeProductDetail(item));
       }
     }
+
+    logger.debug('[Channel3Catalog] getMockLookupItems matched count', {
+      requested: productIds.length,
+      matched: matches.length,
+    });
 
     return matches;
   }
