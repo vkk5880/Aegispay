@@ -2,6 +2,9 @@ import { task, flow, type FlowContext } from '@renderinc/sdk/workflows';
 import { enhanceContext } from './types.js';
 import { executeReverseShippingLabel } from './reverseShippingLabelTask.js';
 import type { ReturnLabelInfo } from '@aegispay/shared-types';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('Workflows:Tasks');
 
 export type CarrierEventType =
   | 'in_transit'
@@ -36,24 +39,63 @@ export async function processFulfillmentException(
 ): Promise<FulfillmentResolution> {
   const attemptCount = event.delivery_attempt_count || 1;
 
+  logger.info('processFulfillmentException invoked', {
+    order_id: event.order_id,
+    tracking_number: event.tracking_number,
+    carrier: event.carrier,
+    event_type: event.event_type,
+    delivery_attempt_count: attemptCount,
+    reason: event.reason || 'NONE',
+    location: event.location || 'NONE',
+    timestamp: event.timestamp,
+  });
+
   if (event.event_type === 'failed_attempt') {
+    logger.info(`Evaluating failed_attempt branch (attemptCount: ${attemptCount}) for order: ${event.order_id}`);
     if (attemptCount >= 3) {
-      // Automatic provision of reverse shipping label to prevent formal dispute
-      const returnLabel = await executeReverseShippingLabel({
-        disputeId: `dsp_ret_${event.order_id}`,
-        transactionId: event.order_id,
-        carrier: event.carrier || 'USPS',
+      logger.warn(`Delivery attempt count ${attemptCount} >= 3. Automatically provisioning reverse shipping label to prevent formal PayPal dispute.`, {
+        order_id: event.order_id,
+        tracking_number: event.tracking_number,
       });
 
-      return {
-        order_id: event.order_id,
-        status: 'ACTION_REQUIRED',
-        suggested_action: 'AUTO_PROVISION_RETURN_LABEL',
-        resolution_options: ['RESCHEDULE_CARRIER_DROP', 'CONFIRM_RETURN_MERCHANT'],
-        return_label: returnLabel,
-        alert_message: `Delivery failed after ${attemptCount} attempts. A prepaid return shipping label (${returnLabel.tracking_number}) has been auto-provisioned to protect your funds.`,
-      };
+      try {
+        // Automatic provision of reverse shipping label to prevent formal dispute
+        const returnLabel = await executeReverseShippingLabel({
+          disputeId: `dsp_ret_${event.order_id}`,
+          transactionId: event.order_id,
+          carrier: event.carrier || 'USPS',
+        });
+
+        logger.info(`Prepaid reverse shipping label auto-provisioned successfully for failed delivery attempt threshold`, {
+          order_id: event.order_id,
+          return_tracking_number: returnLabel.tracking_number,
+          carrier: returnLabel.carrier,
+        });
+
+        return {
+          order_id: event.order_id,
+          status: 'ACTION_REQUIRED',
+          suggested_action: 'AUTO_PROVISION_RETURN_LABEL',
+          resolution_options: ['RESCHEDULE_CARRIER_DROP', 'CONFIRM_RETURN_MERCHANT'],
+          return_label: returnLabel,
+          alert_message: `Delivery failed after ${attemptCount} attempts. A prepaid return shipping label (${returnLabel.tracking_number}) has been auto-provisioned to protect your funds.`,
+        };
+      } catch (err: any) {
+        logger.error(`Error auto-provisioning reverse shipping label on failed attempt #${attemptCount}`, {
+          error_code: err?.code || 'AUTO_PROVISION_LABEL_ERROR',
+          order_id: event.order_id,
+          message: err?.message,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     }
+
+    logger.info(`Delivery attempt count ${attemptCount} < 3; proposing delivery reschedule or locker redirection`, {
+      order_id: event.order_id,
+      carrier: event.carrier,
+      reason: event.reason,
+    });
 
     return {
       order_id: event.order_id,
@@ -65,6 +107,10 @@ export async function processFulfillmentException(
   }
 
   if (event.event_type === 'ready_for_pickup') {
+    logger.info(`Evaluating ready_for_pickup branch for order ${event.order_id}`, {
+      location: event.location,
+    });
+
     return {
       order_id: event.order_id,
       status: 'ACTION_REQUIRED',
@@ -75,25 +121,47 @@ export async function processFulfillmentException(
   }
 
   if (event.event_type === 'undeliverable') {
-    const returnLabel = await executeReverseShippingLabel({
-      disputeId: `dsp_undeliv_${event.order_id}`,
-      transactionId: event.order_id,
-      carrier: event.carrier || 'USPS',
+    logger.warn(`Evaluating undeliverable branch for order ${event.order_id} (Reason: ${event.reason || 'Address incorrect'}). Auto-provisioning return label.`, {
+      order_id: event.order_id,
+      carrier: event.carrier,
     });
 
-    return {
-      order_id: event.order_id,
-      status: 'ACTION_REQUIRED',
-      suggested_action: 'AUTO_PROVISION_RETURN_LABEL',
-      resolution_options: ['CONFIRM_RETURN_MERCHANT'],
-      return_label: returnLabel,
-      alert_message: `Package deemed undeliverable by ${event.carrier} (${event.reason || 'Address incorrect'}). Prepaid return label provisioned.`,
-    };
+    try {
+      const returnLabel = await executeReverseShippingLabel({
+        disputeId: `dsp_undeliv_${event.order_id}`,
+        transactionId: event.order_id,
+        carrier: event.carrier || 'USPS',
+      });
+
+      logger.info(`Return label successfully provisioned for undeliverable package: ${returnLabel.tracking_number}`, {
+        order_id: event.order_id,
+      });
+
+      return {
+        order_id: event.order_id,
+        status: 'ACTION_REQUIRED',
+        suggested_action: 'AUTO_PROVISION_RETURN_LABEL',
+        resolution_options: ['CONFIRM_RETURN_MERCHANT'],
+        return_label: returnLabel,
+        alert_message: `Package deemed undeliverable by ${event.carrier} (${event.reason || 'Address incorrect'}). Prepaid return label provisioned.`,
+      };
+    } catch (err: any) {
+      logger.error('Error auto-provisioning reverse shipping label for undeliverable package', {
+        error_code: err?.code || 'UNDELIVERABLE_LABEL_ERROR',
+        order_id: event.order_id,
+        message: err?.message,
+        stack: err?.stack,
+      });
+      throw err;
+    }
   }
+
+  const isDelivered = event.event_type === 'delivered';
+  logger.info(`Evaluating standard transit status branch (${event.event_type}) for order ${event.order_id}. isDelivered=${isDelivered}`);
 
   return {
     order_id: event.order_id,
-    status: event.event_type === 'delivered' ? 'RESOLVED' : 'MONITORING',
+    status: isDelivered ? 'RESOLVED' : 'MONITORING',
     suggested_action: 'NONE',
     resolution_options: [],
     alert_message: `Shipment is currently ${event.event_type}.`,
@@ -108,8 +176,22 @@ export const fulfillmentWatcherFlow = flow(
   },
   async (ctx: FlowContext, event: FulfillmentEvent) => {
     const eCtx = enhanceContext(ctx);
+
+    logger.info('fulfillmentWatcherFlow initiated', {
+      order_id: event.order_id,
+      event_type: event.event_type,
+      tracking_number: event.tracking_number,
+    });
+
     return await eCtx.step('process-fulfillment-event', async () => {
-      return await processFulfillmentException(event);
+      logger.debug('Durable checkpoint: process-fulfillment-event');
+      const res = await processFulfillmentException(event);
+      logger.info('processFulfillmentException completed', {
+        order_id: res.order_id,
+        status: res.status,
+        suggested_action: res.suggested_action,
+      });
+      return res;
     });
   }
 );
