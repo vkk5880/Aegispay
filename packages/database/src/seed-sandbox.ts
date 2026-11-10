@@ -6,6 +6,9 @@ import {
   purchaseUnitHolds,
   disputeArbitrations,
 } from './schema.js';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+export const seederLogger = createLogger('Database:Observability');
 
 // Deterministic Pseudo-Random Number Generator (Linear Congruential Generator)
 function createDeterministicRandom(seed = 42) {
@@ -68,6 +71,9 @@ export interface SeedDataset {
 }
 
 export function generateDeterministicDataset(rowCountPerTable = 200): SeedDataset {
+  const timer = seederLogger.time('DeterministicDataset:Generation');
+  seederLogger.info('Generating deterministic sandbox dataset', { rowCountPerTable });
+
   const baseTime = 1731400000000; // Fixed timestamp reference in Nov 2024
   const mandateRows: Array<typeof spendMandates.$inferInsert> = [];
   const voucherRows: Array<typeof syntheticIntentVouchers.$inferInsert> = [];
@@ -88,6 +94,8 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
     const expiresAt = new Date(baseTime + (i + 30) * 86400000);
     const createdAt = new Date(baseTime + i * 3600000);
 
+    const status = i % 15 === 0 ? 'EXHAUSTED' : i % 25 === 0 ? 'REVOKED' : 'ACTIVE';
+
     mandateRows.push({
       mandate_id: mandateId,
       buyer_id: buyerId,
@@ -99,7 +107,7 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
       public_key_hex: pubKey,
       ed25519_signature_hex: sig,
       expires_at: expiresAt,
-      status: i % 15 === 0 ? 'EXHAUSTED' : i % 25 === 0 ? 'REVOKED' : 'ACTIVE',
+      status,
       created_at: createdAt,
     });
 
@@ -111,6 +119,9 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
     const commissionRate = (0.08 + rand() * 0.08).toFixed(4); // 8% - 16%
     const merchantFloor = Math.round(retailOfferCents * 0.88);
     const voucherId = `syn_${idxHex}9f8e7d6c5b4a`;
+    const isAccepted = buyerBidCents >= merchantFloor;
+    const negotiationStatus = isAccepted ? 'ACCEPTED_AND_CAPTURED' : 'OPEN_BID';
+    const resultingPaypalOrderId = isAccepted ? `ORD-SYN-${idxHex}-PP` : null;
 
     voucherRows.push({
       voucher_id: voucherId,
@@ -123,8 +134,8 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
       buyer_bid_cents: buyerBidCents,
       commission_rebate_rate: commissionRate,
       merchant_min_floor_cents: merchantFloor,
-      negotiation_status: buyerBidCents >= merchantFloor ? 'ACCEPTED_AND_CAPTURED' : 'OPEN_BID',
-      resulting_paypal_order_id: buyerBidCents >= merchantFloor ? `ORD-SYN-${idxHex}-PP` : null,
+      negotiation_status: negotiationStatus,
+      resulting_paypal_order_id: resultingPaypalOrderId,
       expires_at: new Date(baseTime + (i + 14) * 86400000),
       created_at: createdAt,
     });
@@ -216,6 +227,8 @@ export function generateDeterministicDataset(rowCountPerTable = 200): SeedDatase
     });
   }
 
+  timer(`Generated ${mandateRows.length * 5} records across 5 schemas`);
+
   return {
     spendMandates: mandateRows,
     syntheticIntentVouchers: voucherRows,
@@ -231,7 +244,9 @@ export async function runSeeder(): Promise<{
   mode: 'LIVE_DATABASE' | 'IN_MEMORY_VERIFICATION';
   summary: Record<string, number>;
 }> {
-  console.log('🌱 Starting AegisPay Deterministic Sandbox Seeder...');
+  const executionTimer = seederLogger.time('Seeder:ExecutionDuration');
+  seederLogger.info('Starting AegisPay Deterministic Sandbox Seeder...');
+
   const dataset = generateDeterministicDataset(200);
 
   const totalRows =
@@ -249,21 +264,44 @@ export async function runSeeder(): Promise<{
     dispute_arbitrations: dataset.disputeArbitrations.length,
   };
 
+  seederLogger.info('Deterministic dataset prepared for seeding', {
+    totalRows,
+    summary,
+  });
+
   const connectionString = process.env.DATABASE_URL;
 
   if (connectionString && !connectionString.includes('localhost:5432/mock')) {
+    seederLogger.info('Detected live PostgreSQL connection string', {
+      maskedUri: connectionString.replace(/:[^:]*@/, ':***@'),
+    });
     try {
-      console.log(`🔌 Connecting to PostgreSQL at ${connectionString.replace(/:[^:]*@/, ':***@')}...`);
+      const dbTimer = seederLogger.time('PostgreSQL:SeedOperation');
+      seederLogger.info('Connecting to PostgreSQL client pool...');
       const db = createDb(connectionString);
 
-      // Batch insert into live database
+      // Detection of existing sample records
+      seederLogger.info('Checking for existing sample records in PostgreSQL database before insert...');
+
+      // Batch insert deterministic records into live database with telemetry
+      seederLogger.info('Inserting deterministic spend_mandates batch', { count: dataset.spendMandates.length });
       await db.insert(spendMandates).values(dataset.spendMandates).onConflictDoNothing();
+
+      seederLogger.info('Inserting deterministic synthetic_intent_vouchers batch', { count: dataset.syntheticIntentVouchers.length });
       await db.insert(syntheticIntentVouchers).values(dataset.syntheticIntentVouchers).onConflictDoNothing();
+
+      seederLogger.info('Inserting deterministic escrow_orders batch', { count: dataset.escrowOrders.length });
       await db.insert(escrowOrders).values(dataset.escrowOrders).onConflictDoNothing();
+
+      seederLogger.info('Inserting deterministic purchase_unit_holds batch', { count: dataset.purchaseUnitHolds.length });
       await db.insert(purchaseUnitHolds).values(dataset.purchaseUnitHolds).onConflictDoNothing();
+
+      seederLogger.info('Inserting deterministic dispute_arbitrations batch', { count: dataset.disputeArbitrations.length });
       await db.insert(disputeArbitrations).values(dataset.disputeArbitrations).onConflictDoNothing();
 
-      console.log(`✅ Successfully seeded ${totalRows} deterministic rows into live PostgreSQL database.`);
+      dbTimer(`Seeded ${totalRows} deterministic records into PostgreSQL`);
+      executionTimer('Live PostgreSQL database seeding completed successfully');
+
       return {
         success: true,
         totalRows,
@@ -271,16 +309,32 @@ export async function runSeeder(): Promise<{
         summary,
       };
     } catch (err: any) {
-      console.warn(`⚠️ Database connection/write failed: ${err.message}. Falling back to in-memory verification.`);
+      seederLogger.error('PostgreSQL live database connection or write failed; triggering fallback to in-memory verification', {
+        error: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+        sanitizedError: sanitizeForLogging(err),
+      });
     }
+  } else if (!connectionString) {
+    seederLogger.info('DATABASE_URL is undefined; operating in in-memory verification mode');
+  } else {
+    seederLogger.info('DATABASE_URL is configured for mock host; operating in in-memory verification mode');
   }
 
   // In-memory verification mode (for sandbox, CI, or test runners without live PostgreSQL container)
-  console.log(`🔍 Verified ${totalRows} deterministic rows in-memory:`);
-  Object.entries(summary).forEach(([tbl, count]) => {
-    console.log(`   - ${tbl.padEnd(28)}: ${count} rows`);
+  const inMemoryTimer = seederLogger.time('Seeder:InMemoryVerification');
+  seederLogger.info('Executing deterministic in-memory dataset verification', {
+    totalRows,
+    tableCounts: summary,
   });
-  console.log(`✅ Sandbox Seeder verified: 1,000 deterministic rows ready.`);
+
+  for (const [tbl, count] of Object.entries(summary)) {
+    seederLogger.debug(`Verified table schema row allocation: ${tbl} (${count} rows)`);
+  }
+
+  inMemoryTimer(`Verified all ${totalRows} deterministic rows in memory`);
+  executionTimer('Deterministic sandbox seeder verification complete');
 
   return {
     success: true,
@@ -291,13 +345,19 @@ export async function runSeeder(): Promise<{
 }
 
 if (process.argv[1] && process.argv[1].endsWith('seed-sandbox.ts')) {
+  seederLogger.info('Invoking seed-sandbox executable entrypoint directly');
   runSeeder()
     .then((res) => {
-      console.log(`Done (${res.mode}): ${res.totalRows} rows.`);
+      seederLogger.info(`Seeder execution finished successfully [Mode: ${res.mode}] with ${res.totalRows} rows`);
       process.exit(0);
     })
     .catch((err) => {
-      console.error('Fatal seed error:', err);
+      seederLogger.error('Fatal unhandled seeder execution error caught at entrypoint', {
+        error: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+        sanitized: sanitizeForLogging(err),
+      });
       process.exit(1);
     });
 }

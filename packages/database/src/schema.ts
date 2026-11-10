@@ -12,6 +12,9 @@ import {
   check,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+export const schemaLogger = createLogger('Database:Observability');
 
 export const spendMandates = pgTable(
   'spend_mandates',
@@ -184,3 +187,175 @@ export const disputeArbitrations = pgTable(
 
 export * from './schema/user-memories.js';
 
+/**
+ * SQLite PRAGMA and DDL Deep Logging & Execution Subsystem
+ */
+
+export interface SqlitePragmaConfig {
+  foreignKeys: boolean;
+  busyTimeout: number;
+  walMode: boolean;
+  synchronous: 'NORMAL' | 'FULL' | 'OFF';
+}
+
+export interface SqlitePragmaLogContext {
+  location: string;
+  config: SqlitePragmaConfig;
+  appliedPragmas: string[];
+}
+
+/**
+ * Executes and logs SQLite PRAGMA configurations with deep observability.
+ */
+export function logAndApplySqlitePragmas(
+  db: { exec(sql: string): void },
+  location: string,
+  options: {
+    foreignKeys?: boolean;
+    busyTimeout?: number;
+    walMode?: boolean;
+    synchronous?: 'NORMAL' | 'FULL' | 'OFF';
+  } = {}
+): SqlitePragmaLogContext {
+  schemaLogger.info('Initializing SQLite database connection and PRAGMA settings', {
+    location,
+    isMemory: location === ':memory:',
+  });
+
+  const foreignKeys = options.foreignKeys ?? true;
+  const busyTimeout = options.busyTimeout ?? 5000;
+  const walMode = options.walMode ?? true;
+  const synchronous = options.synchronous ?? 'NORMAL';
+
+  const config: SqlitePragmaConfig = {
+    foreignKeys,
+    busyTimeout,
+    walMode,
+    synchronous,
+  };
+
+  const appliedPragmas: string[] = [];
+
+  // PRAGMA foreign_keys = ON;
+  if (foreignKeys) {
+    try {
+      schemaLogger.debug('Executing SQLite PRAGMA: foreign_keys = ON');
+      db.exec('PRAGMA foreign_keys = ON;');
+      appliedPragmas.push('PRAGMA foreign_keys = ON;');
+      schemaLogger.info('SQLite PRAGMA foreign_keys = ON applied successfully');
+    } catch (err: any) {
+      schemaLogger.error('Failed executing PRAGMA foreign_keys = ON', {
+        error: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+      });
+      throw err;
+    }
+  } else {
+    schemaLogger.warn('SQLite PRAGMA foreign_keys skipped by configuration');
+  }
+
+  // PRAGMA busy_timeout
+  try {
+    const pragmaBusy = `PRAGMA busy_timeout = ${Number(busyTimeout)};`;
+    schemaLogger.debug(`Executing SQLite PRAGMA: busy_timeout = ${busyTimeout}ms`);
+    db.exec(pragmaBusy);
+    appliedPragmas.push(pragmaBusy);
+    schemaLogger.info(`SQLite PRAGMA busy_timeout = ${busyTimeout}ms applied successfully`);
+  } catch (err: any) {
+    schemaLogger.error('Failed executing PRAGMA busy_timeout', {
+      busyTimeout,
+      error: err?.message,
+      code: err?.code,
+      stack: err?.stack,
+    });
+    throw err;
+  }
+
+  // PRAGMA journal_mode = WAL;
+  if (walMode && location !== ':memory:') {
+    try {
+      schemaLogger.debug('Executing SQLite PRAGMA: journal_mode = WAL');
+      db.exec('PRAGMA journal_mode = WAL;');
+      appliedPragmas.push('PRAGMA journal_mode = WAL;');
+      schemaLogger.info('SQLite PRAGMA journal_mode = WAL applied successfully');
+    } catch (err: any) {
+      schemaLogger.error('Failed executing PRAGMA journal_mode = WAL', {
+        location,
+        error: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+      });
+      throw err;
+    }
+  } else if (location === ':memory:') {
+    schemaLogger.debug('SQLite journal_mode = WAL bypassed for in-memory database');
+  } else {
+    schemaLogger.warn('SQLite PRAGMA journal_mode = WAL disabled by configuration');
+  }
+
+  // PRAGMA synchronous = NORMAL;
+  try {
+    const pragmaSync = `PRAGMA synchronous = ${synchronous};`;
+    schemaLogger.debug(`Executing SQLite PRAGMA: synchronous = ${synchronous}`);
+    db.exec(pragmaSync);
+    appliedPragmas.push(pragmaSync);
+    schemaLogger.info(`SQLite PRAGMA synchronous = ${synchronous} applied successfully`);
+  } catch (err: any) {
+    schemaLogger.error(`Failed executing PRAGMA synchronous = ${synchronous}`, {
+      synchronous,
+      error: err?.message,
+      code: err?.code,
+      stack: err?.stack,
+    });
+    throw err;
+  }
+
+  return { location, config, appliedPragmas };
+}
+
+/**
+ * Executes and logs SQLite DDL table and index creations with timing and error diagnostics.
+ */
+export function logAndExecuteSqliteDdl(
+  db: { exec(sql: string): void },
+  ddlStatements: Array<{ label: string; ddl: string }>
+): void {
+  schemaLogger.info(`Beginning SQLite DDL execution sequence (${ddlStatements.length} statements)`);
+  const totalTimer = schemaLogger.time('SQLite:DDL:All');
+
+  for (const { label, ddl } of ddlStatements) {
+    const stepTimer = schemaLogger.time(`SQLite:DDL:${label}`);
+    schemaLogger.debug(`Executing SQLite DDL: ${label}`, { ddl_preview: ddl.trim().slice(0, 120) });
+    try {
+      db.exec(ddl);
+      stepTimer(`Executed SQLite DDL statement for: ${label}`);
+    } catch (err: any) {
+      schemaLogger.error(`SQLite DDL execution failed on statement: ${label}`, {
+        label,
+        ddl,
+        error: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+      });
+      throw err;
+    }
+  }
+
+  totalTimer(`All ${ddlStatements.length} SQLite DDL statements completed successfully`);
+}
+
+/**
+ * Logs SQLite database errors with comprehensive diagnostics.
+ */
+export function logSqliteDatabaseError(
+  context: string,
+  error: unknown,
+  meta?: Record<string, unknown>
+): void {
+  schemaLogger.error(`SQLite database operation error in [${context}]`, {
+    context,
+    error: sanitizeForLogging(error),
+    meta: meta ? sanitizeForLogging(meta) : undefined,
+  });
+}
