@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+import { verifySessionToken } from './auth.js';
 
 const logger = createLogger('API:Middleware:HTTP402');
 
@@ -607,6 +608,36 @@ export const http402Interceptor = async (
 
   logger.info('Request matched protected paywall route; evaluating payment credentials and proofs', { path });
   const hmacSecret = options?.hmacSecret || DEFAULT_SECRET;
+
+  // Check 0a: Scoped read-only tracking token rejection
+  try {
+    const authHeader = request.headers.authorization;
+    const sessionTokenHeader = request.headers['x-session-token'] as string | undefined;
+    let rawToken: string | undefined;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      rawToken = authHeader.substring(7).trim();
+    } else if (sessionTokenHeader) {
+      rawToken = sessionTokenHeader.trim();
+    }
+    if (rawToken) {
+      const verified = verifySessionToken(rawToken);
+      if (verified?.scope === 'order_tracking') {
+        logger.warn('HTTP 402 interceptor strictly rejecting order_tracking token on protected route', {
+          path,
+          orderId: verified.orderId,
+        });
+        return reply.code(403).send({
+          error: 'READ_ONLY_ACCESS',
+          message: `This session is restricted to tracking order ${verified.orderId || ''}. To make purchases, please authenticate with PayPal or start an active shopping session.`,
+          order_id: verified.orderId,
+        });
+      }
+    }
+  } catch (error: any) {
+    logger.error('Error during order_tracking token check in HTTP 402 interceptor', {
+      error: error.message,
+    });
+  }
 
   // Check 0: Payment-Identifier Idempotency Check with defensive error boundary
   try {

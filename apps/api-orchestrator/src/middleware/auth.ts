@@ -4,11 +4,17 @@ import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 
 const logger = createLogger('API:Middleware:Auth');
 
+export type TokenScope = 'identity_only' | 'autonomous_buyer' | 'order_tracking' | 'standard';
+
 export interface AuthUser {
   id: string;
   tenantId: string;
   role?: 'buyer' | 'merchant' | 'admin' | 'guest';
   isAnonymous?: boolean;
+  scope?: TokenScope;
+  orderId?: string;
+  mandateId?: string;
+  hasMandate?: boolean;
   iat: number;
   exp: number;
 }
@@ -44,6 +50,10 @@ export function createSessionToken(params: {
   tenantId?: string;
   role?: 'buyer' | 'merchant' | 'admin' | 'guest';
   isAnonymous?: boolean;
+  scope?: TokenScope;
+  orderId?: string;
+  mandateId?: string;
+  hasMandate?: boolean;
   expiresInSeconds?: number;
 }): string {
   const now = Math.floor(Date.now() / 1000);
@@ -55,6 +65,10 @@ export function createSessionToken(params: {
     tenantId: params.tenantId || `tenant-${params.id}`,
     role: params.role || 'buyer',
     isAnonymous: params.isAnonymous ?? false,
+    scope: params.scope || 'standard',
+    orderId: params.orderId,
+    mandateId: params.mandateId,
+    hasMandate: params.hasMandate ?? Boolean(params.mandateId),
     iat: now,
     exp,
   };
@@ -63,6 +77,10 @@ export function createSessionToken(params: {
     userId: payload.id,
     tenantId: payload.tenantId,
     role: payload.role,
+    scope: payload.scope,
+    orderId: payload.orderId,
+    mandateId: payload.mandateId,
+    hasMandate: payload.hasMandate,
     isAnonymous: payload.isAnonymous,
     iat: payload.iat,
     exp: payload.exp,
@@ -82,9 +100,60 @@ export function createSessionToken(params: {
     userId: payload.id,
     tenantId: payload.tenantId,
     role: payload.role,
+    scope: payload.scope,
     tokenPreview: `${token.slice(0, 16)}...`,
   });
   return token;
+}
+
+/**
+ * Creates a scoped Read-Only Order Tracking Token for receipt links or email notifications.
+ * Valid for 7 days by default. Cannot be used to execute purchases or spend mandates.
+ */
+export function createOrderTrackingToken(orderId: string, userId = 'tracking_guest', expiresInSeconds = 7 * 86400): string {
+  return createSessionToken({
+    id: userId,
+    tenantId: `tenant-tracking-${orderId}`,
+    role: 'guest',
+    scope: 'order_tracking',
+    orderId,
+    isAnonymous: true,
+    hasMandate: false,
+    expiresInSeconds,
+  });
+}
+
+/**
+ * Creates a $0 Identity-Only Session Token (e.g., from "Sign in with PayPal" without spend mandate).
+ * Unlocks history across browsers but requires explicit mandate authorization before autonomous buying.
+ */
+export function createIdentityOnlyToken(userId: string, expiresInSeconds = 86400): string {
+  return createSessionToken({
+    id: userId,
+    tenantId: `tenant-${userId}`,
+    role: 'buyer',
+    scope: 'identity_only',
+    isAnonymous: false,
+    hasMandate: false,
+    expiresInSeconds,
+  });
+}
+
+/**
+ * Creates an Autonomous Buyer Session Token backed by an active Ed25519 Spend Mandate.
+ * Enables 1-prompt autonomous buying within budget caps.
+ */
+export function createAutonomousBuyerToken(userId: string, mandateId: string, expiresInSeconds = 86400): string {
+  return createSessionToken({
+    id: userId,
+    tenantId: `tenant-${userId}`,
+    role: 'buyer',
+    scope: 'autonomous_buyer',
+    mandateId,
+    hasMandate: true,
+    isAnonymous: false,
+    expiresInSeconds,
+  });
 }
 
 /**
@@ -219,8 +288,29 @@ export async function authenticateUser(request: FastifyRequest, reply: FastifyRe
         userId: user.id,
         tenantId: user.tenantId,
         role: user.role,
+        scope: user.scope,
         path,
       });
+
+      // Strict Scoped Security: Block order_tracking tokens from performing state mutations or purchasing
+      if (user.scope === 'order_tracking') {
+        const isRead = request.method === 'GET' || request.method === 'HEAD' || request.method === 'OPTIONS';
+        // /api/buyer/chat is conversational; all mutations (prefs, watchlist, escrow, vault, authorize) are blocked
+        if (!isRead && path !== '/api/buyer/chat') {
+          logger.warn('Rejecting write operation for order_tracking scoped token', {
+            userId: user.id,
+            orderId: user.orderId,
+            path,
+            method: request.method,
+          });
+          return reply.status(403).send({
+            error: 'READ_ONLY_ACCESS',
+            message: `This session is restricted to tracking order ${user.orderId || ''}. To make purchases, please authenticate with PayPal or start an active shopping session.`,
+            order_id: user.orderId,
+          });
+        }
+      }
+
       request.user = user;
       return;
     }

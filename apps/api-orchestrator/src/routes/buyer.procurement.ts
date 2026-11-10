@@ -10,6 +10,7 @@ import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
 import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 import { SpendMandateSchema } from '@aegispay/shared-types';
 import { renderWorkflowClient } from '../services/render-workflow-client.js';
+import { authenticateUser, createOrderTrackingToken } from '../middleware/auth.js';
 
 const logger = createLogger('API:Routes:Procurement');
 
@@ -110,7 +111,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/vault/setup
    * Creates one-time Vault v3 setup session for off-session agent purchasing
    */
-  fastify.post('/api/buyer/vault/setup', async (request, reply) => {
+  fastify.post('/api/buyer/vault/setup', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/buyer/vault/setup');
     logger.debug('Received Vault setup session creation request', {
       body: sanitizeForLogging(request.body || {}),
@@ -174,7 +175,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/vault/confirm
    * Converts Vault v3 setup-token to durable paypal_payment_token_id
    */
-  fastify.post('/api/buyer/vault/confirm', async (request, reply) => {
+  fastify.post('/api/buyer/vault/confirm', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/buyer/vault/confirm');
     logger.debug('Received Vault token confirmation request', {
       body: sanitizeForLogging(request.body),
@@ -352,7 +353,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/authorize
    * Two-Phase Commit (2PC) inventory pre-check + Multi-purchase unit PayPal v2 Order with intent: "AUTHORIZE"
    */
-  fastify.post('/api/buyer/authorize', async (request, reply) => {
+  fastify.post('/api/buyer/authorize', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/buyer/authorize');
     logger.debug('Received Escrow Order authorization request', {
       body: sanitizeForLogging(request.body),
@@ -491,9 +492,13 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         purchaseUnitIds: purchase_units.map((pu: any, i: number) => pu.reference_id || `pu_${i}`),
       });
 
+      const trackingToken = createOrderTrackingToken(orderId, request.user?.id || 'guest');
+      const trackingUrl = `/history?order_id=${encodeURIComponent(orderId)}&token=${encodeURIComponent(trackingToken)}`;
+
       logger.info('Escrow order authorization workflow dispatched and finalized', {
         orderId,
         mandateId: mandate_id,
+        trackingUrl,
         workflowExecutionId: (workflowDispatch as any)?.execution_id || (workflowDispatch as any)?.workflow_id || 'none',
       });
       routeTimer('Order authorized successfully');
@@ -507,6 +512,8 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         stock_reservation_status: 'HELD_2PC',
         readback_verified: true,
         workflow_dispatch: workflowDispatch,
+        tracking_token: trackingToken,
+        tracking_url: trackingUrl,
         order: verifiedOrder,
       });
     } catch (err: any) {
@@ -560,7 +567,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/synthetic-bid
    * Mints Vault v3 setup-token and negotiates autonomous discount
    */
-  fastify.post('/api/buyer/synthetic-bid', async (request, reply) => {
+  fastify.post('/api/buyer/synthetic-bid', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/buyer/synthetic-bid');
     logger.debug('Received Synthetic Intent Bid proposal request', {
       body: sanitizeForLogging(request.body),
@@ -658,7 +665,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/counter-bid
    * Evaluates 2-turn bounded negotiation counter-offer against Ed25519 mandate
    */
-  fastify.post('/api/buyer/counter-bid', async (request, reply) => {
+  fastify.post('/api/buyer/counter-bid', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/buyer/counter-bid');
     logger.debug('Received Counter-Bid negotiation evaluation request', {
       body: sanitizeForLogging(request.body),
@@ -748,7 +755,7 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/capture
    * Executes autonomous capture on an approved PayPal order with < 1ms compensating rollback on failure
    */
-  fastify.post('/api/buyer/capture', async (request, reply) => {
+  fastify.post('/api/buyer/capture', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/buyer/capture');
     logger.debug('Received autonomous Order capture request', {
       body: sanitizeForLogging(request.body),

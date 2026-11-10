@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSessionToken, verifySessionToken, authenticateUser, AuthUser } from './auth.js';
+import {
+  createSessionToken,
+  verifySessionToken,
+  authenticateUser,
+  createOrderTrackingToken,
+  createIdentityOnlyToken,
+  createAutonomousBuyerToken,
+  AuthUser,
+} from './auth.js';
 import { isOfferFresh, MAX_OFFER_AGE_MS } from '../services/channel3.client.js';
 import { AtomicSpendEnforcer, SpendMandateDbRecord } from '@aegispay/mcp-enforcer';
 import { buildApp } from '../index.js';
@@ -246,4 +254,106 @@ test('custody enforcer Guardrail 3: Fails closed in production when both Redis a
   } finally {
     process.env.NODE_ENV = originalEnv;
   }
+});
+
+test('auth scopes: createOrderTrackingToken creates read-only token and blocks state mutations with HTTP 403', async () => {
+  const trackingToken = createOrderTrackingToken('ord_test_884920491');
+  const payload = verifySessionToken(trackingToken);
+
+  assert.ok(payload);
+  assert.equal(payload.scope, 'order_tracking');
+  assert.equal(payload.orderId, 'ord_test_884920491');
+  assert.equal(payload.hasMandate, false);
+
+  const app = await buildApp();
+
+  // GET is permitted for read-only tracking token
+  const readRes = await app.inject({
+    method: 'GET',
+    url: '/api/buyer/history',
+    headers: {
+      authorization: `Bearer ${trackingToken}`,
+    },
+  });
+  assert.equal(readRes.statusCode, 200);
+
+  // POST to mutation endpoint (/api/buyer/authorize) is strictly rejected with 403 READ_ONLY_ACCESS
+  const writeRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/authorize',
+    headers: {
+      authorization: `Bearer ${trackingToken}`,
+    },
+    payload: {
+      mandate_id: 'vch_hacked',
+      purchase_units: [{ reference_id: 'pu_1', amount: { currency_code: 'USD', value: '50.00' } }],
+    },
+  });
+  assert.equal(writeRes.statusCode, 403);
+  const writeJson = writeRes.json();
+  assert.equal(writeJson.error, 'READ_ONLY_ACCESS');
+  assert.equal(writeJson.order_id, 'ord_test_884920491');
+});
+
+test('auth scopes: identity_only vs autonomous_buyer token behavior in /api/buyer/chat', async () => {
+  const app = await buildApp();
+
+  // 1. Order tracking token attempting to BUY is blocked with read-only notice
+  const trackingToken = createOrderTrackingToken('ord_target_123');
+  const trackingChatRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    headers: {
+      authorization: `Bearer ${trackingToken}`,
+    },
+    payload: {
+      message: 'Buy headphones right now',
+      action: 'BUY',
+    },
+  });
+  assert.equal(trackingChatRes.statusCode, 200);
+  const trackingChatJson = trackingChatRes.json();
+  assert.equal(trackingChatJson.read_only_tracking, true);
+  assert.ok(trackingChatJson.markdown.includes('Read-Only Session Active'));
+
+  // 2. Identity-only token ($0 sign in) attempting to BUY prompts spend mandate setup
+  const identityToken = createIdentityOnlyToken('usr_pp_identity');
+  const idChatRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    headers: {
+      authorization: `Bearer ${identityToken}`,
+    },
+    payload: {
+      message: 'Buy headphones right now',
+      action: 'BUY',
+    },
+  });
+  assert.equal(idChatRes.statusCode, 200);
+  const idChatJson = idChatRes.json();
+  assert.equal(idChatJson.requires_spend_mandate, true);
+  assert.equal(idChatJson.hitl_approval_required, true);
+  assert.ok(idChatJson.markdown.includes('$0 Sign-In'));
+
+  // 3. Autonomous buyer token executes 1-prompt buy end-to-end
+  const autoBuyerToken = createAutonomousBuyerToken('usr_pp_buyer', 'vch_active_123');
+  const autoChatRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    headers: {
+      authorization: `Bearer ${autoBuyerToken}`,
+    },
+    payload: {
+      message: 'Buy headphones right now',
+      action: 'BUY',
+      budget_cap_cents: 60000,
+    },
+  });
+  assert.equal(autoChatRes.statusCode, 200);
+  const autoChatJson = autoChatRes.json();
+  assert.equal(autoChatJson.autonomous_buy_executed, true);
+  assert.ok(autoChatJson.order_id);
+  assert.ok(autoChatJson.tracking_number);
+  assert.ok(autoChatJson.tracking_url);
+  assert.ok(autoChatJson.markdown.includes('1-Prompt Autonomous Purchase Complete!'));
 });

@@ -1085,7 +1085,8 @@ export class ShoppingAssistantService {
       if (timeoutId) clearTimeout(timeoutId);
 
       if (runResult?.status !== 'success' || !runResult?.result) {
-        throw new Error(`Mastra Workflow DAG failed execution with status: ${runResult?.status}`);
+        const errorDetail = (runResult as any)?.error?.message || (runResult as any)?.error || JSON.stringify((runResult as any)?.steps);
+        throw new Error(`Mastra Workflow DAG failed execution with status: ${runResult?.status} - ${errorDetail}`);
       }
 
       // Validate emitted output strictly against Zod schema
@@ -1104,6 +1105,25 @@ export class ShoppingAssistantService {
         : request.budget_cap_cents || 5000;
 
       const fallbackQuery = this.extractSearchQuery(request.message);
+      const resolvedIntent = this.resolveIntent(request.message, request.action);
+
+      if (resolvedIntent === 'BUY') {
+        const buyResult = await this.executeBuyWorkflow({
+          query: fallbackQuery,
+          product_ids: request.product_ids,
+          budget_cap_cents: fallbackAmountCents,
+          zip_code: request.zip_code,
+          trace: [
+            `[Circuit Breaker Fallback] Switched to deterministic Buy workflow: ${proposal.toolCall.toolName}`,
+          ],
+        });
+        return {
+          ...buyResult,
+          active_model: 'local-financial-reasoner-v1',
+          requires_human_confirmation: true,
+        };
+      }
+
       const discoverResult = await this.executeDiscoverWorkflow({
         query: fallbackQuery,
         budget_cap_cents: fallbackAmountCents,
@@ -1367,7 +1387,8 @@ export class ShoppingAssistantService {
     )) as { cart: KnapsackOptimizationResult };
 
     // Validate emitted cart against ExplainableCartPayloadSchema
-    const rawCart = (solveCartRes as any)?.cart || solveCartRes;
+    const candidateCart = (solveCartRes as any)?.cart || (solveCartRes as any)?.result?.cart || (solveCartRes as any)?.result || solveCartRes;
+    const rawCart = candidateCart?.assigned_merchants ? candidateCart : (candidateCart as any)?.cart || candidateCart;
     const validatedCart: ExplainableCartPayload = ExplainableCartPayloadSchema.parse(rawCart);
 
     trace.push(

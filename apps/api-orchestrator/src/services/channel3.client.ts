@@ -991,7 +991,20 @@ export class Channel3Client {
 
   private getMockLookupResponse(productIds: string[]): Channel3ProductDetail[] {
     const fullSet = this.getMockSearchResponse({}).products;
-    return fullSet.filter((p) => productIds.includes(p.product_id));
+    const matches = fullSet.filter((p) => productIds.includes(p.product_id));
+    if (matches.length > 0) {
+      return matches;
+    }
+    // Synthesize fallback offers for requested product IDs so lookup always succeeds
+    return productIds.map((id, idx) => {
+      const base = fullSet[idx % fullSet.length];
+      return {
+        ...base,
+        product_id: id,
+        title: base.title,
+        offers: base.offers.map(o => ({ ...o, product_id: id })),
+      };
+    });
   }
 
   /**

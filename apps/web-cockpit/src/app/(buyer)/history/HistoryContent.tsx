@@ -160,11 +160,32 @@ export function HistoryContent({
   const [activeTab, setActiveTab] = useState<'orders' | 'receipts'>('orders');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [trackingToken, setTrackingToken] = useState<string | null>(null);
+  const [targetOrderId, setTargetOrderId] = useState<string | null>(null);
 
   useEffect(() => {
+    let activeToken: string | null = null;
+    let activeOrderId: string | null = null;
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      activeToken = params.get('token');
+      activeOrderId = params.get('order_id');
+      if (activeToken) setTrackingToken(activeToken);
+      if (activeOrderId) setTargetOrderId(activeOrderId);
+    }
+
     async function loadData() {
+      const headers: Record<string, string> = {};
+      if (activeToken) {
+        headers['authorization'] = `Bearer ${activeToken}`;
+      }
+
       try {
-        const res = await fetch('/api/buyer/history?user_id=demo');
+        const historyUrl = activeOrderId
+          ? `/api/buyer/history?user_id=demo&order_id=${encodeURIComponent(activeOrderId)}`
+          : '/api/buyer/history?user_id=demo';
+        const res = await fetch(historyUrl, { headers });
         if (res.ok) {
           const data = await res.json();
           if (data.history && Array.isArray(data.history) && data.history.length > 0) {
@@ -176,7 +197,7 @@ export function HistoryContent({
       }
 
       try {
-        const resReceipts = await fetch('/api/buyer/receipts?user_id=demo');
+        const resReceipts = await fetch('/api/buyer/receipts?user_id=demo', { headers });
         if (resReceipts.ok) {
           const data = await resReceipts.json();
           if (data.receipts && Array.isArray(data.receipts) && data.receipts.length > 0) {
@@ -271,6 +292,36 @@ export function HistoryContent({
             ? 'Autonomous 2PC escrow holds, price-drop watcher captures, and cryptographically verified transaction receipts.'
             : 'Track your purchases, delivery progress, and official receipts with PayPal purchase protection.'}
         </p>
+
+        {/* Scoped Read-Only Tracking Mode Banner */}
+        {Boolean(trackingToken || targetOrderId) && (
+          <div className="mt-6 mb-2 p-4 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 max-w-2xl mx-auto w-full text-left animate-fade-in shadow-xl">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-cyan-500/20 text-cyan-400 shrink-0">
+                <Truck className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-bold text-white uppercase tracking-wider font-mono flex items-center gap-2">
+                  <span>Secure Shipment Tracking Mode</span>
+                  {targetOrderId && (
+                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 text-[10px]">
+                      {targetOrderId}
+                    </span>
+                  )}
+                </h4>
+                <p className="text-xs text-slate-300 mt-0.5">
+                  Viewing live carrier fulfillment via read-only capability link. New purchases and wallet spending are restricted in this session.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/"
+              className="px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shrink-0 transition-all shadow-md active:scale-95 text-center"
+            >
+              Sign In with PayPal
+            </Link>
+          </div>
+        )}
 
         {/* Tab Switcher */}
         <div className="mt-8 inline-flex p-1 rounded-xl bg-slate-900/80 border border-slate-800">

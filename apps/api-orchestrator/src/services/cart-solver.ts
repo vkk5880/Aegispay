@@ -299,7 +299,7 @@ export class CartSolver {
       0
     );
     const savingsPercentage = retailTotal > 0
-      ? Number((((retailTotal - netBuyerExpenditure) / retailTotal) * 100).toFixed(2))
+      ? Math.max(0, Math.min(100, Number((((retailTotal - netBuyerExpenditure) / retailTotal) * 100).toFixed(2))))
       : 0;
 
     let isWithinBudget = true;

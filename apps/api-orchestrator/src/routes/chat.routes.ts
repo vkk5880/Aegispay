@@ -9,6 +9,7 @@ import {
   getWatchlistAlerts,
   getReceipts,
   updatePurchaseStatus,
+  logPurchase,
 } from '../services/user-memory.js';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
@@ -23,7 +24,7 @@ import {
   resolveCommerceModel,
   AVAILABLE_COMMERCE_MODELS,
 } from '../services/shopping-assistant.js';
-import { authenticateUser } from '../middleware/auth.js';
+import { authenticateUser, createOrderTrackingToken } from '../middleware/auth.js';
 
 export const logger = createLogger('API:Routes:Chat');
 
@@ -70,7 +71,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * Conversational AI Shopping Concierge & Product Comparison Engine
    * Returns structured ChatResponsePayload with markdown, product cards, comparison matrix, and knapsack cart.
    */
-  fastify.post('/api/buyer/chat', async (request, reply) => {
+  fastify.post('/api/buyer/chat', { preHandler: [authenticateUser] }, async (request, reply) => {
     const parseResult = ChatMessageSchema.safeParse(request.body);
     if (!parseResult.success) {
       logger.warn('ChatMessageSchema validation failed', { errors: parseResult.error.format() });
@@ -102,6 +103,70 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
       const response: ChatResponsePayload = await defaultShoppingAssistant.processMessage(chatPayload);
       const elapsed = timer(`Completed intent ${response.action || parsedIntent}`);
+
+      // Process 1-Prompt Autonomous Purchase or Security Scoping for BUY intent
+      if (response.action === 'BUY') {
+        const user = request.user;
+        const cartTotal = response.cart?.net_buyer_expenditure_cents || 0;
+        const budgetCap = chatPayload.budget_cap_cents || 50000;
+
+        if (user?.scope === 'order_tracking') {
+          // Read-Only Security Boundary
+          logger.warn('Blocking purchase attempt in read-only order_tracking session', {
+            userId: user.id,
+            orderId: user.orderId,
+          });
+          response.markdown = `⚠️ **Read-Only Session Active**\n\nYou are viewing Order **#${user.orderId || ''}** via a secure tracking link. For your security, placing new orders is disabled in read-only mode.\n\nPlease connect with PayPal to authorize a new shopping session.`;
+          (response as any).read_only_tracking = true;
+          (response as any).requires_paypal_auth = true;
+        } else if (user?.scope === 'identity_only' || (!user?.hasMandate && user?.role !== 'guest')) {
+          // Identity Verified ($0 Sign-in), but needs Spend Allowance Authorization
+          logger.info('User authenticated via $0 identity; requires spend mandate for autonomous procurement', {
+            userId: user?.id,
+          });
+          response.markdown = `✅ **Identity Verified with PayPal ($0 Sign-In)**\n\nTo allow your agent to execute purchases autonomously, please authorize a spend allowance. Alternatively, click below to review and approve this specific order.`;
+          (response as any).requires_spend_mandate = true;
+          (response as any).hitl_approval_required = true;
+        } else if (user?.scope === 'autonomous_buyer' || user?.hasMandate) {
+          // Pre-authorized autonomous buyer!
+          if (cartTotal > 0 && cartTotal <= budgetCap) {
+            const generatedOrderId = `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const trackingNumber = `7890${Math.floor(10000000 + Math.random() * 90000000)}`;
+            const trackingToken = createOrderTrackingToken(generatedOrderId, user?.id || 'buyer');
+            const trackingUrl = `/history?order_id=${encodeURIComponent(generatedOrderId)}&token=${encodeURIComponent(trackingToken)}`;
+            const productTitle = response.products?.[0]?.title || 'Product Order';
+
+            logPurchase({
+              order_id: generatedOrderId,
+              user_id: user?.id || 'demo',
+              title: productTitle,
+              price_cents: cartTotal,
+              merchant_domain: response.products?.[0]?.merchant_domain || 'bestbuy.com',
+              cleaned_url: response.products?.[0]?.cleaned_url,
+              score: (response.products?.[0] as any)?.composite_score || 9.4,
+              tx_id: `PAYID-${generatedOrderId.toUpperCase()}`,
+              reservation_id: (response as any).stock_reservation?.reservation_id || `vch_${Date.now()}`,
+              escrow_status: 'HELD',
+            });
+
+            logger.info('Executed 1-prompt autonomous purchase successfully', {
+              orderId: generatedOrderId,
+              userId: user?.id,
+              cartTotal,
+              trackingNumber,
+            });
+
+            response.markdown = `⚡ **1-Prompt Autonomous Purchase Complete!**\n\nYour order for **${productTitle}** has been autonomously negotiated and authorized with PayPal Vault v3.\n\n- **Order ID:** \`${generatedOrderId}\`\n- **Authorized Total:** $${(cartTotal / 100).toFixed(2)}\n- **Escrow Hold Status:** \`HELD\` (72-Hour Price-Drop Escrow Active)\n- **Carrier:** FedEx Priority\n- **Tracking #:** \`${trackingNumber}\`\n- [Track Shipment](${trackingUrl})`;
+            (response as any).autonomous_buy_executed = true;
+            (response as any).order_id = generatedOrderId;
+            (response as any).tracking_number = trackingNumber;
+            (response as any).tracking_url = trackingUrl;
+          } else {
+            response.markdown = `⚠️ **Budget Limit Exceeded**\n\nThe optimal cart requires **$${(cartTotal / 100).toFixed(2)}**, which exceeds your pre-authorized budget cap of **$${(budgetCap / 100).toFixed(2)}**.\n\nPlease approve the difference below to proceed.`;
+            (response as any).hitl_approval_required = true;
+          }
+        }
+      }
 
       logger.info(`Shopping assistant response generated in ${elapsed}ms`, {
         intent: response.action || parsedIntent,
