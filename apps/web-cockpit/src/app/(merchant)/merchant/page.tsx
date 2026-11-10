@@ -29,21 +29,24 @@ export default function MerchantCockpitPage() {
   return (
     <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full transition-colors">
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-[#0b1324] p-5 rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800">
-        <div className="flex items-center gap-3.5">
-          <div className="p-2.5 bg-gradient-to-tr from-cyan-600 to-blue-600 rounded-xl text-white shadow-md shadow-cyan-500/20">
-            <Store className="w-5 h-5" />
+      <div className="relative flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white/90 dark:bg-[#0c1424]/90 backdrop-blur-xl p-6 rounded-2xl shadow-xl shadow-black/5 dark:shadow-black/20 border border-slate-200/80 dark:border-white/10 overflow-hidden">
+        {/* Top subtle radiant border light */}
+        <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
+
+        <div className="flex items-center gap-4">
+          <div className="p-3 bg-gradient-to-tr from-cyan-600 to-blue-600 rounded-2xl text-white shadow-lg shadow-cyan-500/25">
+            <Store className="w-6 h-6" />
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
               {showTechnicalDetails ? 'Merchant Arbitration Cockpit' : 'Seller Resolution Center'}
               {showTechnicalDetails && (
-                <span className="text-xs font-mono font-medium px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
+                <span className="text-xs font-mono font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/10 text-cyan-800 dark:text-cyan-300 border border-cyan-500/30">
                   Layer 6
                 </span>
               )}
             </h1>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 font-medium">
               {showTechnicalDetails
                 ? 'AG Studio 3 multi-agent harness, DuckDB-WASM analytics & Bryntum SLA scheduler'
                 : 'Automated return inspection, customer dispute resolution, and settlement analytics'}
@@ -54,13 +57,13 @@ export default function MerchantCockpitPage() {
         <div className="flex flex-wrap items-center gap-3">
           <Link
             href="/"
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl border border-slate-200/80 dark:border-white/10 bg-slate-50 dark:bg-[#0e172a] text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all shadow-xs"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             Buyer Portal
           </Link>
-          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-400 rounded-lg text-xs font-mono font-bold border border-emerald-300 dark:border-emerald-500/40">
-            <Database className="w-3.5 h-3.5" />
+          <span className="flex items-center gap-1.5 px-3 py-2 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-mono font-bold border border-emerald-500/30 shadow-xs">
+            <Database className="w-3.5 h-3.5 text-emerald-500" />
             {showTechnicalDetails ? 'DuckDB-WASM: Ready' : 'Analytics Engine: Active'}
           </span>
         </div>
@@ -96,17 +99,22 @@ export default function MerchantCockpitPage() {
           <DisputeSlaScheduler />
 
           {/* HATEOAS Action Resolution */}
-          <div className="bg-white dark:bg-[#0b1324] rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-            <div className="bg-slate-50 dark:bg-[#080d19] border-b border-slate-200 dark:border-slate-800 px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 text-sm flex items-center justify-between">
-              <span>{showTechnicalDetails ? 'HATEOAS Action Resolution' : 'One-Click Dispute Actions'}</span>
-              <span className="text-[10px] font-mono text-slate-500">
+          <div className="relative bg-white/90 dark:bg-[#0c1424]/90 backdrop-blur-xl rounded-2xl shadow-xl shadow-black/5 dark:shadow-black/20 border border-slate-200/80 dark:border-white/10 overflow-hidden">
+            {/* Top radiant border light */}
+            <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
+
+            <div className="bg-slate-50/90 dark:bg-[#080d19]/90 border-b border-slate-200/80 dark:border-white/5 px-4 py-3 font-semibold text-slate-800 dark:text-slate-200 text-sm flex items-center justify-between">
+              <span className="font-extrabold text-slate-900 dark:text-white">
+                {showTechnicalDetails ? 'HATEOAS Action Resolution' : 'One-Click Dispute Actions'}
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 font-bold">
                 {showTechnicalDetails ? 'RFC 5988 Links' : 'Live PayPal Actions'}
               </span>
             </div>
 
             <div className="p-4 space-y-3.5">
-              <div className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                <div className="text-[11px] font-mono text-slate-500">
+              <div className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs">
+                <div className="text-[11px] font-mono text-slate-500 font-semibold">
                   {showTechnicalDetails ? 'Dispute ID: PP-D-1002' : 'Case: PP-D-1002'}
                 </div>
                 <div className="font-bold text-xs text-rose-600 dark:text-rose-400">
@@ -118,8 +126,8 @@ export default function MerchantCockpitPage() {
                 />
               </div>
 
-              <div className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                <div className="text-[11px] font-mono text-slate-500">
+              <div className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs">
+                <div className="text-[11px] font-mono text-slate-500 font-semibold">
                   {showTechnicalDetails ? 'Dispute ID: PP-D-1003' : 'Case: PP-D-1003'}
                 </div>
                 <div className="font-bold text-xs text-amber-600 dark:text-amber-400">
@@ -131,8 +139,8 @@ export default function MerchantCockpitPage() {
                 />
               </div>
 
-              <div className="bg-slate-50 dark:bg-[#080d19] border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                <div className="text-[11px] font-mono text-slate-500">
+              <div className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs">
+                <div className="text-[11px] font-mono text-slate-500 font-semibold">
                   {showTechnicalDetails ? 'Synthetic Intent Bid: SYN-B-999' : 'Price Match Offer: #999'}
                 </div>
                 <div className="font-bold text-xs text-emerald-600 dark:text-emerald-400">

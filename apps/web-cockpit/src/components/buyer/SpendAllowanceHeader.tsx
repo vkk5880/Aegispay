@@ -72,12 +72,15 @@ export function SpendAllowanceHeader({
       )}
 
       {/* Main Persistent Spend Allowance Header Bar */}
-      <div className="bg-white/80 dark:bg-[#070e1c]/80 border border-slate-200 dark:border-slate-800 backdrop-blur-md rounded-2xl p-4 sm:p-5 shadow-xs transition-colors">
+      <div className="relative group bg-white/95 dark:bg-[#0c1424]/90 border border-slate-200/80 dark:border-white/10 backdrop-blur-xl rounded-2xl p-4 sm:p-5 shadow-xl shadow-black/5 dark:shadow-black/20 transition-all overflow-hidden">
+        {/* Top radiant line */}
+        <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-cyan-500/20 via-cyan-400 to-blue-500/20" />
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* Left: Spend Allowance Breakdown */}
           <div className="flex flex-wrap items-center gap-6 sm:gap-8">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shrink-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shrink-0 shadow-xs group-hover:scale-105 transition-transform">
                 <Lock className="w-5 h-5" />
               </div>
               <div>
@@ -90,7 +93,7 @@ export function SpendAllowanceHeader({
               </div>
             </div>
 
-            <div className="h-8 w-px bg-slate-200 dark:border-slate-800 hidden sm:block" />
+            <div className="h-8 w-px bg-slate-200/80 dark:bg-white/10 hidden sm:block" />
 
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
@@ -101,7 +104,7 @@ export function SpendAllowanceHeader({
               </span>
             </div>
 
-            <div className="h-8 w-px bg-slate-200 dark:border-slate-800 hidden sm:block" />
+            <div className="h-8 w-px bg-slate-200/80 dark:bg-white/10 hidden sm:block" />
 
             <div>
               <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
@@ -116,18 +119,18 @@ export function SpendAllowanceHeader({
           {/* Right: Progress & Settings Trigger */}
           <div className="flex items-center gap-3.5 justify-between md:justify-end">
             {/* Visual Budget Meter */}
-            <div className="w-32 sm:w-40 space-y-1">
-              <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-slate-400">
+            <div className="w-32 sm:w-40 space-y-1.5">
+              <div className="flex justify-between text-[10px] font-mono text-slate-500 dark:text-slate-400 font-semibold">
                 <span>Usage</span>
                 <span>{spentPercent}%</span>
               </div>
-              <div className="w-full h-2 rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+              <div className="w-full h-2.5 rounded-full bg-slate-200/80 dark:bg-slate-800/80 overflow-hidden p-0.5">
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${
                     spentPercent > 80
-                      ? 'bg-rose-500'
+                      ? 'bg-gradient-to-r from-rose-500 to-red-600'
                       : spentPercent > 50
-                      ? 'bg-amber-500'
+                      ? 'bg-gradient-to-r from-amber-500 to-orange-500'
                       : 'bg-gradient-to-r from-cyan-500 to-emerald-500'
                   }`}
                   style={{ width: `${spentPercent}%` }}
@@ -140,13 +143,13 @@ export function SpendAllowanceHeader({
               <button
                 type="button"
                 onClick={onOpenCart}
-                className="relative p-2 sm:px-3 sm:py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                className="relative px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500/10 to-blue-500/10 hover:from-cyan-500/20 hover:to-blue-500/20 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
                 title="View Explainable Multi-Vendor Cart"
               >
                 <Sparkles className="w-4 h-4 text-cyan-500" />
                 <span className="hidden sm:inline">Cart</span>
                 {cartItemCount > 0 && (
-                  <span className="px-1.5 py-0.2 rounded-full bg-cyan-600 text-white font-mono text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-full bg-cyan-600 text-white font-mono text-[10px] font-bold shadow-xs">
                     {cartItemCount}
                   </span>
                 )}
@@ -157,7 +160,7 @@ export function SpendAllowanceHeader({
             <button
               type="button"
               onClick={onOpenSettings}
-              className="p-2 sm:px-3 sm:py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+              className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200/80 dark:border-white/10 text-slate-700 dark:text-slate-300 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
               title="Open Buyer Procurement Settings"
             >
               <Sliders className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />

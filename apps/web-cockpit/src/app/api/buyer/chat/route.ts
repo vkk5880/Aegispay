@@ -6,20 +6,22 @@ export async function POST(req: Request) {
   const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
   const body = await req.json();
 
-  try {
-    const res = await fetch(`${orchestratorUrl}/api/buyer/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      cache: 'no-store',
-    });
+  if (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT) {
+    try {
+      const res = await fetch(`${orchestratorUrl}/api/buyer/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        cache: 'no-store',
+      });
 
-    if (res.ok) {
-      const data = await res.json();
-      return NextResponse.json(data);
+      if (res.ok) {
+        const data = await res.json();
+        return NextResponse.json(data);
+      }
+    } catch {
+      // Fall back to robust in-memory mock responses for standalone preview or testing
     }
-  } catch {
-    // Fall back to robust in-memory mock responses for standalone preview or testing
   }
 
   const message: string = (body.message || '').toLowerCase();

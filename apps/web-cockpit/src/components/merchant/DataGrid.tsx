@@ -368,27 +368,29 @@ export function DataGrid({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {/* Enterprise Cockpit Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search all columns…"
-            aria-label="Search all columns"
-            className="h-9 w-64 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0c1424] px-3 text-xs outline-none focus:border-cyan-500 text-slate-800 dark:text-slate-100 shadow-sm"
-          />
+      <div className="flex flex-wrap items-center justify-between gap-3 p-1">
+        <div className="flex items-center gap-2.5">
+          <div className="relative">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search all columns…"
+              aria-label="Search all columns"
+              className="h-9 w-64 sm:w-72 rounded-xl border border-slate-300 dark:border-white/10 bg-white dark:bg-[#0c1424] px-3 text-xs outline-none focus:border-cyan-500 dark:focus:border-cyan-400 text-slate-800 dark:text-slate-100 shadow-xs transition-colors"
+            />
+          </div>
 
           {/* Density Preset Controls */}
-          <div className="hidden sm:flex items-center rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-0.5 text-[11px] font-mono">
+          <div className="hidden sm:flex items-center rounded-xl bg-slate-100 dark:bg-[#060b14] border border-slate-200 dark:border-white/10 p-1 text-[11px] font-mono shadow-inner">
             {(['comfortable', 'compact', 'dense'] as GridDensity[]).map((d) => (
               <button
                 key={d}
                 type="button"
                 onClick={() => setDensity(d)}
-                className={`px-2 py-1 rounded-lg capitalize transition-colors cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg capitalize transition-all duration-200 cursor-pointer ${
                   density === d
-                    ? 'bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 font-bold shadow-xs'
+                    ? 'bg-white dark:bg-[#0e172a] text-cyan-600 dark:text-cyan-400 font-bold shadow-xs border border-slate-200/60 dark:border-cyan-500/30'
                     : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-300'
                 }`}
               >

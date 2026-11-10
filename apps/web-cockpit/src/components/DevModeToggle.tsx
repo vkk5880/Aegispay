@@ -24,17 +24,17 @@ export function DevModeToggle() {
       }
       aria-label="Toggle technical details"
       aria-pressed={showTechnicalDetails}
-      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all border cursor-pointer select-none ${
+      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-2xl text-xs font-semibold transition-all duration-200 border cursor-pointer select-none ${
         showTechnicalDetails
-          ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300 dark:border-amber-700/80 shadow-xs'
-          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+          ? 'bg-amber-500/10 text-amber-900 dark:text-amber-300 border-amber-500/30 shadow-xs'
+          : 'bg-slate-100 dark:bg-[#060b14] text-slate-600 dark:text-slate-400 border-slate-200 dark:border-white/10 hover:border-slate-300 dark:hover:border-white/20'
       }`}
     >
       <Terminal className={`w-3.5 h-3.5 ${showTechnicalDetails ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`} />
-      <span className="hidden md:inline font-mono text-[11px]">
+      <span className="hidden md:inline font-mono text-[11px] font-semibold">
         {showTechnicalDetails ? 'Dev Mode: ON' : 'Dev Mode: OFF'}
       </span>
-      <span className="md:hidden font-mono text-[11px]">
+      <span className="md:hidden font-mono text-[11px] font-semibold">
         {showTechnicalDetails ? 'Dev' : 'User'}
       </span>
       {showTechnicalDetails ? (

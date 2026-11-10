@@ -69,16 +69,19 @@ export function AutonomyDialWidget({
   return (
     <div
       data-testid="autonomy-dial-widget"
-      className={`border border-slate-200 dark:border-slate-800 rounded-2xl p-4 bg-white dark:bg-[#0b1324] shadow-xs ${className}`}
+      className={`relative border border-slate-200/80 dark:border-white/10 rounded-2xl p-5 bg-white/90 dark:bg-[#0c1424]/90 backdrop-blur-xl shadow-lg shadow-black/5 dark:shadow-black/20 overflow-hidden ${className}`}
     >
+      {/* Top subtle radiant border light */}
+      <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
+
       {/* Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800/80">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-cyan-100 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-slate-100 dark:border-white/5">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
             <Sliders className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+            <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
               Merchant Autonomy Dial
             </h3>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -88,14 +91,14 @@ export function AutonomyDialWidget({
         </div>
 
         <span
-          className={`text-[10px] font-mono font-semibold px-2.5 py-0.5 rounded-full border ${currentOption.badgeColor}`}
+          className={`self-start sm:self-auto text-[11px] font-mono font-bold px-3 py-1 rounded-full border shadow-xs transition-all ${currentOption.badgeColor}`}
         >
           {currentOption.badge}
         </span>
       </div>
 
-      {/* 3-Mode Slider / Switch Buttons */}
-      <div className="grid grid-cols-3 gap-2 mt-3 p-1 bg-slate-100 dark:bg-slate-900/90 rounded-xl border border-slate-200/80 dark:border-slate-800">
+      {/* 3-Mode Slider / Switch Buttons inspired by Linear & Raycast */}
+      <div className="grid grid-cols-3 gap-2 mt-4 p-1.5 bg-slate-100/80 dark:bg-[#060b14]/80 rounded-2xl border border-slate-200/80 dark:border-white/5 shadow-inner">
         {MODES.map((option) => {
           const isSelected = option.mode === selectedMode;
           const Icon = option.icon;
@@ -105,38 +108,49 @@ export function AutonomyDialWidget({
               type="button"
               onClick={() => handleModeChange(option.mode)}
               data-testid={`autonomy-mode-${option.mode.toLowerCase()}`}
-              className={`flex flex-col items-center justify-center py-2 px-2 rounded-lg text-center transition-all ${
+              className={`relative flex flex-col items-center justify-center py-2.5 px-3 rounded-xl text-center transition-all duration-200 cursor-pointer ${
                 isSelected
-                  ? 'bg-white dark:bg-[#0f172a] text-slate-900 dark:text-white shadow-sm ring-1 ring-slate-300 dark:ring-slate-700 font-bold'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+                  ? 'bg-white dark:bg-[#0e172a] text-slate-900 dark:text-white shadow-md shadow-black/5 dark:shadow-cyan-950/30 border border-slate-200/90 dark:border-cyan-500/40 font-bold'
+                  : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-white/40 dark:hover:bg-white/5'
               }`}
             >
               <Icon
-                className={`w-4 h-4 mb-1 ${
+                className={`w-4 h-4 mb-1.5 transition-transform duration-200 ${
                   isSelected
                     ? option.mode === 'AUTONOMOUS'
-                      ? 'text-emerald-500'
+                      ? 'text-emerald-500 scale-110'
                       : option.mode === 'SUPERVISED'
-                      ? 'text-amber-500'
-                      : 'text-blue-500'
+                      ? 'text-amber-500 scale-110'
+                      : 'text-blue-500 scale-110'
                     : 'text-slate-400 dark:text-slate-500'
                 }`}
               />
-              <span className="text-xs font-semibold leading-tight">{option.title}</span>
+              <span className="text-xs font-bold leading-tight tracking-tight">{option.title}</span>
+              {isSelected && (
+                <span
+                  className={`absolute -bottom-1 left-1/2 -translate-x-1/2 w-6 h-[2px] rounded-full ${
+                    option.mode === 'AUTONOMOUS'
+                      ? 'bg-emerald-500'
+                      : option.mode === 'SUPERVISED'
+                      ? 'bg-amber-500'
+                      : 'bg-blue-500'
+                  }`}
+                />
+              )}
             </button>
           );
         })}
       </div>
 
       {/* Description & Policy Insight */}
-      <div className="mt-3 bg-slate-50 dark:bg-[#080d19] p-3 rounded-xl border border-slate-200/60 dark:border-slate-800/60 text-xs">
-        <div className="flex items-start gap-2">
-          <Info className="w-3.5 h-3.5 mt-0.5 text-cyan-600 dark:text-cyan-400 shrink-0" />
+      <div className="mt-4 bg-slate-50/80 dark:bg-[#080e1c]/80 p-3.5 rounded-xl border border-slate-200/70 dark:border-white/5 text-xs">
+        <div className="flex items-start gap-2.5">
+          <Info className="w-4 h-4 mt-0.5 text-cyan-600 dark:text-cyan-400 shrink-0" />
           <div className="space-y-1">
-            <div className="font-semibold text-slate-800 dark:text-slate-200">
+            <div className="font-bold text-slate-900 dark:text-slate-100">
               {currentOption.description}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed font-medium">
               {currentOption.policySummary}
             </p>
           </div>

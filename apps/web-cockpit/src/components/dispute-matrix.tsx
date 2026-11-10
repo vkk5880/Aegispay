@@ -164,31 +164,34 @@ export function DisputeMatrixViewer({
   };
 
   return (
-    <div className="rounded-2xl border border-slate-800 bg-[#0c1424] p-6 shadow-2xl space-y-6">
+    <div className="relative group rounded-3xl border border-slate-200/80 dark:border-white/10 bg-white/95 dark:bg-[#0c1424]/90 backdrop-blur-xl p-6 sm:p-7 shadow-xl shadow-black/5 dark:shadow-black/20 space-y-6 overflow-hidden">
+      {/* Top radiant light */}
+      <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-cyan-500/20 via-cyan-400 to-indigo-500/20" />
+
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-200/80 dark:border-white/10 gap-3">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-cyan-950/60 border border-cyan-500/30 text-cyan-400">
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shadow-xs">
             <ShieldAlert className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2 flex-wrap">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 flex-wrap">
               Dispute Forensics Matrix
-              <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border ${activeBadgeColor}`}>
+              <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full border ${activeBadgeColor}`}>
                 {tierActionKey}
               </span>
             </h3>
-            <p className="text-xs text-slate-400">
-              Dispute ID: <span className="font-mono text-slate-300">{disputeId}</span> • Stage: <span className="text-white font-mono">{stage}</span> • Amount: {formatCents(amountCents)}
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Dispute ID: <span className="font-mono text-slate-800 dark:text-slate-200 font-semibold">{disputeId}</span> • Stage: <span className="text-slate-900 dark:text-white font-mono font-semibold">{stage}</span> • Amount: <strong className="text-slate-900 dark:text-white">{formatCents(amountCents)}</strong>
             </p>
           </div>
         </div>
 
         {/* SLA Countdown Timer */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#060b14] border border-slate-800 text-xs font-mono self-start sm:self-auto">
-          <Clock className="w-3.5 h-3.5 text-amber-400" />
-          <span className="text-slate-400">SLA Due Date:</span>
-          <span className={`font-bold ${slaRemaining <= 20 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+        <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-[#060b14]/80 border border-slate-200/80 dark:border-white/10 text-xs font-mono self-start sm:self-auto shadow-xs">
+          <Clock className="w-3.5 h-3.5 text-amber-500" />
+          <span className="text-slate-500 dark:text-slate-400">SLA Due Date:</span>
+          <span className={`font-bold ${slaRemaining <= 20 ? 'text-rose-500 dark:text-rose-400 animate-pulse' : 'text-amber-600 dark:text-amber-400'}`}>
             {slaRemaining}h remaining
           </span>
         </div>
@@ -201,24 +204,24 @@ export function DisputeMatrixViewer({
       {/* Grid View: Vision Forensics + (L, R) Matrix */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Left: Defect Bounding Box Viewer */}
-        <div className="rounded-xl border border-slate-800 bg-[#060b14] p-4 space-y-3">
-          <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-800">
-            <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-              <Camera className="w-3.5 h-3.5 text-cyan-400" />
+        <div className="relative rounded-2xl border border-slate-200/80 dark:border-white/10 bg-slate-50/70 dark:bg-[#060b14]/80 p-5 space-y-3.5">
+          <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-200/80 dark:border-white/10">
+            <span className="font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+              <Camera className="w-4 h-4 text-cyan-500" />
               Evidence Visual Analysis
             </span>
             {exifTamperFlag ? (
-              <span className="text-[10px] font-mono text-rose-400 bg-rose-950/60 border border-rose-500/30 px-2 py-0.5 rounded font-bold">
+              <span className="text-[10px] font-mono text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-bold">
                 EXIF TAMPER DETECTED
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded font-bold">
+              <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
                 EXIF AUTHENTICATED
               </span>
             )}
           </div>
 
-          <div className="relative aspect-video rounded-lg bg-slate-900 overflow-hidden border border-slate-800 flex items-center justify-center">
+          <div className="relative aspect-video rounded-xl bg-slate-900 overflow-hidden border border-slate-200/80 dark:border-white/10 flex items-center justify-center shadow-inner">
             {buyerImageUrl ? (
               <img
                 src={buyerImageUrl}
@@ -226,14 +229,14 @@ export function DisputeMatrixViewer({
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="absolute inset-0 bg-gradient-to-br from-slate-900 to-slate-950 flex items-center justify-center text-slate-600 text-xs font-mono">
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-[#060b14] flex items-center justify-center text-slate-500 text-xs font-mono">
                 [Buyer Uploaded Evidence]
               </div>
             )}
 
             {normalizedBox && boxHeight > 0 && boxWidth > 0 && (
               <div
-                className="absolute border-2 border-rose-500 bg-rose-500/20 rounded shadow-lg shadow-rose-500/30 flex items-start justify-end p-1 pointer-events-none"
+                className="absolute border-2 border-rose-500 bg-rose-500/20 rounded-md shadow-lg shadow-rose-500/30 flex items-start justify-end p-1 pointer-events-none"
                 style={{
                   top: `${ymin * 100}%`,
                   left: `${xmin * 100}%`,
@@ -241,7 +244,7 @@ export function DisputeMatrixViewer({
                   width: `${boxWidth}%`,
                 }}
               >
-                <span className="text-[9px] font-mono bg-rose-600 text-white px-1 rounded font-bold">
+                <span className="text-[9px] font-mono bg-rose-600 text-white px-1.5 py-0.5 rounded font-bold shadow-xs">
                   DEFECT {defectPercent}%
                 </span>
               </div>
@@ -249,73 +252,75 @@ export function DisputeMatrixViewer({
           </div>
 
           {buyerStatement && (
-            <p className="text-xs text-slate-400 italic bg-[#0c1424] p-2.5 rounded-lg border border-slate-800/80">
+            <p className="text-xs text-slate-600 dark:text-slate-300 italic bg-white/80 dark:bg-[#0c1424] p-3 rounded-xl border border-slate-200/80 dark:border-white/10 shadow-xs">
               Statement: "{buyerStatement}"
             </p>
           )}
 
-          <div className="text-[11px] font-mono space-y-1 text-slate-400 pt-1">
-            <div className="flex justify-between">
-              <span>SOFTWARE EXIF:</span>
-              <span className={exifTamperFlag ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+          <div className="text-[11px] font-mono space-y-1.5 text-slate-600 dark:text-slate-400 pt-1">
+            <div className="flex justify-between items-center">
+              <span className="font-semibold text-slate-500">SOFTWARE EXIF:</span>
+              <span className={exifTamperFlag ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-slate-800 dark:text-slate-200'}>
                 {exifSoftware}
               </span>
             </div>
-            <div className="flex justify-between">
-              <span>CARRIER TRACKING:</span>
-              <span className="text-cyan-400">{trackingNumber} ({carrierStatus})</span>
+            <div className="flex justify-between items-center">
+              <span className="font-semibold text-slate-500">CARRIER TRACKING:</span>
+              <span className="text-cyan-600 dark:text-cyan-400 font-medium">{trackingNumber} ({carrierStatus})</span>
             </div>
           </div>
         </div>
 
         {/* Right: (L, R) Settlement Matrix Breakdown */}
-        <div className="rounded-xl border border-slate-800 bg-[#060b14] p-4 flex flex-col justify-between font-mono text-xs">
+        <div className="relative rounded-2xl border border-slate-200/80 dark:border-white/10 bg-slate-50/70 dark:bg-[#060b14]/80 p-5 flex flex-col justify-between font-mono text-xs">
           <div className="space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <span className="font-sans font-semibold text-slate-300 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200/80 dark:border-white/10">
+              <span className="font-sans font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-indigo-500" />
                 (L, R) Deterministic Arbitration Scores
               </span>
-              <span className="text-cyan-400 font-bold text-[11px]">Section 5.3 Grounded</span>
+              <span className="text-cyan-600 dark:text-cyan-400 font-bold text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20">Section 5.3 Grounded</span>
             </div>
 
             {/* Score Sliders */}
-            <div className="space-y-3">
+            <div className="space-y-3.5">
               <div>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span className="text-slate-400">Merchant Liability Score (L):</span>
-                  <span className="text-white font-bold">{liabilityScoreL.toFixed(3)}</span>
+                <div className="flex justify-between text-[11px] mb-1.5">
+                  <span className="text-slate-600 dark:text-slate-400 font-sans font-medium">Merchant Liability Score (L):</span>
+                  <span className="text-slate-900 dark:text-white font-bold">{liabilityScoreL.toFixed(3)}</span>
                 </div>
-                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-indigo-500 h-full rounded-full transition-all duration-300" style={{ width: `${liabilityScoreL * 100}%` }} />
+                <div className="w-full bg-slate-200 dark:bg-slate-800/80 h-2.5 rounded-full overflow-hidden p-0.5">
+                  <div className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full transition-all duration-300" style={{ width: `${liabilityScoreL * 100}%` }} />
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">S_defect + S_non_delivery</div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-1">S_defect + S_non_delivery</div>
               </div>
 
               <div>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span className="text-slate-400">Buyer Abuse / Tamper Risk (R):</span>
-                  <span className="text-rose-400 font-bold">{abuseRiskScoreR.toFixed(3)}</span>
+                <div className="flex justify-between text-[11px] mb-1.5">
+                  <span className="text-slate-600 dark:text-slate-400 font-sans font-medium">Buyer Abuse / Tamper Risk (R):</span>
+                  <span className="text-rose-600 dark:text-rose-400 font-bold">{abuseRiskScoreR.toFixed(3)}</span>
                 </div>
-                <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-rose-500 h-full rounded-full transition-all duration-300" style={{ width: `${abuseRiskScoreR * 100}%` }} />
+                <div className="w-full bg-slate-200 dark:bg-slate-800/80 h-2.5 rounded-full overflow-hidden p-0.5">
+                  <div className="bg-gradient-to-r from-rose-500 to-amber-500 h-full rounded-full transition-all duration-300" style={{ width: `${abuseRiskScoreR * 100}%` }} />
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">I_tamper + S_velocity</div>
+                <div className="text-[10px] text-slate-500 dark:text-slate-500 mt-1">I_tamper + S_velocity</div>
               </div>
             </div>
 
-            <p className="text-[11px] text-slate-400 font-sans leading-relaxed pt-2">
-              Decision Rule: Because R = {abuseRiskScoreR.toFixed(2)} {abuseRiskScoreR >= 0.60 ? '>= 0.60' : '< 0.60'}, the autonomous arbiter selected{' '}
-              <strong className="text-rose-400">{tierActionKey}</strong> to submit compiled forensic evidence.
-            </p>
+            <div className="p-3 rounded-xl bg-white/80 dark:bg-[#0c1424] border border-slate-200/80 dark:border-white/10 shadow-xs">
+              <p className="text-[11px] text-slate-600 dark:text-slate-400 font-sans leading-relaxed">
+                Decision Rule: Because R = {abuseRiskScoreR.toFixed(2)} {abuseRiskScoreR >= 0.60 ? '>= 0.60' : '< 0.60'}, the autonomous arbiter selected{' '}
+                <strong className="text-rose-600 dark:text-rose-400 font-bold">{tierActionKey}</strong> to submit compiled forensic evidence.
+              </p>
+            </div>
           </div>
 
           {/* Interactive HATEOAS Actions */}
-          <div className="pt-4 border-t border-slate-800 space-y-2">
+          <div className="pt-4 border-t border-slate-200/80 dark:border-white/10 space-y-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-slate-500 text-[10px]">AVAILABLE HATEOAS ACTIONS:</span>
+              <span className="text-slate-500 text-[10px] font-bold">AVAILABLE HATEOAS ACTIONS:</span>
               {lastExecutedAction && (
-                <span className="text-emerald-400 text-[10px] font-mono flex items-center gap-1">
+                <span className="text-emerald-600 dark:text-emerald-400 text-[10px] font-mono flex items-center gap-1 font-bold">
                   <CheckCircle2 className="w-3 h-3" /> Executed: {lastExecutedAction}
                 </span>
               )}
@@ -325,7 +330,7 @@ export function DisputeMatrixViewer({
               <button
                 onClick={() => handleAction('provide-evidence')}
                 disabled={isSubmitting}
-                className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-bold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-sm shadow-rose-500/20"
               >
                 {internalSubmittingAction === 'provide-evidence' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -338,7 +343,7 @@ export function DisputeMatrixViewer({
               <button
                 onClick={() => handleAction('propose-offer')}
                 disabled={isSubmitting}
-                className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-sm shadow-indigo-500/20"
               >
                 {internalSubmittingAction === 'propose-offer' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -351,7 +356,7 @@ export function DisputeMatrixViewer({
               <button
                 onClick={() => handleAction('escalate-sla')}
                 disabled={isSubmitting}
-                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 font-semibold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 text-amber-700 dark:text-amber-300 font-bold text-xs transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed shadow-xs"
               >
                 {internalSubmittingAction === 'escalate-sla' ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
