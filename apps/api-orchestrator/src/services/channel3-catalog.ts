@@ -54,6 +54,10 @@ export function sanitizeText(input: unknown): string {
  * Handles float dollar amounts (e.g., 299.99 -> 29999), raw cents, and currency-formatted strings.
  */
 export function toIntegerCents(rawPrice: unknown, assumeDollarsIfDecimal = false): number {
+  if (typeof rawPrice === 'object' && rawPrice !== null && 'price' in rawPrice) {
+    return toIntegerCents((rawPrice as { price: unknown }).price, true);
+  }
+
   if (typeof rawPrice === 'number') {
     if (isNaN(rawPrice) || !isFinite(rawPrice)) {
       return 0;

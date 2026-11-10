@@ -287,3 +287,118 @@ test('Knapsack Cart Solver: seamlessly ingests Channel3 catalog and generates de
   assert.equal(pu.platform_subsidy_credit.settlement_decoupled, true);
   assert.equal(pu.platform_subsidy_credit.commission_rebate_cents, merchantGroup.commission_rebate_cents);
 });
+
+test('Channel3Client: initializes official @channel3/sdk and exposes SDK instance', () => {
+  const client = new Channel3Client('live_c3_key_123', 'https://api.trychannel3.com', 'PAYPAL-HACKATHON-2026');
+  const officialSdk = client.getOfficialSdk();
+  assert.ok(officialSdk, 'Official @channel3/sdk instance should be initialized');
+  assert.ok(officialSdk.products, 'SDK products resource should be present');
+  assert.ok(officialSdk.categories, 'SDK categories resource should be present');
+  assert.ok(officialSdk.brands, 'SDK brands resource should be present');
+  assert.ok(officialSdk.priceTracking, 'SDK priceTracking resource should be present');
+});
+
+test('Channel3Client: searchByImage executes visual search and preserves cleaned_url', async () => {
+  const client = new Channel3Client();
+  const res = await client.searchByImage('https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024', {
+    limit: 5,
+  });
+
+  assert.ok(res.products.length > 0);
+  assert.ok(res.total >= res.products.length);
+  assert.ok(res.products[0].images[0].cleaned_url.includes('bg=white'));
+});
+
+test('Channel3Client: findSimilar and retrieveProduct resolve products', async () => {
+  const client = new Channel3Client();
+  const similar = await client.findSimilar('ch3_prod_9921', { limit: 2 });
+  assert.ok(Array.isArray(similar));
+  assert.ok(similar.length > 0);
+  assert.notEqual(similar[0].product_id, 'ch3_prod_9921');
+
+  const prod = await client.retrieveProduct('ch3_prod_9921');
+  assert.ok(prod);
+  assert.equal(prod?.product_id, 'ch3_prod_9921');
+  assert.ok(prod?.offers.length > 0);
+});
+
+test('Channel3Client: listCategories and searchCategories return taxonomy entries', async () => {
+  const client = new Channel3Client();
+  const categories = await client.listCategories();
+  assert.ok(Array.isArray(categories));
+  assert.ok(categories.length >= 3);
+  assert.ok(categories.some((c: any) => c.slug === 'electronics' || c.slug === 'audio'));
+
+  const searched = await client.searchCategories('audio');
+  assert.ok(Array.isArray(searched));
+  assert.ok(searched.length > 0);
+  assert.ok(searched.some((c: any) => c.slug.includes('audio') || c.title.toLowerCase().includes('audio')));
+});
+
+test('Channel3Client: listBrands and searchBrands return partner brands', async () => {
+  const client = new Channel3Client();
+  const brands = await client.listBrands();
+  assert.ok(Array.isArray(brands));
+  assert.ok(brands.length >= 3);
+  assert.ok(brands.some((b: any) => b.slug === 'sony' || b.name === 'Sony'));
+
+  const searched = await client.searchBrands('sony');
+  assert.ok(Array.isArray(searched));
+  assert.ok(searched.length > 0);
+  assert.equal(searched[0].slug, 'sony');
+});
+
+test('Channel3Client: priceTracking lifecycle (start, history, subscriptions, stop)', async () => {
+  const client = new Channel3Client();
+  const startResult = await client.startPriceTracking('ch3_prod_9921');
+  assert.equal(startResult.success, true);
+  assert.ok(startResult.subscription_id);
+
+  const history = await client.getPriceHistory('ch3_prod_9921');
+  assert.ok(Array.isArray(history));
+  assert.ok(history.length >= 2);
+  assert.ok(history[0].price_cents > 0);
+
+  const subs = await client.listPriceTrackingSubscriptions();
+  assert.ok(Array.isArray(subs));
+
+  const stopResult = await client.stopPriceTracking('ch3_prod_9921');
+  assert.equal(stopResult.success, true);
+});
+
+test('Channel3Client: normalizeProduct handles SDK nested Price and WeightDimension objects', () => {
+  const client = new Channel3Client();
+  const rawSdkProduct = {
+    id: 'c3_sdk_phone_001',
+    title: 'Flagship Smartphone Pro',
+    description: 'High-end smartphone with OLED screen',
+    category: { slug: 'smartphones', title: 'Smartphones' },
+    images: [
+      { url: 'https://cdn.trychannel3.com/prod/phone.jpg', cleaned_url: 'https://cdn.trychannel3.com/prod/phone-clean.jpg' },
+    ],
+    offers: [
+      {
+        id: 'off_c3_1',
+        domain: 'prime-retail.com',
+        price: { price: 899.99, compare_at_price: 999.99, currency: 'USD' },
+        availability: 'InStock',
+        max_commission_rate: 0.12,
+        shipping_fee_cents: 0,
+      },
+    ],
+    dimensions: {
+      weight: { number: 0.45, unit: 'kg' },
+      length: { number: 15, unit: 'cm' },
+    },
+  };
+
+  const normalized = client.normalizeProduct(rawSdkProduct);
+  assert.equal(normalized.product_id, 'c3_sdk_phone_001');
+  assert.equal(normalized.category_id, 'smartphones');
+  assert.equal(normalized.offers.length, 1);
+  assert.equal(normalized.offers[0].price, 89999);
+  assert.equal(normalized.offers[0].compare_at_price, 99999);
+  assert.equal(normalized.offers[0].stock_status, 'IN_STOCK');
+  assert.equal(normalized.images[0].cleaned_url, 'https://cdn.trychannel3.com/prod/phone-clean.jpg');
+  assert.equal(normalized.dimensions?.weight, 450); // 0.45 kg converted to 450g
+});

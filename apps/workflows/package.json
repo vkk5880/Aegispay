@@ -11,6 +11,7 @@
   "dependencies": {
     "@aegispay/database": "workspace:*",
     "@aegispay/shared-types": "workspace:*",
+    "@channel3/sdk": "^4.9.0",
     "@paypal/paypal-server-sdk": "^2.5.0",
     "@renderinc/sdk": "^1.8.0",
     "dotenv": "^16.4.5",

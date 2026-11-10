@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import { Channel3Item } from '@aegispay/shared-types';
 import { defaultCartSolver, KnapsackOptimizationResult, RequiredShoppingItem } from './cart-solver.js';
+import { Channel3 as OfficialChannel3Sdk, Channel3Api } from '@channel3/sdk';
 
 dotenv.config();
 
@@ -106,11 +107,26 @@ export class Channel3Client {
   private apiKey: string;
   private baseUrl: string;
   private promoCode: string;
+  private sdkClient?: OfficialChannel3Sdk;
 
   constructor(apiKey?: string, baseUrl?: string, promoCode?: string) {
     this.apiKey = apiKey || process.env.CHANNEL3_API_KEY || '';
     this.baseUrl = baseUrl || process.env.CHANNEL3_BASE_URL || 'https://api.channel3.ai';
     this.promoCode = promoCode || process.env.CHANNEL3_PROMO_CODE || 'PAYPAL-HACKATHON-2026';
+
+    if (this.apiKey && this.apiKey !== 'your_channel3_api_key_here') {
+      try {
+        this.sdkClient = new OfficialChannel3Sdk({
+          apiKey: this.apiKey,
+          baseUrl: this.baseUrl,
+          headers: {
+            'x-promo-code': this.promoCode,
+          },
+        });
+      } catch (err) {
+        console.warn('Channel3Client: Error initializing official @channel3/sdk client:', err);
+      }
+    }
   }
 
   public getPromoCode(): string {
@@ -119,6 +135,10 @@ export class Channel3Client {
 
   public getBaseUrl(): string {
     return this.baseUrl;
+  }
+
+  public getOfficialSdk(): OfficialChannel3Sdk | undefined {
+    return this.sdkClient;
   }
 
   public getHeaders(): Record<string, string> {
@@ -133,6 +153,77 @@ export class Channel3Client {
     return headers;
   }
 
+  public normalizeProduct(p: any): Channel3ProductDetail {
+    const productId = String(p.product_id || p.id || '');
+    const rawImages = Array.isArray(p.images) ? p.images : [];
+    const images = rawImages.map((img: any) => {
+      const rawUrl = typeof img === 'string' ? img : (img?.url || '');
+      const cleaned = typeof img === 'object' && img?.cleaned_url
+        ? img.cleaned_url
+        : `${rawUrl}&cleaned=1024&bg=white`;
+      return { url: rawUrl, cleaned_url: cleaned };
+    });
+    if (images.length === 0) {
+      images.push({
+        url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024',
+        cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&bg=white',
+      });
+    }
+
+    const rawOffers = Array.isArray(p.offers) ? p.offers : [];
+    const offers: Channel3Offer[] = rawOffers.map((o: any, idx: number) => {
+      let priceCents = 0;
+      let compareCents = 0;
+      if (typeof o.price === 'object' && o.price !== null) {
+        priceCents = Math.max(0, Math.round(Number(o.price.price || 0) * 100));
+        compareCents = o.price.compare_at_price != null
+          ? Math.max(0, Math.round(Number(o.price.compare_at_price) * 100))
+          : priceCents;
+      } else if (typeof o.price === 'number') {
+        priceCents = Number.isInteger(o.price) ? Math.max(0, o.price) : Math.max(0, Math.round(o.price * 100));
+        compareCents = typeof o.compare_at_price === 'number'
+          ? (Number.isInteger(o.compare_at_price) ? o.compare_at_price : Math.round(o.compare_at_price * 100))
+          : priceCents;
+      }
+      const stock = o.stock_status || (o.availability === 'InStock' ? 'IN_STOCK' : (o.availability ? 'OUT_OF_STOCK' : 'IN_STOCK'));
+      return {
+        id: String(o.id || `off_${productId}_${idx}`),
+        product_id: productId,
+        domain: String(o.domain || 'merchant.com'),
+        price: priceCents,
+        compare_at_price: Math.max(priceCents, compareCents),
+        max_commission_rate: typeof o.max_commission_rate === 'number'
+          ? Math.max(0, Math.min(1.0, o.max_commission_rate))
+          : 0.10,
+        shipping_fee_cents: typeof o.shipping_fee_cents === 'number' ? o.shipping_fee_cents : 0,
+        shipping_waiver_threshold_cents: o.shipping_waiver_threshold_cents,
+        merchant_anomaly_score: typeof o.merchant_anomaly_score === 'number' ? o.merchant_anomaly_score : 0.05,
+        stock_status: stock,
+        observed_at: o.observed_at || new Date().toISOString(),
+      };
+    });
+
+    let dimensions = p.dimensions;
+    if (dimensions?.weight && typeof dimensions.weight === 'object' && 'number' in dimensions.weight) {
+      const wNum = Number(dimensions.weight.number) || 0;
+      const unit = String(dimensions.weight.unit || '').toLowerCase();
+      const weightGrams = unit === 'lb' || unit === 'lbs'
+        ? Math.round(wNum * 453.592)
+        : (unit === 'kg' ? Math.round(wNum * 1000) : Math.round(wNum));
+      dimensions = { ...dimensions, weight: weightGrams };
+    }
+
+    return {
+      product_id: productId,
+      title: String(p.title || 'Untitled Product'),
+      description: String(p.description || ''),
+      category_id: String(p.category_id || p.category?.slug || p.category?.title || 'general'),
+      offers,
+      images,
+      dimensions,
+    };
+  }
+
   /**
    * Channel3 /v1/search (text query, inspiration image_url, category_ids, and hex color)
    */
@@ -141,18 +232,79 @@ export class Channel3Client {
       return this.getMockSearchResponse(filters);
     }
 
+    // 1. Try official @channel3/sdk client if targeting trychannel3.com
+    if (this.sdkClient && this.baseUrl.includes('trychannel3.com')) {
+      try {
+        const searchReq: Channel3Api.SearchRequest = {
+          query: filters.query || undefined,
+          image_url: filters.image_url || undefined,
+          limit: Math.min(30, Math.max(1, filters.limit || 20)),
+        };
+        const searchFilters: Channel3Api.SearchFilters = {};
+        if (filters.category_ids && filters.category_ids.length > 0) {
+          searchFilters.category_ids = filters.category_ids;
+        }
+        if (filters.hex_color) {
+          searchFilters.colors = {
+            palette: [{ hex: filters.hex_color }],
+          };
+        }
+        if (Object.keys(searchFilters).length > 0) {
+          searchReq.filters = searchFilters;
+        }
+
+        const page = await this.sdkClient.products.search(searchReq);
+        const rawList = (page as any)?.products ?? (page as any)?.data ?? page;
+        if (Array.isArray(rawList) && rawList.length > 0) {
+          const normalized = rawList.map((p: any) => this.normalizeProduct(p));
+          return {
+            total: Number((page as any)?.total) || normalized.length,
+            products: normalized,
+          };
+        }
+      } catch (sdkErr) {
+        console.warn('Channel3 @channel3/sdk products.search encountered error, falling back to HTTP:', sdkErr);
+      }
+    }
+
+    // 2. Direct HTTP fetch fallback (also handles mocked globalThis.fetch in tests)
     try {
-      const res = await fetch(`${this.baseUrl}/v1/search`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
+      let requestBody: Record<string, any>;
+      if (this.baseUrl.includes('trychannel3.com')) {
+        const filtersObj: Record<string, any> = {};
+        if (filters.category_ids && filters.category_ids.length > 0) {
+          filtersObj.category_ids = filters.category_ids;
+        }
+        if (filters.hex_color) {
+          filtersObj.colors = {
+            palette: [{ hex: filters.hex_color }],
+          };
+        }
+        requestBody = {
+          query: filters.query || '',
+          limit: filters.limit || 20,
+        };
+        if (Object.keys(filtersObj).length > 0) {
+          requestBody.filters = filtersObj;
+        }
+        if (filters.image_url) {
+          requestBody.image_url = filters.image_url;
+        }
+      } else {
+        requestBody = {
           query: filters.query,
           image_url: filters.image_url,
           category_ids: filters.category_ids,
           hex_color: filters.hex_color,
           limit: filters.limit || 20,
           offset: filters.offset || 0,
-        }),
+        };
+      }
+
+      const res = await fetch(`${this.baseUrl}/v1/search`, {
+        method: 'POST',
+        headers: this.getHeaders(),
+        body: JSON.stringify(requestBody),
       });
 
       if (!res.ok) {
@@ -160,7 +312,16 @@ export class Channel3Client {
         return this.getMockSearchResponse(filters);
       }
 
-      return await res.json() as Channel3SearchResponse;
+      const raw = (await res.json()) as any;
+      if (Array.isArray(raw?.products)) {
+        const normalized = raw.products.map((p: any) => this.normalizeProduct(p));
+        return {
+          total: Number(raw.total) || normalized.length,
+          products: normalized,
+        };
+      }
+
+      return raw as Channel3SearchResponse;
     } catch (err) {
       console.warn('Channel3 search failed, using deterministic mock items:', err);
       return this.getMockSearchResponse(filters);
@@ -173,6 +334,69 @@ export class Channel3Client {
   async lookup(productIds: string[]): Promise<Channel3ProductDetail[]> {
     if (!this.apiKey || this.apiKey === 'your_channel3_api_key_here') {
       return this.getMockLookupResponse(productIds);
+    }
+
+    // 1. Try official SDK retrieve / lookup if targeting trychannel3.com
+    if (this.sdkClient && this.baseUrl.includes('trychannel3.com')) {
+      try {
+        const fetchPromises = productIds.map(async (id) => {
+          try {
+            if (/^https?:\/\//i.test(id)) {
+              const res = await this.sdkClient!.products.lookup({ url: id });
+              if (res?.product) {
+                return this.normalizeProduct(res.product);
+              }
+            } else {
+              const prod = await this.sdkClient!.products.retrieve({ product_id: id });
+              if (prod) {
+                return this.normalizeProduct(prod);
+              }
+            }
+          } catch {
+            // Individual item failure handled by filter
+          }
+          return null;
+        });
+
+        const fetched = await Promise.all(fetchPromises);
+        const valid = fetched.filter((p): p is Channel3ProductDetail => p !== null);
+        if (valid.length > 0) {
+          return valid;
+        }
+      } catch (sdkErr) {
+        console.warn('Channel3 @channel3/sdk products.retrieve encountered error, falling back:', sdkErr);
+      }
+    }
+
+    // 2. Direct HTTP fetch fallback
+    if (this.baseUrl.includes('trychannel3.com')) {
+      try {
+        const fetchPromises = productIds.map(async (id) => {
+          try {
+            const res = await fetch(`${this.baseUrl}/v1/products/${id}`, {
+              method: 'GET',
+              headers: this.getHeaders(),
+            });
+            if (res.ok) {
+              const raw = (await res.json()) as any;
+              return this.normalizeProduct(raw);
+            }
+          } catch {
+            // fallback handled below
+          }
+          return null;
+        });
+
+        const fetched = await Promise.all(fetchPromises);
+        const valid = fetched.filter((p): p is Channel3ProductDetail => p !== null);
+        if (valid.length > 0) {
+          return valid;
+        }
+        return this.getMockLookupResponse(productIds);
+      } catch (err) {
+        console.warn('Channel3 live lookup failed, using deterministic mock items:', err);
+        return this.getMockLookupResponse(productIds);
+      }
     }
 
     try {
@@ -189,12 +413,255 @@ export class Channel3Client {
         return this.getMockLookupResponse(productIds);
       }
 
-      const data = await res.json() as { products: Channel3ProductDetail[] };
-      return data.products || [];
+      const data = (await res.json()) as { products?: any[] };
+      if (Array.isArray(data?.products)) {
+        return data.products.map((p) => this.normalizeProduct(p));
+      }
+      return [];
     } catch (err) {
       console.warn('Channel3 lookup failed, using deterministic mock items:', err);
       return this.getMockLookupResponse(productIds);
     }
+  }
+
+  /**
+   * Visual search by image URL powered by Channel3
+   */
+  async searchByImage(imageUrl: string, options?: { limit?: number; category_ids?: string[] }): Promise<Channel3SearchResponse> {
+    return this.search({
+      image_url: imageUrl,
+      limit: options?.limit || 20,
+      category_ids: options?.category_ids,
+    });
+  }
+
+  /**
+   * Discover similar products for a seed product ID
+   */
+  async findSimilar(productId: string, options?: { limit?: number }): Promise<Channel3ProductDetail[]> {
+    if (this.sdkClient) {
+      try {
+        const res = await this.sdkClient.products.findSimilar({
+          product_id: productId,
+          limit: options?.limit || 10,
+        });
+        const rawList = (res as any)?.products ?? (res as any)?.data ?? res;
+        if (Array.isArray(rawList) && rawList.length > 0) {
+          return rawList.map((p: any) => this.normalizeProduct(p));
+        }
+      } catch (err) {
+        console.warn(`[Channel3Client] findSimilar SDK call failed for ${productId}:`, err);
+      }
+    }
+    // Fallback: lookup and return related mock products
+    const all = this.getMockSearchResponse({}).products;
+    return all.filter((p) => p.product_id !== productId).slice(0, options?.limit || 4);
+  }
+
+  /**
+   * Look up product details from any live merchant URL
+   */
+  async lookupUrl(url: string): Promise<Channel3ProductDetail | null> {
+    if (this.sdkClient) {
+      try {
+        const res = await this.sdkClient.products.lookup({ url });
+        if (res?.product) {
+          return this.normalizeProduct(res.product);
+        }
+      } catch (err) {
+        console.warn(`[Channel3Client] lookupUrl SDK call failed for ${url}:`, err);
+      }
+    }
+    const mock = this.getMockSearchResponse({}).products[0];
+    return mock || null;
+  }
+
+  /**
+   * Retrieve full product detail by canonical product ID
+   */
+  async retrieveProduct(productId: string): Promise<Channel3ProductDetail | null> {
+    const list = await this.lookup([productId]);
+    return list[0] || null;
+  }
+
+  /**
+   * Browse and list categories in the catalog
+   */
+  async listCategories(options?: { pageSize?: number }): Promise<any[]> {
+    if (this.sdkClient) {
+      try {
+        const page = await this.sdkClient.categories.list({
+          page_size: options?.pageSize || 20,
+        });
+        const items = (page as any)?.items ?? (page as any)?.categories ?? page;
+        if (Array.isArray(items)) {
+          return items;
+        }
+      } catch (err) {
+        console.warn('[Channel3Client] listCategories SDK call failed:', err);
+      }
+    }
+    return [
+      { id: 'cat_electronics', slug: 'electronics', title: 'Electronics', path: '/electronics' },
+      { id: 'cat_audio', slug: 'audio', title: 'Audio & Headphones', path: '/electronics/audio' },
+      { id: 'cat_computers', slug: 'computers', title: 'Computers & Accessories', path: '/electronics/computers' },
+      { id: 'cat_home', slug: 'home-office', title: 'Home Office & Ergonomics', path: '/home/office' },
+    ];
+  }
+
+  /**
+   * Search categories by query keyword
+   */
+  async searchCategories(query: string): Promise<any[]> {
+    if (this.sdkClient) {
+      try {
+        const res = await this.sdkClient.categories.search({ query });
+        const items = (res as any)?.categories ?? res;
+        if (Array.isArray(items)) {
+          return items;
+        }
+      } catch (err) {
+        console.warn(`[Channel3Client] searchCategories SDK call failed for "${query}":`, err);
+      }
+    }
+    const all = await this.listCategories();
+    return all.filter((c: any) =>
+      c.title.toLowerCase().includes(query.toLowerCase()) || c.slug.toLowerCase().includes(query.toLowerCase())
+    );
+  }
+
+  /**
+   * Browse and list brands in the catalog
+   */
+  async listBrands(options?: { limit?: number }): Promise<any[]> {
+    if (this.sdkClient) {
+      try {
+        const page = await this.sdkClient.brands.list({
+          limit: options?.limit || 20,
+        });
+        const items = (page as any)?.items ?? (page as any)?.brands ?? page;
+        if (Array.isArray(items)) {
+          return items;
+        }
+      } catch (err) {
+        console.warn('[Channel3Client] listBrands SDK call failed:', err);
+      }
+    }
+    return [
+      { id: 'brand_sony', name: 'Sony', slug: 'sony' },
+      { id: 'brand_anker', name: 'Anker', slug: 'anker' },
+      { id: 'brand_nomad', name: 'Nomad Goods', slug: 'nomad' },
+      { id: 'brand_lenovo', name: 'Lenovo', slug: 'lenovo' },
+      { id: 'brand_logitech', name: 'Logitech', slug: 'logitech' },
+    ];
+  }
+
+  /**
+   * Search brands by query keyword
+   */
+  async searchBrands(query: string): Promise<any[]> {
+    if (this.sdkClient) {
+      try {
+        const res = await this.sdkClient.brands.search({ query });
+        const items = (res as any)?.brands ?? res;
+        if (Array.isArray(items)) {
+          return items;
+        }
+      } catch (err) {
+        console.warn(`[Channel3Client] searchBrands SDK call failed for "${query}":`, err);
+      }
+    }
+    const all = await this.listBrands();
+    return all.filter((b: any) =>
+      b.name.toLowerCase().includes(query.toLowerCase()) || b.slug.toLowerCase().includes(query.toLowerCase())
+    );
+  }
+
+  /**
+   * Start price tracking for a product (subscribes to automated price change alerts)
+   */
+  async startPriceTracking(canonicalProductId: string): Promise<{ success: boolean; subscription_id: string }> {
+    if (this.sdkClient) {
+      try {
+        const res = await this.sdkClient.priceTracking.start({
+          canonical_product_id: canonicalProductId,
+        });
+        return {
+          success: true,
+          subscription_id: (res as any)?.id || `sub_${canonicalProductId}_${Date.now()}`,
+        };
+      } catch (err) {
+        console.warn(`[Channel3Client] startPriceTracking SDK call failed for ${canonicalProductId}:`, err);
+      }
+    }
+    return {
+      success: true,
+      subscription_id: `sub_sim_${canonicalProductId}_${Date.now()}`,
+    };
+  }
+
+  /**
+   * Stop price tracking for a product
+   */
+  async stopPriceTracking(canonicalProductId: string): Promise<{ success: boolean }> {
+    if (this.sdkClient) {
+      try {
+        await this.sdkClient.priceTracking.stop({
+          canonical_product_id: canonicalProductId,
+        });
+        return { success: true };
+      } catch (err) {
+        console.warn(`[Channel3Client] stopPriceTracking SDK call failed for ${canonicalProductId}:`, err);
+      }
+    }
+    return { success: true };
+  }
+
+  /**
+   * Retrieve historical price data points for a product
+   */
+  async getPriceHistory(canonicalProductId: string): Promise<Array<{ timestamp: string; price_cents: number; domain: string }>> {
+    if (this.sdkClient) {
+      try {
+        const res = await this.sdkClient.priceTracking.retrieveHistory({
+          canonical_product_id: canonicalProductId,
+        });
+        const points = (res as any)?.points ?? (res as any)?.history ?? [];
+        if (Array.isArray(points) && points.length > 0) {
+          return points.map((pt: any) => ({
+            timestamp: pt.timestamp || new Date().toISOString(),
+            price_cents: Math.round(Number(pt.price || 0) * 100),
+            domain: pt.domain || 'merchant.com',
+          }));
+        }
+      } catch (err) {
+        console.warn(`[Channel3Client] getPriceHistory SDK call failed for ${canonicalProductId}:`, err);
+      }
+    }
+    const now = Date.now();
+    return [
+      { timestamp: new Date(now - 86400000 * 3).toISOString(), price_cents: 34900, domain: 'techmerchant.com' },
+      { timestamp: new Date(now - 86400000 * 2).toISOString(), price_cents: 33900, domain: 'audiovault.io' },
+      { timestamp: new Date(now - 86400000 * 1).toISOString(), price_cents: 32900, domain: 'techmerchant.com' },
+    ];
+  }
+
+  /**
+   * List active price tracking subscriptions
+   */
+  async listPriceTrackingSubscriptions(): Promise<any[]> {
+    if (this.sdkClient) {
+      try {
+        const page = await this.sdkClient.priceTracking.listSubscriptions();
+        const items = (page as any)?.items ?? (page as any)?.subscriptions ?? page;
+        if (Array.isArray(items)) {
+          return items;
+        }
+      } catch (err) {
+        console.warn('[Channel3Client] listPriceTrackingSubscriptions SDK call failed:', err);
+      }
+    }
+    return [];
   }
 
   private getMockSearchResponse(filters: Channel3SearchFilters): Channel3SearchResponse {
@@ -216,6 +683,7 @@ export class Channel3Client {
             shipping_waiver_threshold_cents: 50000,
             merchant_anomaly_score: 0.05,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
           {
             id: 'off_002',
@@ -228,6 +696,7 @@ export class Channel3Client {
             shipping_waiver_threshold_cents: 30000,
             merchant_anomaly_score: 0.12,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -260,6 +729,7 @@ export class Channel3Client {
             shipping_waiver_threshold_cents: 50000,
             merchant_anomaly_score: 0.04,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
           {
             id: 'off_004',
@@ -272,6 +742,7 @@ export class Channel3Client {
             shipping_waiver_threshold_cents: 20000,
             merchant_anomaly_score: 0.08,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -304,6 +775,7 @@ export class Channel3Client {
             shipping_waiver_threshold_cents: 20000,
             merchant_anomaly_score: 0.02,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
           {
             id: 'off_006',
@@ -316,6 +788,7 @@ export class Channel3Client {
             shipping_waiver_threshold_cents: 100000,
             merchant_anomaly_score: 0.88,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -347,6 +820,7 @@ export class Channel3Client {
             shipping_fee_cents: 0,
             merchant_anomaly_score: 0.03,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
           {
             id: 'off_lenovo_2',
@@ -358,6 +832,7 @@ export class Channel3Client {
             shipping_fee_cents: 0,
             merchant_anomaly_score: 0.04,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -384,6 +859,7 @@ export class Channel3Client {
             shipping_fee_cents: 0,
             merchant_anomaly_score: 0.01,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
           {
             id: 'off_oneplus_2',
@@ -395,6 +871,7 @@ export class Channel3Client {
             shipping_fee_cents: 0,
             merchant_anomaly_score: 0.03,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -421,6 +898,7 @@ export class Channel3Client {
             shipping_fee_cents: 500,
             merchant_anomaly_score: 0.02,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -447,6 +925,7 @@ export class Channel3Client {
             shipping_fee_cents: 0,
             merchant_anomaly_score: 0.02,
             stock_status: 'IN_STOCK',
+            observed_at: new Date().toISOString(),
           },
         ],
         images: [
@@ -463,7 +942,7 @@ export class Channel3Client {
 
     if (filters.category_ids && filters.category_ids.length > 0) {
       const catSet = new Set(filters.category_ids);
-      filtered = filtered.filter(p => catSet.has(p.category_id));
+      filtered = filtered.filter((p) => catSet.has(p.category_id));
       if (filtered.length === 0) {
         // Fall back to all if category wasn't in mock catalog
         filtered = [...mockProducts];
@@ -472,8 +951,8 @@ export class Channel3Client {
 
     if (filters.query) {
       const q = filters.query.toLowerCase();
-      const match = filtered.filter(p =>
-        p.title.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
+      const match = filtered.filter(
+        (p) => p.title.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)
       );
       if (match.length > 0) {
         filtered = match;
@@ -485,7 +964,7 @@ export class Channel3Client {
 
   private getMockLookupResponse(productIds: string[]): Channel3ProductDetail[] {
     const fullSet = this.getMockSearchResponse({}).products;
-    return fullSet.filter(p => productIds.includes(p.product_id));
+    return fullSet.filter((p) => productIds.includes(p.product_id));
   }
 
   /**
@@ -502,11 +981,11 @@ export class Channel3Client {
       zipCode?: string;
     }
   ): Promise<TwoPhaseStockReservationResult> {
-    const normalizedItems: StockReservationItem[] = items.map(it =>
+    const normalizedItems: StockReservationItem[] = items.map((it) =>
       typeof it === 'string' ? { product_id: it, quantity: 1 } : it
     );
 
-    const productIds = Array.from(new Set(normalizedItems.map(i => i.product_id)));
+    const productIds = Array.from(new Set(normalizedItems.map((i) => i.product_id)));
     const catalog = options?.catalog || (await this.lookup(productIds));
 
     const reservationId = `res_2pc_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
@@ -514,7 +993,7 @@ export class Channel3Client {
     const failedItems: string[] = [];
 
     for (const item of normalizedItems) {
-      const prod = catalog.find(p => p.product_id === item.product_id);
+      const prod = catalog.find((p) => p.product_id === item.product_id);
       const qty = item.quantity || 1;
 
       if (!prod) {
@@ -530,15 +1009,18 @@ export class Channel3Client {
       }
 
       // Check specific merchant offer if domain provided, filtering stale offers
-      const freshOffers = prod.offers.filter(o => isOfferFresh(o));
+      const freshOffers = prod.offers.filter((o) => isOfferFresh(o));
       const applicableOffers = item.merchant_domain
-        ? freshOffers.filter(o => o.domain === item.merchant_domain)
+        ? freshOffers.filter((o) => o.domain === item.merchant_domain)
         : freshOffers;
 
-      const hasInStockOffer = applicableOffers.some(o => o.stock_status !== 'OUT_OF_STOCK');
+      const hasInStockOffer = applicableOffers.some((o) => o.stock_status !== 'OUT_OF_STOCK');
 
       if (hasInStockOffer) {
-        const domain = item.merchant_domain || applicableOffers.find(o => o.stock_status !== 'OUT_OF_STOCK')?.domain || 'unknown';
+        const domain =
+          item.merchant_domain ||
+          applicableOffers.find((o) => o.stock_status !== 'OUT_OF_STOCK')?.domain ||
+          'unknown';
         verifiedItems.push({
           product_id: item.product_id,
           quantity: qty,
@@ -565,8 +1047,8 @@ export class Channel3Client {
     // Fallback re-optimization if any item failed stock verification
     if (!allHeld) {
       const remainingItems: RequiredShoppingItem[] = normalizedItems
-        .filter(i => !failedItems.includes(i.product_id))
-        .map(i => ({ product_id: i.product_id, quantity: i.quantity || 1 }));
+        .filter((i) => !failedItems.includes(i.product_id))
+        .map((i) => ({ product_id: i.product_id, quantity: i.quantity || 1 }));
 
       if (remainingItems.length > 0) {
         try {

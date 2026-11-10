@@ -57,7 +57,7 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paypal.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.paypal.com https://*.channel3.ai wss:; frame-ancestors 'none';",
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paypal.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https: https://*.trychannel3.com https://cdn.trychannel3.com https://*.channel3.ai; font-src 'self' data:; connect-src 'self' https://*.paypal.com https://*.channel3.ai https://*.trychannel3.com https://api.trychannel3.com wss:; frame-ancestors 'none';",
           },
           {
             key: 'X-Content-Type-Options',
