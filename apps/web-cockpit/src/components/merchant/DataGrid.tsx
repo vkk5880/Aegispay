@@ -200,7 +200,7 @@ export function DataGrid({
   // Pure, deterministic row ID resolver for stable AG Grid delta operations
   const getRowId = useCallback((params: GetRowIdParams<Row>) => {
     const d = params.data;
-    if (!d) return String((params as any).node?.rowIndex ?? 'unknown');
+    if (!d) return 'unknown';
     if (d.id != null) return String(d.id);
     if (d.transaction_id != null) return String(d.transaction_id);
     if (d.dispute_id != null) return String(d.dispute_id);
@@ -209,7 +209,12 @@ export function DataGrid({
     if (d.currency != null && d.date != null) return `${d.currency}_${d.date}`;
     if (d.currency != null) return String(d.currency);
     if (d.name != null) return String(d.name);
-    return `row_${(params as any).node?.rowIndex ?? 0}`;
+    // Deterministic fallback based on first available primitive property values
+    const fallbackKey = Object.values(d)
+      .filter((v) => v != null && typeof v !== 'object')
+      .slice(0, 3)
+      .join('_');
+    return fallbackKey ? `row_${fallbackKey}` : 'row_unknown';
   }, []);
 
   const onRowClicked = useCallback((event: RowClickedEvent<Row>) => {
@@ -490,6 +495,7 @@ export function DataGrid({
             detailRowAutoHeight
             // Real-Time Cell Flashing & Pure Deterministic IDs
             getRowId={getRowId}
+            tooltipShowDelay={200}
             cellFlashDuration={800}
             cellFadeDuration={1200}
             // Integrated AG Charts & Selection

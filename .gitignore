@@ -23,3 +23,5 @@ development-task/
 scripts/
 .jules/
 *.tar.gz
+.agents/
+skills-lock.json

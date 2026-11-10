@@ -4,18 +4,28 @@ import React, { useState } from 'react';
 import type { CustomCellRendererProps } from 'ag-grid-react';
 import { Layers, ShieldCheck, Truck, Clock, DollarSign, ExternalLink } from 'lucide-react';
 
+export interface PurchaseUnitItem {
+  payee_merchant_id: string;
+  item_name: string;
+  category: string;
+  amount: number;
+  net_settlement: number;
+  status: string;
+}
+
+export interface TrackerItem {
+  carrier: string;
+  tracking_number: string;
+  postal_code: string;
+  delivery_status: string;
+  timestamp: string;
+}
+
 export interface OrderDetailProps {
   data?: {
     id?: string;
     transaction_id?: string;
-    purchase_units?: Array<{
-      payee_merchant_id: string;
-      item_name: string;
-      category: string;
-      amount: number;
-      net_settlement: number;
-      status: string;
-    }>;
+    purchase_units?: PurchaseUnitItem[];
     vault_token?: {
       vault_id: string;
       customer_id: string;
@@ -24,13 +34,7 @@ export interface OrderDetailProps {
       reauth_count: number;
       last_reauth_at: string;
     };
-    trackers?: Array<{
-      carrier: string;
-      tracking_number: string;
-      postal_code: string;
-      delivery_status: string;
-      timestamp: string;
-    }>;
+    trackers?: TrackerItem[];
     [key: string]: unknown;
   };
 }
@@ -153,7 +157,7 @@ export function OrderDetailView(props: CustomCellRendererProps<any> | OrderDetai
               </tr>
             </thead>
             <tbody>
-              {purchaseUnits.map((u: any, i: number) => (
+              {purchaseUnits.map((u: PurchaseUnitItem, i: number) => (
                 <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                   <td className="p-1.5 text-cyan-400 font-bold">{u.payee_merchant_id}</td>
                   <td className="p-1.5 text-slate-200">{u.item_name}</td>
@@ -210,7 +214,7 @@ export function OrderDetailView(props: CustomCellRendererProps<any> | OrderDetai
               </tr>
             </thead>
             <tbody>
-              {trackers.map((t: any, i: number) => (
+              {trackers.map((t: TrackerItem, i: number) => (
                 <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-800/30">
                   <td className="p-1.5 font-bold text-cyan-400">{t.carrier}</td>
                   <td className="p-1.5 text-slate-200 underline">{t.tracking_number}</td>
