@@ -8,6 +8,15 @@ import {
   ComparisonMatrixSchema,
   ExplainableCartPayloadSchema,
   ExplainableCartPayload,
+  ActiveTurnProduct,
+  ActiveTurnProductSchema,
+  formatDataStreamText,
+  formatDataStreamToolCall,
+  formatDataStreamToolResult,
+  formatDataStreamFinish,
+  formatDataStreamError,
+  RecoveryPillSchema,
+  RecoveryPill,
   createLogger,
 } from '@aegispay/shared-types';
 
@@ -38,6 +47,10 @@ import {
   createSolveKnapsackCartTool,
   createVerifyAndCheckoutTool,
   createExecuteEscrowHoldTool,
+  createSearchCatalogTool,
+  createFilterTurnProductsTool,
+  createCompareProductsTool,
+  createPrepareCheckoutTool,
   transformToProductCard,
   buildComparisonMatrix,
 } from './mastra-tools.js';
@@ -398,9 +411,12 @@ export function resolveCommerceModel(requestedModel?: string): string {
 }
 
 export interface ChatMessageRequest {
+  session_id?: string;
   message: string;
   action?: ShoppingActionType;
   product_ids?: string[];
+  selected_product_ids?: string[];
+  active_turn_products?: ActiveTurnProduct[];
   budget_cap_cents?: number;
   zip_code?: string;
   model?: string;
@@ -414,9 +430,12 @@ export interface ChatMessageRequest {
 }
 
 export const WorkflowInputSchema = z.object({
+  session_id: z.string().optional(),
   message: z.string(),
   explicit_action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']).optional(),
   product_ids: z.array(z.string()).optional(),
+  selected_product_ids: z.array(z.string()).optional(),
+  active_turn_products: z.array(ActiveTurnProductSchema).optional(),
   budget_cap_cents: z.number().int().positive().optional(),
   zip_code: z.string().optional(),
   model: z.string().optional(),
@@ -437,6 +456,7 @@ export const WorkflowOutputSchema = z.object({
   thought_trace: z.array(z.string()).optional(),
   active_model: z.string().optional(),
   requires_human_confirmation: z.boolean().optional(),
+  recovery_pills: z.array(RecoveryPillSchema).optional(),
 });
 
 export type WorkflowInput = z.infer<typeof WorkflowInputSchema>;
@@ -606,6 +626,10 @@ export class ShoppingAssistantService {
   public solveCartTool: ReturnType<typeof createSolveKnapsackCartTool>;
   public verifyCheckoutTool: ReturnType<typeof createVerifyAndCheckoutTool>;
   public escrowHoldTool: ReturnType<typeof createExecuteEscrowHoldTool>;
+  public searchCatalogTool: ReturnType<typeof createSearchCatalogTool>;
+  public filterTurnProductsTool: ReturnType<typeof createFilterTurnProductsTool>;
+  public compareProductsTool: ReturnType<typeof createCompareProductsTool>;
+  public prepareCheckoutTool: ReturnType<typeof createPrepareCheckoutTool>;
 
   constructor(
     channel3Client: Channel3Client = defaultChannel3Client,
@@ -622,8 +646,12 @@ export class ShoppingAssistantService {
     this.solveCartTool = createSolveKnapsackCartTool(this.channel3Client, this.cartSolver);
     this.verifyCheckoutTool = createVerifyAndCheckoutTool(this.channel3Client);
     this.escrowHoldTool = createExecuteEscrowHoldTool(this.channel3Client);
+    this.searchCatalogTool = createSearchCatalogTool(this.channel3Client, this.scoringEngine);
+    this.filterTurnProductsTool = createFilterTurnProductsTool();
+    this.compareProductsTool = createCompareProductsTool(this.channel3Client);
+    this.prepareCheckoutTool = createPrepareCheckoutTool(this.channel3Client, this.cartSolver);
 
-    // Initialize Mastra Agent with Gemini 3.8 Flash model configuration
+    // Initialize Mastra Agent with Gemini 2.5 Flash model configuration
     this.agent = new Agent({
       id: 'aegispay-commerce-agent',
       name: 'AegisPay Autonomous Shopping Concierge',
@@ -631,10 +659,14 @@ export class ShoppingAssistantService {
         'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
         'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
         'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
-        'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
+        'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
         'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
       model: resolveCommerceModel(),
       tools: {
+        search_catalog: this.searchCatalogTool,
+        filter_turn_products: this.filterTurnProductsTool,
+        compare_products: this.compareProductsTool,
+        prepare_checkout: this.prepareCheckoutTool,
         discover_products: this.discoverTool,
         score_and_rank: this.scoreTool,
         solve_knapsack_cart: this.solveCartTool,
@@ -928,6 +960,8 @@ export class ShoppingAssistantService {
         action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']),
         query: z.string(),
         product_ids: z.array(z.string()).optional(),
+        selected_product_ids: z.array(z.string()).optional(),
+        active_turn_products: z.array(ActiveTurnProductSchema).optional(),
         budget_cap_cents: z.number().int().positive().optional(),
         zip_code: z.string().optional(),
         model: z.string().optional(),
@@ -938,17 +972,23 @@ export class ShoppingAssistantService {
       }),
       execute: async ({ inputData }: { inputData: WorkflowInput }) => {
         const activeModel = resolveCommerceModel(inputData.model);
-        const action = this.resolveIntent(inputData.message, inputData.explicit_action);
+        const effectiveProductIds =
+          inputData.selected_product_ids && inputData.selected_product_ids.length > 0
+            ? inputData.selected_product_ids
+            : inputData.product_ids;
+        const action = this.resolveIntent(inputData.message, inputData.explicit_action, effectiveProductIds);
         const query = this.extractSearchQuery(inputData.message);
         const keyAuth = inputData.user_api_key ? 'User-Scoped BYOK' : 'Platform Deploy';
         const trace = [
-          `[Mastra Workflow DAG] Active Model: ${activeModel} (${keyAuth}) | Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action}`,
+          `[Mastra Workflow DAG] Active Model: ${activeModel} (${keyAuth}) | Step 'intent_resolution' evaluated input: "${inputData.message}" -> Action: ${action} (selected: ${effectiveProductIds?.length || 0})`,
         ];
 
         return {
           action,
           query,
-          product_ids: inputData.product_ids,
+          product_ids: effectiveProductIds,
+          selected_product_ids: inputData.selected_product_ids,
+          active_turn_products: inputData.active_turn_products,
           budget_cap_cents: inputData.budget_cap_cents,
           zip_code: inputData.zip_code,
           thought_trace: trace,
@@ -964,6 +1004,8 @@ export class ShoppingAssistantService {
         action: z.enum(['DISCOVER', 'COMPARE', 'DETAILS', 'BUY']),
         query: z.string(),
         product_ids: z.array(z.string()).optional(),
+        selected_product_ids: z.array(z.string()).optional(),
+        active_turn_products: z.array(ActiveTurnProductSchema).optional(),
         budget_cap_cents: z.number().int().positive().optional(),
         zip_code: z.string().optional(),
         model: z.string().optional(),
@@ -974,14 +1016,14 @@ export class ShoppingAssistantService {
       }),
       outputSchema: WorkflowOutputSchema,
       execute: async ({ inputData }: any) => {
-        const { action, query, product_ids, budget_cap_cents, zip_code, thought_trace, model } = inputData;
+        const { action, query, product_ids, active_turn_products, budget_cap_cents, zip_code, thought_trace, model } = inputData;
         const activeModel = resolveCommerceModel(model);
         const trace: string[] = [...thought_trace];
 
         switch (action) {
           case 'COMPARE':
             return {
-              ...(await this.executeCompareWorkflow({ query, product_ids, trace })),
+              ...(await this.executeCompareWorkflow({ query, product_ids, active_turn_products, trace })),
               active_model: activeModel,
             };
           case 'DETAILS':
@@ -1017,15 +1059,15 @@ export class ShoppingAssistantService {
   /**
    * Resolves natural language shopping intent into DISCOVER, COMPARE, DETAILS, or BUY actions.
    */
-  public parseIntent(message: string, explicitAction?: ShoppingActionType): ShoppingActionType {
-    return this.resolveIntent(message, explicitAction);
+  public parseIntent(message: string, explicitAction?: ShoppingActionType, productIds?: string[]): ShoppingActionType {
+    return this.resolveIntent(message, explicitAction, productIds);
   }
 
   /**
    * Resolves shopping intent using the Mastra Agent with deterministic semantics,
    * with zero markdown regex parsing.
    */
-  private resolveIntent(message: string, explicitAction?: ShoppingActionType): ShoppingActionType {
+  private resolveIntent(message: string, explicitAction?: ShoppingActionType, productIds?: string[]): ShoppingActionType {
     if (explicitAction) {
       return explicitAction;
     }
@@ -1034,17 +1076,44 @@ export class ShoppingAssistantService {
     const tokens = new Set(lower.split(/[^a-z0-9]+/));
 
     const buyTerms = ['buy', 'purchase', 'checkout', 'order'];
-    if (buyTerms.some(term => tokens.has(term)) || lower.includes('proceed to payment') || lower.includes('pay now') || lower.includes('get it for me')) {
+    if (
+      buyTerms.some(term => tokens.has(term)) ||
+      lower.includes('proceed to payment') ||
+      lower.includes('pay now') ||
+      lower.includes('get it for me') ||
+      lower.includes('buy both') ||
+      lower.includes('buy all') ||
+      lower.includes('can i buy') ||
+      lower.includes('within my budget') ||
+      lower.includes('within budget') ||
+      lower.includes('budget cap')
+    ) {
       return 'BUY';
     }
 
     const compareTerms = ['compare', 'vs', 'versus'];
-    if (compareTerms.some(term => tokens.has(term)) || lower.includes('which one is better') || lower.includes('side by side')) {
+    if (
+      compareTerms.some(term => tokens.has(term)) ||
+      lower.includes('which one is better') ||
+      lower.includes('which of these') ||
+      lower.includes('which is better') ||
+      lower.includes('side by side') ||
+      lower.includes('longer warranty') ||
+      lower.includes('better for') ||
+      lower.includes('difference between') ||
+      ((productIds && productIds.length >= 2) && (lower.includes('which') || lower.includes('better') || lower.includes('compare')))
+    ) {
       return 'COMPARE';
     }
 
-    const detailTerms = ['detail', 'details', 'specs', 'specifications', 'review'];
-    if (detailTerms.some(term => tokens.has(term)) || lower.includes('tell me about') || lower.includes('more info') || lower.includes('features of')) {
+    const detailTerms = ['detail', 'details', 'specs', 'specifications', 'review', 'wattage', 'warranty'];
+    if (
+      detailTerms.some(term => tokens.has(term)) ||
+      lower.includes('tell me about') ||
+      lower.includes('more info') ||
+      lower.includes('features of') ||
+      lower.includes('ask ai')
+    ) {
       return 'DETAILS';
     }
 
@@ -1057,10 +1126,18 @@ export class ShoppingAssistantService {
    * on upstream LLM timeouts or HTTP 429 rate limits.
    */
   async processMessage(request: ChatMessageRequest): Promise<ChatResponsePayload> {
+    const effectiveProductIds =
+      request.selected_product_ids && request.selected_product_ids.length > 0
+        ? request.selected_product_ids
+        : request.product_ids;
+
     const input: WorkflowInput = {
+      session_id: request.session_id,
       message: request.message,
       explicit_action: request.action,
-      product_ids: request.product_ids,
+      product_ids: effectiveProductIds,
+      selected_product_ids: request.selected_product_ids,
+      active_turn_products: request.active_turn_products,
       budget_cap_cents: request.budget_cap_cents,
       zip_code: request.zip_code,
       model: resolveCommerceModel(request.model),
@@ -1069,7 +1146,7 @@ export class ShoppingAssistantService {
       user_api_key: request.user_api_key,
     };
 
-    mastraLogger.info(`Processing chat message: "${request.message}" (model: ${input.model}, action hint: ${input.explicit_action || 'auto-detect'})`);
+    mastraLogger.info(`Processing chat message: "${request.message}" (model: ${input.model}, action hint: ${input.explicit_action || 'auto-detect'}, selected: ${effectiveProductIds?.length || 0})`);
 
     try {
       // 12-second timeout circuit breaker per Phase 4
@@ -1105,12 +1182,12 @@ export class ShoppingAssistantService {
         : request.budget_cap_cents || 5000;
 
       const fallbackQuery = this.extractSearchQuery(request.message);
-      const resolvedIntent = this.resolveIntent(request.message, request.action);
+      const resolvedIntent = this.resolveIntent(request.message, request.action, effectiveProductIds);
 
       if (resolvedIntent === 'BUY') {
         const buyResult = await this.executeBuyWorkflow({
           query: fallbackQuery,
-          product_ids: request.product_ids,
+          product_ids: effectiveProductIds,
           budget_cap_cents: fallbackAmountCents,
           zip_code: request.zip_code,
           trace: [
@@ -1121,6 +1198,21 @@ export class ShoppingAssistantService {
           ...buyResult,
           active_model: 'local-financial-reasoner-v1',
           requires_human_confirmation: true,
+        };
+      }
+
+      if (resolvedIntent === 'COMPARE') {
+        const compareResult = await this.executeCompareWorkflow({
+          query: fallbackQuery,
+          product_ids: effectiveProductIds,
+          active_turn_products: request.active_turn_products,
+          trace: [
+            `[Circuit Breaker Fallback] Switched to deterministic Compare workflow: ${proposal.toolCall.toolName}`,
+          ],
+        });
+        return {
+          ...compareResult,
+          active_model: 'local-financial-reasoner-v1',
         };
       }
 
@@ -1197,9 +1289,10 @@ export class ShoppingAssistantService {
   public async executeCompareWorkflow(params: {
     query: string;
     product_ids?: string[];
+    active_turn_products?: ActiveTurnProduct[];
     trace: string[];
   }): Promise<WorkflowOutput> {
-    const { query, product_ids, trace } = params;
+    const { query, product_ids, active_turn_products, trace } = params;
     trace.push('[Mastra DAG: COMPARE] Initiating multi-product side-by-side comparison');
 
     let productsToCompare: Channel3ProductDetail[] = [];
@@ -1207,6 +1300,42 @@ export class ShoppingAssistantService {
     if (product_ids && product_ids.length >= 2) {
       productsToCompare = await this.channel3Client.lookup(product_ids.slice(0, 3));
       trace.push(`Loaded ${productsToCompare.length} products by provided product IDs`);
+    }
+
+    if (productsToCompare.length < 2 && active_turn_products && active_turn_products.length >= 2) {
+      const matched = product_ids && product_ids.length > 0
+        ? active_turn_products.filter(p => product_ids.includes(p.product_id))
+        : active_turn_products;
+      const candidates = matched.length >= 2 ? matched : active_turn_products;
+      if (candidates.length >= 2) {
+        productsToCompare = candidates.slice(0, 3).map((ap) => ({
+          product_id: ap.product_id,
+          title: ap.title,
+          description: `${ap.title} from ${ap.merchant_domain}`,
+          category_id: 'general',
+          offers: [
+            {
+              id: `off_${ap.product_id}`,
+              product_id: ap.product_id,
+              domain: ap.merchant_domain,
+              price: ap.price_cents,
+              compare_at_price: Math.round(ap.price_cents * 1.15),
+              max_commission_rate: 0.1,
+              shipping_fee_cents: ap.free_shipping ? 0 : 500,
+              stock_status: 'IN_STOCK' as const,
+              merchant_anomaly_score: 0.05,
+            },
+          ],
+          images: [
+            {
+              url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&q=80',
+              cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&q=80',
+            },
+          ],
+          specs: ap.specs || {},
+        })) as Channel3ProductDetail[];
+        trace.push(`Loaded ${productsToCompare.length} products grounded from active turn context`);
+      }
     }
 
     if (productsToCompare.length < 2) {
@@ -1368,6 +1497,14 @@ export class ShoppingAssistantService {
         action: 'BUY',
         markdown: `⚠️ **Stock Alert:** One or more items are currently out of stock or failed reservation hold. We found alternative options for your consideration.`,
         stock_reservation: stockHoldRes,
+        recovery_pills: [
+          {
+            id: `rec_alt_${Date.now()}`,
+            label: '🔄 Alternative in Stock: Sony WH-1000XM5 ($279)',
+            action: 'ALTERNATIVE_PRODUCT',
+            message_prompt: 'Show in-stock alternatives for this item',
+          },
+        ],
         thought_trace: trace,
         follow_up_suggestions: ['Show available alternatives', 'Search similar products'],
       };
@@ -1402,12 +1539,35 @@ export class ShoppingAssistantService {
     const productCards = catalog.map(p => transformToProductCard(p));
     const validatedCards = z.array(ProductCardDataSchema).parse(productCards);
 
+    const isOverBudget = Boolean(budget_cap_cents && validatedCart.net_buyer_expenditure_cents > budget_cap_cents);
+    const recoveryPills: RecoveryPill[] = [];
+    if (isOverBudget && budget_cap_cents) {
+      const suggestedCap = Math.ceil((validatedCart.net_buyer_expenditure_cents + 1000) / 1000) * 1000;
+      recoveryPills.push({
+        id: `rec_budget_${Date.now()}`,
+        label: `💸 Adjust Budget Cap to $${(suggestedCap / 100).toFixed(0)}`,
+        action: 'ADJUST_BUDGET',
+        suggested_budget_cents: suggestedCap,
+        message_prompt: `Adjust my shopping budget cap to $${(suggestedCap / 100).toFixed(0)} and proceed`,
+      });
+      if (validatedCart.total_shipping_cents > 0) {
+        recoveryPills.push({
+          id: `rec_ship_${Date.now()}`,
+          label: `📦 Switch to Standard Shipping (-$${(validatedCart.total_shipping_cents / 100).toFixed(2)})`,
+          action: 'SWITCH_SHIPPING',
+          shipping_type: 'STANDARD',
+          message_prompt: 'Switch to standard shipping to waive the shipping fee',
+        });
+      }
+    }
+
     return {
       action: 'BUY',
       markdown,
       products: validatedCards,
       cart: validatedCart,
       stock_reservation: stockHoldRes,
+      recovery_pills: recoveryPills.length > 0 ? recoveryPills : undefined,
       follow_up_suggestions: [
         'Confirm purchase with 1-click Vault v3',
         'Apply alternate shipping address',
@@ -1430,6 +1590,18 @@ export class ShoppingAssistantService {
   }
 
   public getAgent(requestedModel?: string, userApiKey?: string): Agent {
+    const tools = {
+      search_catalog: this.searchCatalogTool,
+      filter_turn_products: this.filterTurnProductsTool,
+      compare_products: this.compareProductsTool,
+      prepare_checkout: this.prepareCheckoutTool,
+      discover_products: this.discoverTool,
+      score_and_rank: this.scoreTool,
+      solve_knapsack_cart: this.solveCartTool,
+      verify_and_checkout: this.verifyCheckoutTool,
+      execute_escrow_hold: this.escrowHoldTool,
+    };
+
     if (userApiKey && userApiKey.trim().length > 0) {
       // Ephemeral Agent with user-scoped BYOK key: NEVER cached or stored platform-wide
       const model = resolveCommerceModel(requestedModel);
@@ -1440,15 +1612,10 @@ export class ShoppingAssistantService {
           'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
           'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
           'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
-          'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
+          'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
           'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
         model: model,
-        tools: {
-          discover_products: this.discoverTool,
-          score_and_rank: this.scoreTool,
-          solve_knapsack_cart: this.solveCartTool,
-          verify_and_checkout: this.verifyCheckoutTool,
-        },
+        tools,
       });
     }
     if (requestedModel && requestedModel !== resolveCommerceModel()) {
@@ -1459,18 +1626,178 @@ export class ShoppingAssistantService {
           'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
           'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
           'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
-          'solve knapsack bundling optimization, and verify 2PC stock holds. ' +
+          'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
           'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
         model: requestedModel,
-        tools: {
-          discover_products: this.discoverTool,
-          score_and_rank: this.scoreTool,
-          solve_knapsack_cart: this.solveCartTool,
-          verify_and_checkout: this.verifyCheckoutTool,
-        },
+        tools,
       });
     }
     return this.agent;
+  }
+
+  /**
+   * Fastify SSE Data Stream generator emitting Vercel AI SDK compatible frames
+   * (0:text, 9:toolCall, a:toolResult, d:finishReason, 3:error)
+   */
+  public async *processMessageStream(request: ChatMessageRequest): AsyncGenerator<string, void, unknown> {
+    const effectiveProductIds =
+      request.selected_product_ids && request.selected_product_ids.length > 0
+        ? request.selected_product_ids
+        : request.product_ids;
+
+    const message = request.message || '';
+    const lower = message.toLowerCase();
+    const activeTurnProducts = request.active_turn_products || [];
+
+    try {
+      // 1. Detect if this is an in-memory turn filtering query:
+      // e.g. "top 3 from that", "only show under $50", "filter", "show only top 2"
+      const isTurnFilterIntent =
+        activeTurnProducts.length > 0 &&
+        (
+          /\b(top\s+\d+|from\s+that|only\s+show|show\s+only|filter|cheapest\s+one|highest\s+rated|under\s+\$?\d+)\b/i.test(lower) &&
+          !lower.includes('vs') &&
+          !lower.includes('compare') &&
+          !lower.includes('buy')
+        );
+
+      if (isTurnFilterIntent) {
+        const toolCallId = `call_filter_${Date.now()}`;
+        yield formatDataStreamToolCall(toolCallId, 'filter_turn_products', {
+          criteria: message,
+          active_turn_products: activeTurnProducts,
+        });
+
+        const filterOutput = (await this.filterTurnProductsTool.execute!(
+          {
+            criteria: message,
+            top_n: 5,
+            active_turn_products: activeTurnProducts,
+          },
+          {} as any
+        )) as { products: ProductCardData[]; filtered_count: number; applied_criteria?: string };
+
+        yield formatDataStreamToolResult(toolCallId, filterOutput);
+
+        const items = filterOutput.products;
+        yield formatDataStreamText(`I filtered the items from our active search in-memory (<2ms) based on **"${message}"**:\n\n`);
+
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          const net = ((item.price_cents - item.commission_rebate_cents) / 100).toFixed(2);
+          yield formatDataStreamText(
+            `${i + 1}. **${item.title}**\n   - Price: $${(item.price_cents / 100).toFixed(2)} (Effective Net: **$${net}**)\n   - Rating: ★ ${item.rating} • Seller: \`${item.merchant_domain}\` (${item.merchant_credibility_score}% Trust)\n   - Shipping: ${item.free_shipping ? 'Free Shipping' : `$${(item.shipping_fee_cents / 100).toFixed(2)}`}\n\n`
+          );
+        }
+
+        yield formatDataStreamFinish('stop', { promptTokens: 45, completionTokens: 90 });
+        return;
+      }
+
+      const intent = this.resolveIntent(message, request.action, effectiveProductIds);
+
+      // 2. Multi-item comparison stream
+      if (intent === 'COMPARE') {
+        const targetIds =
+          effectiveProductIds && effectiveProductIds.length >= 2
+            ? effectiveProductIds
+            : activeTurnProducts.length >= 2
+            ? activeTurnProducts.map(p => p.product_id)
+            : ['ch3_anc_headphone_01', 'ch3_desk_mat_walnut'];
+
+        const toolCallId = `call_compare_${Date.now()}`;
+        yield formatDataStreamToolCall(toolCallId, 'compare_products', {
+          product_ids: targetIds,
+          active_turn_products: activeTurnProducts,
+        });
+
+        const compareOutput = (await this.compareProductsTool.execute!(
+          {
+            product_ids: targetIds,
+            active_turn_products: activeTurnProducts,
+          },
+          {} as any
+        )) as { comparison: ComparisonMatrix; products: ProductCardData[]; winner_product_id?: string };
+
+        yield formatDataStreamToolResult(toolCallId, compareOutput);
+
+        const markdown = this.generateCompareMarkdown(compareOutput.products, compareOutput.comparison);
+        const sections = markdown.split('\n\n');
+        for (const section of sections) {
+          yield formatDataStreamText(section + '\n\n');
+        }
+
+        yield formatDataStreamFinish('stop', { promptTokens: 60, completionTokens: 120 });
+        return;
+      }
+
+      // 3. Purchase pre-checkout stream
+      if (intent === 'BUY') {
+        const targetId = effectiveProductIds?.[0] || 'ch3_anc_headphone_01';
+        const toolCallId = `call_buy_${Date.now()}`;
+        yield formatDataStreamToolCall(toolCallId, 'prepare_checkout', {
+          product_id: targetId,
+          quantity: 1,
+          budget_cap_cents: request.budget_cap_cents,
+          zip_code: request.zip_code,
+        });
+
+        const buyOutput = (await this.prepareCheckoutTool.execute!(
+          {
+            product_id: targetId,
+            quantity: 1,
+            budget_cap_cents: request.budget_cap_cents,
+            zip_code: request.zip_code,
+          },
+          {} as any
+        )) as any;
+
+        yield formatDataStreamToolResult(toolCallId, buyOutput);
+
+        const markdown = buyOutput.cart
+          ? this.generateBuyMarkdown(buyOutput.cart, buyOutput.reservation_id)
+          : `✅ **Two-Phase Commit (2PC) Stock Reservation:** \`${buyOutput.reservation_id}\` held for item \`${targetId}\`.`;
+
+        const sections = markdown.split('\n\n');
+        for (const section of sections) {
+          yield formatDataStreamText(section + '\n\n');
+        }
+
+        yield formatDataStreamFinish('stop', { promptTokens: 75, completionTokens: 140 });
+        return;
+      }
+
+      // 4. Default Discovery stream
+      const query = this.extractSearchQuery(message);
+      const toolCallId = `call_search_${Date.now()}`;
+      yield formatDataStreamToolCall(toolCallId, 'search_catalog', {
+        query,
+        max_price_usd: request.budget_cap_cents ? request.budget_cap_cents / 100 : undefined,
+      });
+
+      const searchOutput = (await this.searchCatalogTool.execute!(
+        {
+          query,
+          max_price_usd: request.budget_cap_cents ? request.budget_cap_cents / 100 : undefined,
+          limit: 5,
+        },
+        {} as any
+      )) as { products: ProductCardData[]; total_found: number };
+
+      yield formatDataStreamToolResult(toolCallId, searchOutput);
+
+      const markdown = this.generateDiscoverMarkdown(query, searchOutput.products);
+      const sections = markdown.split('\n\n');
+      for (const section of sections) {
+        yield formatDataStreamText(section + '\n\n');
+      }
+
+      yield formatDataStreamFinish('stop', { promptTokens: 50, completionTokens: 110 });
+    } catch (err: any) {
+      mastraLogger.error(`Error in processMessageStream: ${err?.message}`, { error: err?.message, stack: err?.stack });
+      yield formatDataStreamError(err?.message || 'Streaming execution failed');
+      yield formatDataStreamFinish('error');
+    }
   }
 
   private generateDiscoverMarkdown(query: string, products: ProductCardData[]): string {

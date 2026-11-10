@@ -414,3 +414,185 @@ test('Phase 4: Proactive 1-Tap Recovery Pills & Variant Selection', async () => 
   assert.deepEqual(inferRecoveryPillsFromWarning(undefined), []);
   assert.deepEqual(inferRecoveryPillsFromWarning(''), []);
 });
+
+test('Upgrade B: Turn-Level Context & Multi-Product Interactive Chips (assistant_ui_agentic_chat_upgrade_plan:109-148)', async () => {
+  const { ConversationalChatPayloadSchema } = await import('@aegispay/shared-types');
+
+  const mockActiveTurnProducts = [
+    {
+      index: 1,
+      product_id: 'ch3_rowenta_steam_01',
+      title: 'Rowenta Steam Iron 1710W',
+      price_cents: 4999,
+      merchant_domain: 'bestbuy.com',
+      rating: 4.8,
+      free_shipping: true,
+      specs: { Wattage: '1710W', Soleplate: 'Stainless Steel', Warranty: '2-Year Manufacturer' },
+    },
+    {
+      index: 2,
+      product_id: 'ch3_black_decker_02',
+      title: 'Black+Decker Easy Steam 1200W',
+      price_cents: 2999,
+      merchant_domain: 'walmart.com',
+      rating: 4.5,
+      free_shipping: true,
+      specs: { Wattage: '1200W', Soleplate: 'Non-stick Ceramic', Warranty: '1-Year Limited' },
+    },
+  ];
+
+  // 1. Context Payload Schema Validation
+  const testPayload = {
+    session_id: 'sess_test_turn_99',
+    message: 'Which of these two is better for delicate silk and linen?',
+    history: [
+      { role: 'user' as const, content: 'Find me steam irons under $50' },
+      { role: 'assistant' as const, content: 'Here are the matching steam irons from Channel3 merchants:' },
+    ],
+    selected_product_ids: ['ch3_rowenta_steam_01', 'ch3_black_decker_02'],
+    active_turn_products: mockActiveTurnProducts,
+    budget_cap_cents: 10000,
+    zip_code: '94016',
+  };
+  assert.equal(ConversationalChatPayloadSchema.safeParse(testPayload).success, true);
+
+  // 2. Multi-Item Comparison Route Execution
+  const compareReq = new Request('http://localhost:3000/api/buyer/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(testPayload),
+  });
+
+  const compareRes = await chatHandler(compareReq);
+  assert.equal(compareRes.status, 200);
+  const compareData = await compareRes.json();
+  assert.equal(compareData.action, 'COMPARE');
+  assert.ok(compareData.comparison);
+  assert.equal(compareData.comparison.product_ids.length, 2);
+  assert.ok(compareData.comparison.product_ids.includes('ch3_rowenta_steam_01'));
+  assert.ok(compareData.comparison.product_ids.includes('ch3_black_decker_02'));
+  assert.ok(compareData.products.some((p: any) => p.title.includes('Rowenta')));
+  assert.ok(compareData.products.some((p: any) => p.title.includes('Black+Decker')));
+
+  // 3. Multi-Item Bundling / Budget Feasibility Route Execution
+  const bundlePayload = {
+    session_id: 'sess_test_turn_99',
+    message: 'Can I buy both of these within my $100 budget cap?',
+    history: testPayload.history,
+    selected_product_ids: ['ch3_rowenta_steam_01', 'ch3_black_decker_02'],
+    active_turn_products: mockActiveTurnProducts,
+    budget_cap_cents: 10000,
+    zip_code: '94016',
+  };
+
+  const bundleReq = new Request('http://localhost:3000/api/buyer/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(bundlePayload),
+  });
+
+  const bundleRes = await chatHandler(bundleReq);
+  assert.equal(bundleRes.status, 200);
+  const bundleData = await bundleRes.json();
+  assert.equal(bundleData.action, 'BUY');
+  assert.ok(bundleData.cart);
+  assert.equal(bundleData.cart.is_within_budget, true);
+  assert.equal(bundleData.products.length, 2);
+  assert.equal(bundleData.stock_reservation.all_held, true);
+
+  // 4. Single-Item Deep Dive Route Execution (Ask AI About This)
+  const singleDetailPayload = {
+    session_id: 'sess_test_turn_99',
+    message: 'What are the specs and warranty for this iron?',
+    history: testPayload.history,
+    selected_product_ids: ['ch3_rowenta_steam_01'],
+    active_turn_products: mockActiveTurnProducts,
+  };
+
+  const detailReq = new Request('http://localhost:3000/api/buyer/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(singleDetailPayload),
+  });
+
+  const detailRes = await chatHandler(detailReq);
+  assert.equal(detailRes.status, 200);
+  const detailData = await detailRes.json();
+  assert.equal(detailData.action, 'DETAILS');
+  assert.ok(detailData.product_detail);
+  assert.equal(detailData.product_detail.product_id, 'ch3_rowenta_steam_01');
+  assert.ok(detailData.markdown.includes('Rowenta'));
+});
+
+test('Upgrade B: ChatInputBar renders multi-chip input bar visualizer and quick action triggers', async () => {
+  const React = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const { ChatInputBar } = await import('./ChatInputBar.js');
+
+  const selectedProducts: any[] = [
+    {
+      product_id: 'ch3_rowenta_steam_01',
+      title: 'Rowenta Steam 1710W',
+      description: 'Steam iron',
+      category_id: 'appliances',
+      price_cents: 4999,
+      compare_at_price_cents: 5999,
+      commission_rebate_cents: 500,
+      commission_rate: 0.1,
+      review_count: 50,
+      shipping_fee_cents: 0,
+      merchant_credibility_score: 95,
+      stock_status: 'IN_STOCK',
+      delivery_window: '2-Day Express',
+      image_url: '',
+      cleaned_image_url: '',
+      merchant_domain: 'bestbuy.com',
+      rating: 4.8,
+      free_shipping: true,
+    },
+    {
+      product_id: 'ch3_black_decker_02',
+      title: 'Black+Decker 1200W',
+      description: 'Compact iron',
+      category_id: 'appliances',
+      price_cents: 2999,
+      compare_at_price_cents: 3999,
+      commission_rebate_cents: 300,
+      commission_rate: 0.1,
+      review_count: 40,
+      shipping_fee_cents: 0,
+      merchant_credibility_score: 90,
+      stock_status: 'IN_STOCK',
+      delivery_window: '2-Day Express',
+      image_url: '',
+      cleaned_image_url: '',
+      merchant_domain: 'walmart.com',
+      rating: 4.5,
+      free_shipping: true,
+    },
+  ];
+
+  const html = renderToString(
+    React.createElement(ChatInputBar, {
+      inputMessage: 'Which of these two is better for silk?',
+      onInputChange: () => {},
+      onSubmit: () => {},
+      isLoading: false,
+      selectedProducts,
+      onRemoveSelectedProduct: () => {},
+      onClearAllSelected: () => {},
+      onCompareSelected: () => {},
+      onBundleSelected: () => {},
+      budgetCapCents: 10000,
+    })
+  );
+
+  // Multi-Chip Input Bar Visualizer checks
+  assert.ok(html.includes('Selected (2):'));
+  assert.ok(html.includes('Rowenta Steam 1710W'));
+  assert.ok(html.includes('Black+Decker 1200W'));
+  assert.ok(html.includes('(Clear All)'));
+  assert.ok(html.includes('Compare Side-by-Side'));
+  assert.ok(html.includes('Can I buy all within $100 budget?'));
+});
+

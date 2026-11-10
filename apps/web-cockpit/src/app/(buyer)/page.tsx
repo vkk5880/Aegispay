@@ -202,8 +202,7 @@ export default function BuyerPortalPage() {
     logger.info('[BuyerPage:IntentSearch] Executing intent search', {
       rawQuery: intent.rawQuery,
       maxBudgetCents: intent.maxBudgetCents,
-      targetCategory: intent.targetCategory,
-      qualityTier: intent.qualityTier,
+      categoryIds: intent.categoryIds,
     });
     setIsSolvingIntent(true);
     setShouldRunTrace(true);
@@ -418,7 +417,7 @@ export default function BuyerPortalPage() {
             state: newSettings.state,
             zipCode: newSettings.zipCode,
             fulfillmentMode: newSettings.fulfillmentMode,
-            purchaseRule: newSettings.purchaseRule,
+            purchasingRule: newSettings.purchasingRule,
             autoBuyThresholdCents: newSettings.autoBuyThresholdCents,
             aiModel: newSettings.aiModel,
             developerModeEnabled: newSettings.developerModeEnabled,

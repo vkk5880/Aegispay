@@ -1,23 +1,57 @@
 import { NextResponse } from 'next/server';
 import type { ChatResponsePayload } from '@aegispay/shared-types';
+import {
+  formatDataStreamText,
+  formatDataStreamToolCall,
+  formatDataStreamToolResult,
+  formatDataStreamFinish,
+} from '@aegispay/shared-types';
 import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
 export async function POST(req: Request) {
   const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
   const body = await req.json();
-  apiLogger.debug('POST /api/buyer/chat received:', { message: body.message, action: body.action });
+  const isStreamRequested = Boolean(
+    body.stream ||
+      req.headers.get('accept')?.includes('text/event-stream') ||
+      req.headers.get('x-vercel-ai-data-stream')
+  );
+  apiLogger.debug('POST /api/buyer/chat received:', { message: body.message, action: body.action, isStreamRequested });
 
   if (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT) {
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (isStreamRequested) {
+        headers['Accept'] = 'text/event-stream';
+        headers['x-vercel-ai-data-stream'] = 'v1';
+      }
+      const userKey = req.headers.get('x-user-llm-api-key');
+      if (userKey) {
+        headers['x-user-llm-api-key'] = userKey;
+      }
+
       const res = await fetch(`${orchestratorUrl}/api/buyer/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        headers,
+        body: JSON.stringify({ ...body, stream: isStreamRequested }),
         cache: 'no-store',
       });
 
       if (res.ok) {
+        if (isStreamRequested && res.body) {
+          apiLogger.debug('Upstream orchestrator /api/buyer/chat returned stream');
+          return new Response(res.body, {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'x-vercel-ai-data-stream': 'v1',
+              'Cache-Control': 'no-cache, no-transform',
+            },
+          });
+        }
         const data = await res.json();
         apiLogger.debug('Upstream orchestrator /api/buyer/chat returned success');
         return NextResponse.json(data);
@@ -31,15 +65,28 @@ export async function POST(req: Request) {
 
   const message: string = (body.message || '').toLowerCase();
   const explicitAction = body.action;
+  const selectedProductIds: string[] = Array.isArray(body.selected_product_ids)
+    ? body.selected_product_ids
+    : Array.isArray(body.product_ids)
+    ? body.product_ids
+    : [];
+  const activeTurnProducts: any[] = Array.isArray(body.active_turn_products) ? body.active_turn_products : [];
 
   // Determine intent
   let action: 'DISCOVER' | 'COMPARE' | 'DETAILS' | 'BUY' = explicitAction || 'DISCOVER';
   if (!explicitAction) {
-    if (/\b(buy|purchase|checkout|order|get it for me|pay now)\b/i.test(message)) {
+    if (
+      /\b(buy|purchase|checkout|order|get it for me|pay now|buy both|buy all|within budget|within my budget)\b/i.test(message)
+    ) {
       action = 'BUY';
-    } else if (/\b(compare|vs|versus|difference between|side by side)\b/i.test(message)) {
+    } else if (
+      /\b(compare|vs|versus|difference between|side by side|which one|which of these|which is better|longer warranty|better for)\b/i.test(message) ||
+      (selectedProductIds.length >= 2 && /\b(which|better|compare|difference)\b/i.test(message))
+    ) {
       action = 'COMPARE';
-    } else if (/\b(detail|details|specs|specifications|more info|tell me about)\b/i.test(message)) {
+    } else if (
+      /\b(detail|details|specs|specifications|more info|tell me about|wattage|warranty|ask ai)\b/i.test(message)
+    ) {
       action = 'DETAILS';
     }
   }
@@ -128,120 +175,253 @@ export async function POST(req: Request) {
     },
   ];
 
+  // Resolve grounded products from active turn or sample catalog
+  const resolveProducts = (ids: string[]): import('@aegispay/shared-types').ProductCardData[] => {
+    const list: import('@aegispay/shared-types').ProductCardData[] = [];
+    for (const id of ids) {
+      const fromTurn = activeTurnProducts.find((p) => p.product_id === id);
+      if (fromTurn) {
+        list.push({
+          product_id: fromTurn.product_id,
+          title: fromTurn.title,
+          description: `${fromTurn.title} from ${fromTurn.merchant_domain}`,
+          category_id: 'general',
+          price_cents: fromTurn.price_cents,
+          compare_at_price_cents: Math.round(fromTurn.price_cents * 1.15),
+          commission_rebate_cents: Math.round(fromTurn.price_cents * 0.1),
+          commission_rate: 0.1,
+          rating: fromTurn.rating,
+          review_count: 100,
+          merchant_domain: fromTurn.merchant_domain,
+          merchant_credibility_score: 95,
+          stock_status: 'IN_STOCK',
+          delivery_window: '2-Day Express',
+          shipping_fee_cents: fromTurn.free_shipping ? 0 : 500,
+          free_shipping: Boolean(fromTurn.free_shipping),
+          specs: fromTurn.specs || {},
+          image_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&q=80',
+          cleaned_image_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&q=80',
+        });
+        continue;
+      }
+      const fromSample = sampleProducts.find((p) => p.product_id === id);
+      if (fromSample) {
+        list.push(fromSample);
+      }
+    }
+    return list;
+  };
+
+  const respond = (payload: ChatResponsePayload) => {
+    if (isStreamRequested) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          if (payload.action === 'DISCOVER') {
+            controller.enqueue(
+              encoder.encode(formatDataStreamToolCall('call_disc_1', 'search_catalog', { query: body.message || 'catalog search' }))
+            );
+            controller.enqueue(
+              encoder.encode(
+                formatDataStreamToolResult('call_disc_1', {
+                  products: payload.products,
+                  promo_code: 'PAYPAL-HACKATHON-2026',
+                })
+              )
+            );
+          } else if (payload.action === 'COMPARE') {
+            controller.enqueue(
+              encoder.encode(
+                formatDataStreamToolCall('call_comp_1', 'compare_products', {
+                  product_ids: payload.products?.map((p) => p.product_id) || [],
+                })
+              )
+            );
+            controller.enqueue(
+              encoder.encode(
+                formatDataStreamToolResult('call_comp_1', {
+                  comparison: payload.comparison,
+                  recommended_product_id: payload.comparison?.winner_product_id,
+                })
+              )
+            );
+          } else if (payload.action === 'BUY') {
+            const prod = payload.products?.[0] || sampleProducts[0];
+            controller.enqueue(
+              encoder.encode(
+                formatDataStreamToolCall('call_prep_1', 'prepare_checkout', {
+                  product_id: prod.product_id,
+                  quantity: 1,
+                })
+              )
+            );
+            controller.enqueue(
+              encoder.encode(
+                formatDataStreamToolResult('call_prep_1', {
+                  product: prod,
+                  quantity: 1,
+                  unit_price_cents: prod.price_cents,
+                  shipping_fee_cents: 0,
+                  total_cents: prod.price_cents,
+                  reservation_id: payload.stock_reservation?.reservation_id || 'res_2pc_verified',
+                  requires_step_up: false,
+                  checkout_ready: true,
+                  cart: payload.cart,
+                })
+              )
+            );
+          }
+          controller.enqueue(encoder.encode(formatDataStreamText(payload.markdown)));
+          controller.enqueue(encoder.encode(formatDataStreamFinish('stop')));
+          controller.close();
+        },
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'x-vercel-ai-data-stream': 'v1',
+          'Cache-Control': 'no-cache, no-transform',
+        },
+      });
+    }
+
+    return NextResponse.json(payload);
+  };
+
   if (action === 'COMPARE') {
-    const products = sampleProducts.slice(0, 2);
+    const matched = selectedProductIds.length >= 2 ? resolveProducts(selectedProductIds) : [];
+    const products = matched.length >= 2 ? matched : sampleProducts.slice(0, 2);
+    const topPick = products[0];
+
+    const priceRows: Record<string, string> = {};
+    const rebateRows: Record<string, string> = {};
+    const netRows: Record<string, string> = {};
+    const ratingRows: Record<string, string> = {};
+    const trustRows: Record<string, string> = {};
+    const deliveryRows: Record<string, string> = {};
+    const stockRows: Record<string, string> = {};
+
+    for (const p of products) {
+      priceRows[p.product_id] = `$${(p.price_cents / 100).toFixed(2)}`;
+      rebateRows[p.product_id] = `-$${((p.commission_rebate_cents || 0) / 100).toFixed(2)}`;
+      netRows[p.product_id] = `$${((p.price_cents - (p.commission_rebate_cents || 0)) / 100).toFixed(2)}`;
+      ratingRows[p.product_id] = `★ ${p.rating} (${p.review_count || 100} reviews)`;
+      trustRows[p.product_id] = `${p.merchant_credibility_score || 95}% Trust (${p.merchant_domain})`;
+      deliveryRows[p.product_id] = p.free_shipping ? 'Free 2-Day Express' : 'Standard Shipping';
+      stockRows[p.product_id] = '✓ In Stock (2PC Verified)';
+    }
+
     const mockPayload: ChatResponsePayload = {
       action: 'COMPARE',
-      markdown: '### Side-by-Side Product Comparison Matrix\n\nI evaluated **2 products** across pricing, specs, merchant credibility, and commission pass-through:\n\n> 🏆 **Top Recommendation:** **AcousticPro ANC Studio Headphones (Midnight)** delivers the best overall value with a net effective cost of $248.50 after instant commission pass-through and a 98% merchant trust rating.\n\n*Click **[Buy for Me]** to proceed with pre-purchase stock reservation.*',
+      markdown: `### Side-by-Side Product Comparison Matrix\n\nI evaluated **${products.length} products** across pricing, specs, merchant credibility, and commission pass-through:\n\n> 🏆 **Top Recommendation:** **${topPick.title}** delivers the best overall value with a net effective cost of $${((topPick.price_cents - (topPick.commission_rebate_cents || 0)) / 100).toFixed(2)} after instant commission pass-through and a ${topPick.merchant_credibility_score || 98}% merchant trust rating.\n\n*Click **[Buy for Me]** to proceed with pre-purchase stock reservation.*`,
       products,
       comparison: {
         product_ids: products.map((p) => p.product_id),
         products,
-        winner_product_id: products[0].product_id,
-        rationale: 'AcousticPro ANC Studio Headphones (Midnight) delivers the best overall value with a net effective cost of $248.50 after instant commission pass-through and a 98% merchant trust rating.',
+        winner_product_id: topPick.product_id,
+        rationale: `${topPick.title} delivers the best overall value with a net effective cost of $${((topPick.price_cents - (topPick.commission_rebate_cents || 0)) / 100).toFixed(2)} after instant commission pass-through.`,
         rows: [
           {
             attribute: 'Retail Price',
-            values: {
-              ch3_anc_headphone_01: '$280.00',
-              ch3_desk_mat_walnut: '$85.00',
-            },
+            values: priceRows,
           },
           {
             attribute: 'Commission Rebate',
-            values: {
-              ch3_anc_headphone_01: '-$31.50 (11% back)',
-              ch3_desk_mat_walnut: '-$7.65 (9% back)',
-            },
-            highlighted_product_id: 'ch3_anc_headphone_01',
+            values: rebateRows,
+            highlighted_product_id: topPick.product_id,
           },
           {
             attribute: 'Net Effective Price',
-            values: {
-              ch3_anc_headphone_01: '$248.50',
-              ch3_desk_mat_walnut: '$77.35',
-            },
-            highlighted_product_id: 'ch3_anc_headphone_01',
+            values: netRows,
+            highlighted_product_id: topPick.product_id,
           },
           {
             attribute: 'Customer Rating',
-            values: {
-              ch3_anc_headphone_01: '★ 4.9 (328 reviews)',
-              ch3_desk_mat_walnut: '★ 4.8 (142 reviews)',
-            },
+            values: ratingRows,
           },
           {
             attribute: 'Merchant Credibility',
-            values: {
-              ch3_anc_headphone_01: '98% Trust Rating (audio-gear-direct.com)',
-              ch3_desk_mat_walnut: '95% Trust Rating (nordic-workspaces.io)',
-            },
+            values: trustRows,
           },
           {
             attribute: 'Delivery Window',
-            values: {
-              ch3_anc_headphone_01: 'Free • 2-Day Express via FedEx',
-              ch3_desk_mat_walnut: 'Free • 3-4 Business Days',
-            },
+            values: deliveryRows,
           },
           {
             attribute: 'Stock Status',
-            values: {
-              ch3_anc_headphone_01: '✓ In Stock (2PC Verified)',
-              ch3_desk_mat_walnut: '✓ In Stock (2PC Verified)',
-            },
+            values: stockRows,
           },
         ],
       },
       thought_trace: [
         `Parsed user intent: "${body.message}" -> Action: COMPARE`,
-        'Initiating multi-product side-by-side comparison',
-        'Retrieved candidate items from Channel3 vector catalog',
-        'Computed comparison matrix across 2 products with winning recommendation',
+        `Initiating multi-product side-by-side comparison across ${products.length} products`,
+        selectedProductIds.length > 0
+          ? `Grounded turn selection: ${selectedProductIds.join(', ')}`
+          : 'Retrieved candidate items from Channel3 vector catalog',
+        `Computed comparison matrix across ${products.length} products with winning recommendation`,
       ],
       follow_up_suggestions: [
-        'Buy the recommended AcousticPro ANC...',
-        'Show details for Precision Felt Desk Pad',
+        `Buy the recommended ${topPick.title.slice(0, 25)}...`,
+        'View full specs and warranty',
         'Check multi-vendor knapsack bundle savings',
       ],
     };
-    return NextResponse.json(mockPayload);
+    return respond(mockPayload);
   }
 
   if (action === 'DETAILS') {
-    const p = sampleProducts[0];
+    const matched = selectedProductIds.length > 0 ? resolveProducts(selectedProductIds) : [];
+    const p = matched[0] || sampleProducts[0];
+    const net = p.price_cents - (p.commission_rebate_cents || 0);
+
     const mockPayload: ChatResponsePayload = {
       action: 'DETAILS',
-      markdown: `### ${p.title}\n\n${p.description}\n\n#### Key Specifications & Credentials:\n- **Price:** $280.00 (MSRP: ~~$349.99~~)\n- **Instant Commission Rebate:** -$31.50 (Effective Net: **$248.50**)\n- **Merchant:** \`${p.merchant_domain}\` (🛡️ **98%** Credibility Rating)\n- **Stock Status:** ✅ In Stock\n- **Delivery:** ${p.delivery_window}\n- **Warranty:** 1-Year Manufacturer Warranty + AegisPay 72h Price Drop Protection`,
+      markdown: `### ${p.title}\n\n${p.description}\n\n#### Key Specifications & Credentials:\n- **Price:** $${(p.price_cents / 100).toFixed(2)} (MSRP: ~~$${(p.compare_at_price_cents / 100).toFixed(2)}~~)\n- **Instant Commission Rebate:** -$${((p.commission_rebate_cents || 0) / 100).toFixed(2)} (Effective Net: **$${(net / 100).toFixed(2)}**)\n- **Merchant:** \`${p.merchant_domain}\` (🛡️ **${p.merchant_credibility_score || 95}%** Credibility Rating)\n- **Stock Status:** ✅ In Stock\n- **Delivery:** ${p.delivery_window || '2-Day Express'}\n- **Warranty:** ${p.specs?.Warranty || '1-Year Manufacturer Warranty + AegisPay 72h Price Drop Protection'}`,
       products: [p],
       product_detail: p,
       thought_trace: [
         `Parsed user intent: "${body.message}" -> Action: DETAILS`,
-        'Retrieving deep product details and merchant credibility verification',
+        `Retrieving deep product details and merchant credibility verification for ${p.product_id}`,
         `Verified merchant credibility score: ${p.merchant_credibility_score}% (${p.merchant_domain})`,
       ],
       follow_up_suggestions: [
-        'Buy this item now ($280.00)',
-        'Compare with Precision Felt Pad',
+        `Buy this item now ($${(p.price_cents / 100).toFixed(2)})`,
+        'Compare with alternatives',
         'Check delivery to my ZIP',
       ],
     };
-    return NextResponse.json(mockPayload);
+    return respond(mockPayload);
   }
 
   if (action === 'BUY') {
+    const matched = selectedProductIds.length > 0 ? resolveProducts(selectedProductIds) : [];
+    const buyProducts = matched.length > 0 ? matched : [sampleProducts[0], sampleProducts[1]];
+
+    const grossSubtotalCents = buyProducts.reduce((acc, p) => acc + p.price_cents, 0);
+    const rebateCents = buyProducts.reduce((acc, p) => acc + (p.commission_rebate_cents || 0), 0);
+    const shippingSavedCents = buyProducts.length > 1 ? 2500 : 0;
+    const shippingCents = buyProducts.some((p) => !p.free_shipping) ? 500 : 0;
+    const taxCents = Math.round(grossSubtotalCents * 0.0725);
+    const netExpenditureCents = grossSubtotalCents - rebateCents + shippingCents + taxCents;
+    const budgetCapCents = body.budget_cap_cents || 50000;
+    const isWithinBudget = netExpenditureCents <= budgetCapCents;
+
     const mockPayload: ChatResponsePayload = {
       action: 'BUY',
-      markdown: `### Pre-Purchase Verification & Knapsack Cart Summary\n\n✅ **Two-Phase Commit (2PC) Stock Reservation:** \`res_2pc_verified_${Date.now().toString(36)}\` (Held)\n✅ **Merchants Assigned:** audio-gear-direct.com, nordic-workspaces.io\n\n#### Financial Settlement Breakdown:\n- **Gross Subtotal:** $365.00\n- **Instant Commission Rebate:** -$39.15\n- **Estimated Sales Tax:** $26.46\n- **Shipping Fee:** $0.00 (🎉 Saved $25.00 with multi-item bundling)\n- **Net Buyer Expenditure:** **$352.31**\n\n*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`,
-      products: [sampleProducts[0], sampleProducts[1]],
+      markdown: `### Pre-Purchase Verification & Knapsack Cart Summary\n\n✅ **Two-Phase Commit (2PC) Stock Reservation:** \`res_2pc_verified_${Date.now().toString(36)}\` (Held)\n✅ **Items Included (${buyProducts.length}):** ${buyProducts.map((p) => p.title).join(', ')}\n\n#### Financial Settlement Breakdown:\n- **Gross Subtotal:** $${(grossSubtotalCents / 100).toFixed(2)}\n- **Instant Commission Rebate:** -$${(rebateCents / 100).toFixed(2)}\n- **Estimated Sales Tax:** $${(taxCents / 100).toFixed(2)}\n- **Shipping Fee:** $${(shippingCents / 100).toFixed(2)}${shippingSavedCents > 0 ? ` (🎉 Saved $${(shippingSavedCents / 100).toFixed(2)} with multi-item bundling)` : ''}\n- **Net Buyer Expenditure:** **$${(netExpenditureCents / 100).toFixed(2)}**\n- **Budget Cap:** $${(budgetCapCents / 100).toFixed(2)} (${isWithinBudget ? '✅ Within Budget' : '⚠️ Exceeds Budget'})\n\n*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`,
+      products: buyProducts,
       cart: {
-        gross_subtotal_cents: 36500,
-        total_commission_rebate_cents: 3915,
-        total_shipping_cents: 0,
-        total_shipping_saved_cents: 2500,
-        total_tax_cents: 2646,
-        net_buyer_expenditure_cents: 35231,
-        is_within_budget: true,
+        gross_subtotal_cents: grossSubtotalCents,
+        total_commission_rebate_cents: rebateCents,
+        total_shipping_cents: shippingCents,
+        total_shipping_saved_cents: shippingSavedCents,
+        total_tax_cents: taxCents,
+        net_buyer_expenditure_cents: netExpenditureCents,
+        budget_cap_cents: budgetCapCents,
+        is_within_budget: isWithinBudget,
       },
       stock_reservation: {
         reservation_id: `res_2pc_verified_${Date.now().toString(36)}`,
@@ -250,9 +430,9 @@ export async function POST(req: Request) {
       },
       thought_trace: [
         `Parsed user intent: "${body.message}" -> Action: BUY`,
-        'Executing pre-purchase 2PC inventory hold check and knapsack cart optimization',
+        `Executing pre-purchase 2PC inventory hold check and knapsack cart optimization across ${buyProducts.length} items`,
         '2PC stock verification successful!',
-        'Knapsack solver bundled cart: Net buyer price: $352.31, Instant Commission Rebate: $39.15, Shipping Saved: $25.00',
+        `Knapsack solver bundled cart: Net buyer price: $${(netExpenditureCents / 100).toFixed(2)}, Instant Commission Rebate: $${(rebateCents / 100).toFixed(2)}, Within budget: ${isWithinBudget}`,
       ],
       follow_up_suggestions: [
         'Confirm purchase with 1-click Vault v3',
@@ -260,7 +440,7 @@ export async function POST(req: Request) {
         'Add complementary accessories',
       ],
     };
-    return NextResponse.json(mockPayload);
+    return respond(mockPayload);
   }
 
   // Default DISCOVER
@@ -280,5 +460,5 @@ export async function POST(req: Request) {
     ],
   };
 
-  return NextResponse.json(mockPayload);
+  return respond(mockPayload);
 }

@@ -10,12 +10,20 @@ import {
   getReceipts,
   updatePurchaseStatus,
   logPurchase,
+  createOrGetChatSession,
+  saveChatMessage,
+  getChatSessionWithMessages,
+  listChatSessions,
+  deleteChatSession,
 } from '../services/user-memory.js';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
   ShoppingActionTypeSchema,
   ChatResponsePayload,
+  ActiveTurnProductSchema,
+  formatDataStreamError,
+  formatDataStreamFinish,
   createLogger,
   sanitizeForLogging,
 } from '@aegispay/shared-types';
@@ -29,15 +37,19 @@ import { authenticateUser, createOrderTrackingToken } from '../middleware/auth.j
 export const logger = createLogger('API:Routes:Chat');
 
 const ChatMessageSchema = z.object({
+  session_id: z.string().optional(),
   message: z.string().min(1),
   action: ShoppingActionTypeSchema.optional(),
   product_ids: z.array(z.string()).optional(),
+  selected_product_ids: z.array(z.string()).optional(),
+  active_turn_products: z.array(ActiveTurnProductSchema).optional(),
   budget_cap_cents: z.number().int().positive().optional(),
   zip_code: z.string().optional(),
   model: z.string().optional(),
   provider: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   user_api_key: z.string().max(256).optional(),
+  stream: z.boolean().optional(),
   history: z.array(z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string(),
@@ -69,7 +81,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /api/buyer/chat
    * Conversational AI Shopping Concierge & Product Comparison Engine
-   * Returns structured ChatResponsePayload with markdown, product cards, comparison matrix, and knapsack cart.
+   * Returns structured ChatResponsePayload or streams Vercel AI SDK compatible Data Stream frames.
    */
   fastify.post('/api/buyer/chat', { preHandler: [authenticateUser] }, async (request, reply) => {
     const parseResult = ChatMessageSchema.safeParse(request.body);
@@ -89,19 +101,99 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
         user_api_key: parseResult.data.user_api_key || userApiKeyHeader,
       };
 
+      const effectiveProductIds =
+        chatPayload.selected_product_ids && chatPayload.selected_product_ids.length > 0
+          ? chatPayload.selected_product_ids
+          : chatPayload.product_ids;
+
+      const chatRequestPayload = {
+        ...chatPayload,
+        product_ids: effectiveProductIds,
+      };
+
       const parsedIntent = chatPayload.action || 'DISCOVER';
       const selectedModel = chatPayload.model || resolveCommerceModel();
+      const sessionId = chatPayload.session_id || 'session_default';
+      const userId = request.user?.id || 'demo';
+
+      // Persist the incoming user message turn
+      await saveChatMessage({
+        session_id: sessionId,
+        role: 'user',
+        content: chatPayload.message,
+        selected_product_ids: effectiveProductIds,
+      });
+
+      const isStreamingRequested =
+        Boolean(chatPayload.stream) ||
+        request.headers.accept?.includes('text/event-stream') ||
+        request.headers['x-vercel-ai-data-stream'] === 'v1';
+
+      if (isStreamingRequested) {
+        reply.hijack();
+        const contentType = request.headers.accept?.includes('text/event-stream')
+          ? 'text/event-stream; charset=utf-8'
+          : 'text/plain; charset=utf-8';
+
+        reply.raw.writeHead(200, {
+          'Content-Type': contentType,
+          'x-vercel-ai-data-stream': 'v1',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive',
+        });
+
+        try {
+          let accumulatedAssistantText = '';
+          let accumulatedProducts: any[] = [];
+          for await (const chunk of defaultShoppingAssistant.processMessageStream(chatRequestPayload)) {
+            reply.raw.write(chunk);
+            if (chunk.startsWith('0:')) {
+              try {
+                accumulatedAssistantText += JSON.parse(chunk.slice(2).trim());
+              } catch {}
+            } else if (chunk.startsWith('a:')) {
+              try {
+                const toolRes = JSON.parse(chunk.slice(2).trim());
+                if (toolRes.result?.products && Array.isArray(toolRes.result.products)) {
+                  accumulatedProducts = toolRes.result.products;
+                }
+              } catch {}
+            }
+          }
+          reply.raw.end();
+          timer('Completed SSE stream');
+
+          // Persist the completed streaming assistant turn
+          await saveChatMessage({
+            session_id: sessionId,
+            role: 'assistant',
+            content: accumulatedAssistantText || 'Product recommendations ready',
+            action: parsedIntent,
+            attached_products: accumulatedProducts.length > 0 ? accumulatedProducts : undefined,
+            selected_product_ids: accumulatedProducts.map((p) => p.product_id),
+          });
+        } catch (streamErr: any) {
+          logger.error('Error during chat SSE stream generation', { error: streamErr?.message });
+          reply.raw.write(formatDataStreamError(streamErr?.message || 'Streaming execution failed'));
+          reply.raw.write(formatDataStreamFinish('error'));
+          reply.raw.end();
+        }
+        return;
+      }
 
       logger.info(`Processing shopping assistant chat message: intent '${parsedIntent}', model '${selectedModel}'`, {
+        sessionId: chatPayload.session_id,
         intent: parsedIntent,
         model: selectedModel,
         budgetCapCents: chatPayload.budget_cap_cents,
-        productIds: chatPayload.product_ids,
+        productIds: effectiveProductIds,
+        selectedProductIds: chatPayload.selected_product_ids,
+        activeTurnProductCount: chatPayload.active_turn_products?.length || 0,
         zipCode: chatPayload.zip_code,
         historyCount: chatPayload.history?.length || 0,
       });
 
-      const response: ChatResponsePayload = await defaultShoppingAssistant.processMessage(chatPayload);
+      const response: ChatResponsePayload = await defaultShoppingAssistant.processMessage(chatRequestPayload);
       const elapsed = timer(`Completed intent ${response.action || parsedIntent}`);
 
       // Process 1-Prompt Autonomous Purchase or Security Scoping for BUY intent
@@ -176,6 +268,16 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
         followUpCount: response.follow_up_suggestions?.length || 0,
       });
 
+      // Persist the assistant turn in storage
+      await saveChatMessage({
+        session_id: sessionId,
+        role: 'assistant',
+        content: response.markdown,
+        action: response.action,
+        attached_products: response.products,
+        selected_product_ids: response.products?.map((p) => p.product_id),
+      });
+
       return reply.send({
         status: 'SUCCESS',
         ...response,
@@ -200,6 +302,62 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
           'Explore top deals',
         ],
       });
+    }
+  });
+
+  /**
+   * POST /api/buyer/chat/stream
+   * Explicit SSE Data Stream route for assistant-ui and Vercel AI SDK clients.
+   * Emits `0:text`, `9:toolCall`, `a:toolResult`, and `d:finish`.
+   */
+  fastify.post('/api/buyer/chat/stream', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const parseResult = ChatMessageSchema.safeParse(request.body);
+    if (!parseResult.success) {
+      logger.warn('ChatMessageSchema validation failed on stream route', { errors: parseResult.error.format() });
+      return reply.status(400).send({
+        error: 'INVALID_REQUEST',
+        details: parseResult.error.format(),
+      });
+    }
+
+    const userApiKeyHeader = request.headers['x-user-llm-api-key'] as string | undefined;
+    const chatPayload = {
+      ...parseResult.data,
+      user_api_key: parseResult.data.user_api_key || userApiKeyHeader,
+    };
+
+    const effectiveProductIds =
+      chatPayload.selected_product_ids && chatPayload.selected_product_ids.length > 0
+        ? chatPayload.selected_product_ids
+        : chatPayload.product_ids;
+
+    const chatRequestPayload = {
+      ...chatPayload,
+      product_ids: effectiveProductIds,
+    };
+
+    reply.hijack();
+    const contentType = request.headers.accept?.includes('text/event-stream')
+      ? 'text/event-stream; charset=utf-8'
+      : 'text/plain; charset=utf-8';
+
+    reply.raw.writeHead(200, {
+      'Content-Type': contentType,
+      'x-vercel-ai-data-stream': 'v1',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+    });
+
+    try {
+      for await (const chunk of defaultShoppingAssistant.processMessageStream(chatRequestPayload)) {
+        reply.raw.write(chunk);
+      }
+      reply.raw.end();
+    } catch (streamErr: any) {
+      logger.error('Error during chat SSE stream generation', { error: streamErr?.message });
+      reply.raw.write(formatDataStreamError(streamErr?.message || 'Streaming execution failed'));
+      reply.raw.write(formatDataStreamFinish('error'));
+      reply.raw.end();
     }
   });
 
@@ -453,5 +611,51 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     const updated = updatePurchaseStatus(userId, orderId, 'REFUNDED');
     logger.info(`Escrow status updated to REFUNDED for order '${orderId}'`);
     return reply.send({ status: 'SUCCESS', order_id: orderId, escrow_status: 'REFUNDED', updated });
+  });
+
+  /**
+   * GET /api/buyer/chat/sessions
+   * Lists historical chat sessions for the authenticated buyer.
+   */
+  fastify.get('/api/buyer/chat/sessions', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const userId = request.user?.id || 'demo';
+    const query = request.query as { limit?: string };
+    const limit = query?.limit ? parseInt(query.limit, 10) : 20;
+    logger.debug(`Retrieving chat sessions for user '${userId}', limit: ${limit}`);
+    const sessions = await listChatSessions(userId, limit);
+    logger.info(`Retrieved ${sessions.length} chat sessions for user '${userId}'`);
+    return reply.send({ status: 'SUCCESS', sessions });
+  });
+
+  /**
+   * GET /api/buyer/chat/sessions/:sessionId
+   * Retrieves a chat session with full turn-bound messages and attached products.
+   */
+  fastify.get('/api/buyer/chat/sessions/:sessionId', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    logger.debug(`Retrieving chat session and messages for '${sessionId}'`);
+    const data = await getChatSessionWithMessages(sessionId);
+    if (!data.session && data.messages.length === 0) {
+      return reply.status(404).send({
+        error: 'SESSION_NOT_FOUND',
+        message: `Chat session '${sessionId}' was not found`,
+      });
+    }
+    return reply.send({
+      status: 'SUCCESS',
+      session: data.session,
+      messages: data.messages,
+    });
+  });
+
+  /**
+   * DELETE /api/buyer/chat/sessions/:sessionId
+   * Deletes a chat session and all cascading historical turn messages.
+   */
+  fastify.delete('/api/buyer/chat/sessions/:sessionId', { preHandler: [authenticateUser] }, async (request, reply) => {
+    const { sessionId } = request.params as { sessionId: string };
+    logger.info(`Deleting chat session '${sessionId}'`);
+    const deleted = await deleteChatSession(sessionId);
+    return reply.send({ status: 'SUCCESS', session_id: sessionId, deleted });
   });
 };

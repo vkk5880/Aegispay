@@ -9,6 +9,8 @@ import {
   Truck,
   ImageOff,
   AlertTriangle,
+  Scale,
+  CheckCircle2,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
@@ -17,6 +19,9 @@ import { useUiMode } from '@/context/UiModeContext';
 export interface ProductCardProps {
   product: ProductCardData;
   isWinner?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (product: ProductCardData) => void;
+  onAskAi?: (product: ProductCardData) => void;
   onAddToCart?: (product: ProductCardData) => void;
   onInstantBuy?: (product: ProductCardData) => void;
   className?: string;
@@ -25,6 +30,9 @@ export interface ProductCardProps {
 export function ProductCard({
   product,
   isWinner = false,
+  isSelected = false,
+  onToggleSelect,
+  onAskAi,
   onAddToCart,
   onInstantBuy,
   className = '',
@@ -78,13 +86,23 @@ export function ProductCard({
   return (
     <div
       className={`group p-5 rounded-2xl bg-white/95 dark:bg-[#0c1424]/90 backdrop-blur-xl border transition-all duration-300 card-hover flex flex-col justify-between relative shadow-sm hover:shadow-xl ${
-        isWinner
+        isSelected
+          ? 'border-cyan-500 shadow-cyan-500/15 ring-2 ring-cyan-500/40 bg-cyan-50/20 dark:bg-cyan-950/20'
+          : isWinner
           ? 'border-cyan-500 shadow-cyan-500/10 ring-1 ring-cyan-500/30'
           : 'border-slate-200/80 dark:border-white/10 hover:border-cyan-500/50 dark:hover:border-cyan-400/50 hover:shadow-cyan-500/5'
       } ${className}`}
     >
       {/* Top radiant light */}
-      <div className={`absolute top-0 inset-x-0 h-[2px] transition-all ${isWinner ? 'bg-gradient-to-r from-transparent via-cyan-400 to-transparent' : 'bg-gradient-to-r from-transparent via-transparent to-transparent group-hover:via-cyan-400/50'}`} />
+      <div className={`absolute top-0 inset-x-0 h-[2px] transition-all ${isWinner || isSelected ? 'bg-gradient-to-r from-transparent via-cyan-400 to-transparent' : 'bg-gradient-to-r from-transparent via-transparent to-transparent group-hover:via-cyan-400/50'}`} />
+
+      {/* Selected Pill */}
+      {isSelected && (
+        <div className="absolute -top-3 right-6 px-3 py-0.5 rounded-full bg-cyan-600 text-white font-bold text-[10px] uppercase tracking-wider shadow-md flex items-center gap-1 z-10">
+          <CheckCircle2 className="w-3 h-3 text-white" />
+          <span>Selected</span>
+        </div>
+      )}
 
       {/* Winner Ribbon */}
       {isWinner && (
@@ -246,6 +264,35 @@ export function ProductCard({
             {showTechnicalDetails ? 'Escrow Protected' : 'Purchase Protected'}
           </span>
         </div>
+
+        {(onToggleSelect || onAskAi) && (
+          <div className="flex items-center gap-2 mb-2.5">
+            {onToggleSelect && (
+              <button
+                type="button"
+                onClick={() => onToggleSelect(product)}
+                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all border flex items-center justify-center gap-1 cursor-pointer active:scale-95 ${
+                  isSelected
+                    ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200 border-cyan-500 font-bold shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/10 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                }`}
+              >
+                <Scale className="w-3.5 h-3.5 text-cyan-500" />
+                <span>{isSelected ? 'Selected' : 'Select'}</span>
+              </button>
+            )}
+            {onAskAi && (
+              <button
+                type="button"
+                onClick={() => onAskAi(product)}
+                className="flex-1 py-1.5 px-2 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/15 text-slate-700 dark:text-slate-300 text-xs font-semibold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1 cursor-pointer active:scale-95"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
+                <span>Ask AI</span>
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           {onAddToCart && (

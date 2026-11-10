@@ -336,3 +336,207 @@ test('Checkpoint 5.1-5.3: processMessage fails over cleanly to local-reasoner on
   assert.ok(res.products && res.products.length > 0);
   assert.ok(res.thought_trace && res.thought_trace.some((t: string) => t.includes('[Circuit Breaker Fallback]')));
 });
+
+test('Phase 1: 4-Tool LLM Suite (filter_turn_products, compare_products, search_catalog, prepare_checkout)', async () => {
+  const service = defaultShoppingAssistant;
+
+  const sampleTurnProducts = [
+    {
+      index: 0,
+      product_id: 'ch3_iron_01',
+      title: 'Rowenta Steam Iron 1710W Stainless Steel',
+      price_cents: 4999,
+      merchant_domain: 'bestbuy.com',
+      rating: 4.8,
+      free_shipping: true,
+      specs: { Wattage: '1710W', Material: 'Stainless Steel' },
+    },
+    {
+      index: 1,
+      product_id: 'ch3_iron_02',
+      title: 'Black+Decker Vitessa Steam Iron 1200W',
+      price_cents: 2999,
+      merchant_domain: 'target.com',
+      rating: 4.5,
+      free_shipping: false,
+      specs: { Wattage: '1200W', Material: 'Nonstick' },
+    },
+    {
+      index: 2,
+      product_id: 'ch3_iron_03',
+      title: 'PurSteam Professional Grade 1800W Iron',
+      price_cents: 6999,
+      merchant_domain: 'amazon.com',
+      rating: 4.9,
+      free_shipping: true,
+      specs: { Wattage: '1800W', Material: 'Ceramic' },
+    },
+  ];
+
+  // 1. Tool: filter_turn_products in-memory execution (<2ms)
+  const startTime = Date.now();
+  const filterOutput = (await service.filterTurnProductsTool.execute!(
+    {
+      criteria: 'under $50 steam',
+      top_n: 2,
+      sort_by: 'price_asc',
+      active_turn_products: sampleTurnProducts,
+    },
+    {} as any
+  )) as any;
+  const elapsed = Date.now() - startTime;
+  assert.ok(elapsed < 50, `Filter execution took ${elapsed}ms, expected sub-50ms`);
+  assert.equal(filterOutput.filtered_count, 2);
+  assert.equal(filterOutput.products[0].product_id, 'ch3_iron_02'); // $29.99 is lowest price
+  assert.equal(filterOutput.products[1].product_id, 'ch3_iron_01'); // $49.99 is second lowest
+
+  // 2. Tool: compare_products with active turn products
+  const compareOutput = (await service.compareProductsTool.execute!(
+    {
+      product_ids: ['ch3_iron_01', 'ch3_iron_02'],
+      active_turn_products: sampleTurnProducts,
+    },
+    {} as any
+  )) as any;
+  assert.ok(compareOutput.comparison);
+  assert.equal(compareOutput.products.length, 2);
+  assert.ok(compareOutput.winner_product_id);
+  assert.ok(compareOutput.comparison.rows.length >= 4);
+
+  // 3. Tool: search_catalog Channel3 search and ranking
+  const searchOutput = (await service.searchCatalogTool.execute!(
+    {
+      query: 'headphones',
+      limit: 3,
+      max_price_usd: 350,
+    },
+    {} as any
+  )) as any;
+  assert.ok(searchOutput.products.length > 0);
+  assert.equal(searchOutput.total_found, searchOutput.products.length);
+
+  // 4. Tool: prepare_checkout quantity cap & 2PC hold
+  const buyOutputWithinBudget = (await service.prepareCheckoutTool.execute!(
+    {
+      product_id: 'ch3_iron_01',
+      quantity: 2,
+      budget_cap_cents: 100000, // $1000 budget cap covers the total expenditure ($678)
+    },
+    {} as any
+  )) as any;
+  assert.equal(buyOutputWithinBudget.all_held, true);
+  assert.ok(buyOutputWithinBudget.reservation_id);
+  assert.ok(buyOutputWithinBudget.total_expenditure_cents > 0);
+  assert.equal(buyOutputWithinBudget.hitl_required, false);
+
+  // Budget exceeded trigger: budget $200 < total expenditure ($678) requires HITL step-up
+  const buyOutputOverBudget = (await service.prepareCheckoutTool.execute!(
+    {
+      product_id: 'ch3_iron_01',
+      quantity: 2,
+      budget_cap_cents: 20000,
+    },
+    {} as any
+  )) as any;
+  assert.equal(buyOutputOverBudget.hitl_required, true);
+  assert.equal(buyOutputOverBudget.requires_approval, true);
+
+  // Verify quantity cap enforcement: quantity > 5 fails schema validation
+  const invalidQtyResult = (await service.prepareCheckoutTool.execute!(
+    {
+      product_id: 'ch3_iron_01',
+      quantity: 6,
+    },
+    {} as any
+  )) as any;
+  assert.equal(invalidQtyResult.error, true);
+  assert.ok(invalidQtyResult.message.includes('less than or equal to 5') || invalidQtyResult.message.includes('quantity'));
+});
+
+test('Phase 1: Fastify SSE Data Stream Protocol generator (0:text, 9:toolCall, a:toolResult, d:finish)', async () => {
+  const service = defaultShoppingAssistant;
+
+  const sampleTurnProducts = [
+    {
+      index: 0,
+      product_id: 'ch3_iron_01',
+      title: 'Rowenta Steam Iron 1710W',
+      price_cents: 4999,
+      merchant_domain: 'bestbuy.com',
+      rating: 4.8,
+      free_shipping: true,
+    },
+    {
+      index: 1,
+      product_id: 'ch3_iron_02',
+      title: 'Black+Decker Vitessa Iron 1200W',
+      price_cents: 2999,
+      merchant_domain: 'target.com',
+      rating: 4.5,
+      free_shipping: false,
+    },
+  ];
+
+  // Test 1: In-memory filter stream
+  const filterFrames: string[] = [];
+  for await (const frame of service.processMessageStream({
+    message: 'show top 2 from that',
+    active_turn_products: sampleTurnProducts,
+  })) {
+    filterFrames.push(frame);
+  }
+
+  assert.ok(filterFrames.length >= 3);
+  // Tool call frame
+  assert.ok(filterFrames.some(f => f.startsWith('9:') && f.includes('filter_turn_products')));
+  // Tool result frame
+  assert.ok(filterFrames.some(f => f.startsWith('a:') && f.includes('filtered_count')));
+  // Text delta frame
+  assert.ok(filterFrames.some(f => f.startsWith('0:')));
+  // Terminal finish frame
+  assert.ok(filterFrames.some(f => f.startsWith('d:') && f.includes('stop')));
+
+  // Test 2: Multi-product compare stream
+  const compareFrames: string[] = [];
+  for await (const frame of service.processMessageStream({
+    message: 'Compare these two side by side',
+    action: 'COMPARE',
+    selected_product_ids: ['ch3_iron_01', 'ch3_iron_02'],
+    active_turn_products: sampleTurnProducts,
+  })) {
+    compareFrames.push(frame);
+  }
+
+  assert.ok(compareFrames.some(f => f.startsWith('9:') && f.includes('compare_products')));
+  assert.ok(compareFrames.some(f => f.startsWith('a:') && f.includes('winner_product_id')));
+  assert.ok(compareFrames.some(f => f.startsWith('0:') && f.includes('Comparison Matrix')));
+  assert.ok(compareFrames.some(f => f.startsWith('d:') && f.includes('stop')));
+
+  // Test 3: Purchase checkout stream
+  const buyFrames: string[] = [];
+  for await (const frame of service.processMessageStream({
+    message: 'Buy this item for me',
+    action: 'BUY',
+    selected_product_ids: ['ch3_iron_01'],
+  })) {
+    buyFrames.push(frame);
+  }
+
+  assert.ok(buyFrames.some(f => f.startsWith('9:') && f.includes('prepare_checkout')));
+  assert.ok(buyFrames.some(f => f.startsWith('a:') && f.includes('all_held')));
+  assert.ok(buyFrames.some(f => f.startsWith('0:') && f.includes('Pre-Purchase Verification')));
+  assert.ok(buyFrames.some(f => f.startsWith('d:') && f.includes('stop')));
+
+  // Test 4: Discovery stream
+  const discoverFrames: string[] = [];
+  for await (const frame of service.processMessageStream({
+    message: 'Find best noise cancelling headphones',
+  })) {
+    discoverFrames.push(frame);
+  }
+
+  assert.ok(discoverFrames.some(f => f.startsWith('9:') && f.includes('search_catalog')));
+  assert.ok(discoverFrames.some(f => f.startsWith('a:') && f.includes('total_found')));
+  assert.ok(discoverFrames.some(f => f.startsWith('0:') && f.includes('top matches')));
+  assert.ok(discoverFrames.some(f => f.startsWith('d:') && f.includes('stop')));
+});

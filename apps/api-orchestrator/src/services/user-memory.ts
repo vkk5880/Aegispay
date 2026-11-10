@@ -18,7 +18,7 @@ import {
   createLogger,
   sanitizeForLogging,
 } from '@aegispay/shared-types';
-import { createDb, userMemoriesTable, eq } from '@aegispay/database';
+import { createDb, userMemoriesTable, chatSessions, chatMessages, eq, desc } from '@aegispay/database';
 
 const logger = createLogger('API:Services:Financial').child('UserMemory');
 
@@ -1078,4 +1078,348 @@ export function applyDynamicUserRules(
   });
 
   return filtered;
+}
+
+// ── Chat Session & Turn-Bound Conversation History Persistence ─────────────
+
+export interface StoredChatSession {
+  id: string;
+  buyer_id: string;
+  title: string;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  message_count?: number;
+}
+
+export interface StoredChatMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  action?: 'DISCOVER' | 'COMPARE' | 'DETAILS' | 'BUY';
+  selected_product_ids?: string[];
+  attached_products?: ProductCardData[];
+  tool_calls?: any;
+  created_at: string;
+}
+
+const chatSessionsStore = new Map<string, StoredChatSession>();
+const chatMessagesStore = new Map<string, StoredChatMessage[]>();
+
+export function clearChatSessionsStore(): void {
+  logger.debug('Clearing chat sessions L1 cache store');
+  chatSessionsStore.clear();
+  chatMessagesStore.clear();
+}
+
+export async function createOrGetChatSession(
+  sessionId: string,
+  buyerId: string = 'demo',
+  title?: string,
+  metadata?: Record<string, unknown>
+): Promise<StoredChatSession> {
+  const safeSessionId = (sessionId || '').trim() || `session_${Date.now()}`;
+  const safeBuyerId = sanitizeUserId(buyerId);
+  const now = new Date().toISOString();
+
+  // 1. Check L1 cache
+  let existing = chatSessionsStore.get(safeSessionId);
+  if (existing) {
+    if (title && existing.title === 'New Shopping Session') {
+      existing.title = title;
+      existing.updated_at = now;
+      chatSessionsStore.set(safeSessionId, existing);
+    }
+    return existing;
+  }
+
+  // 2. Check Database if available
+  const db = getUserMemoryDb();
+  if (db) {
+    try {
+      const rows = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.id, safeSessionId))
+        .limit(1);
+      if (rows && rows.length > 0) {
+        const row = rows[0];
+        const session: StoredChatSession = {
+          id: row.id,
+          buyer_id: row.buyer_id,
+          title: row.title,
+          metadata: (row.metadata as Record<string, unknown>) || undefined,
+          created_at: row.created_at ? new Date(row.created_at).toISOString() : now,
+          updated_at: row.updated_at ? new Date(row.updated_at).toISOString() : now,
+        };
+        chatSessionsStore.set(safeSessionId, session);
+        return session;
+      }
+    } catch (dbErr: any) {
+      logger.warn('Failed to query chat session from database; using L1 fallback', {
+        sessionId: safeSessionId,
+        error: dbErr?.message,
+      });
+    }
+  }
+
+  // 3. Create new session
+  const newSession: StoredChatSession = {
+    id: safeSessionId,
+    buyer_id: safeBuyerId,
+    title: title || 'New Shopping Session',
+    metadata,
+    created_at: now,
+    updated_at: now,
+    message_count: 0,
+  };
+  chatSessionsStore.set(safeSessionId, newSession);
+
+  if (db) {
+    try {
+      await db.insert(chatSessions).values({
+        id: safeSessionId,
+        buyer_id: safeBuyerId,
+        title: newSession.title,
+        metadata: metadata ? metadata : undefined,
+        created_at: new Date(now),
+        updated_at: new Date(now),
+      });
+      logger.info('Persisted new chat session to PostgreSQL', { sessionId: safeSessionId, buyerId: safeBuyerId });
+    } catch (insertErr: any) {
+      logger.warn('Failed to insert chat session into database; retained in L1 cache', {
+        sessionId: safeSessionId,
+        error: insertErr?.message,
+      });
+    }
+  }
+
+  return newSession;
+}
+
+export async function saveChatMessage(input: {
+  id?: string;
+  session_id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  action?: 'DISCOVER' | 'COMPARE' | 'DETAILS' | 'BUY';
+  selected_product_ids?: string[];
+  attached_products?: ProductCardData[];
+  tool_calls?: any;
+  created_at?: string;
+}): Promise<StoredChatMessage> {
+  const safeSessionId = (input.session_id || '').trim() || 'session_default';
+  const messageId = input.id || `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const now = input.created_at || new Date().toISOString();
+
+  // Ensure session exists
+  await createOrGetChatSession(
+    safeSessionId,
+    'demo',
+    input.role === 'user' ? input.content.slice(0, 60) : undefined
+  );
+
+  const storedMessage: StoredChatMessage = {
+    id: messageId,
+    session_id: safeSessionId,
+    role: input.role,
+    content: input.content,
+    action: input.action,
+    selected_product_ids: input.selected_product_ids,
+    attached_products: input.attached_products,
+    tool_calls: input.tool_calls,
+    created_at: now,
+  };
+
+  // Append to L1 cache
+  const list = chatMessagesStore.get(safeSessionId) || [];
+  list.push(storedMessage);
+  chatMessagesStore.set(safeSessionId, list);
+
+  // Update session in L1
+  const session = chatSessionsStore.get(safeSessionId);
+  if (session) {
+    session.updated_at = now;
+    session.message_count = list.length;
+    chatSessionsStore.set(safeSessionId, session);
+  }
+
+  // Persist to DB if available
+  const db = getUserMemoryDb();
+  if (db) {
+    try {
+      await db.insert(chatMessages).values({
+        id: messageId,
+        session_id: safeSessionId,
+        role: input.role,
+        content: input.content,
+        action: input.action,
+        selected_product_ids: input.selected_product_ids,
+        attached_products: input.attached_products as any,
+        tool_calls: input.tool_calls,
+        created_at: new Date(now),
+      });
+
+      await db
+        .update(chatSessions)
+        .set({ updated_at: new Date(now) })
+        .where(eq(chatSessions.id, safeSessionId));
+
+      logger.debug('Persisted chat message to PostgreSQL', { messageId, sessionId: safeSessionId });
+    } catch (insertErr: any) {
+      logger.warn('Failed to insert chat message into database; retained in L1 cache', {
+        messageId,
+        sessionId: safeSessionId,
+        error: insertErr?.message,
+      });
+    }
+  }
+
+  return storedMessage;
+}
+
+export async function getChatSessionWithMessages(
+  sessionId: string
+): Promise<{ session: StoredChatSession | null; messages: StoredChatMessage[] }> {
+  const safeSessionId = (sessionId || '').trim();
+  if (!safeSessionId) {
+    return { session: null, messages: [] };
+  }
+
+  // Check L1
+  const cachedSession = chatSessionsStore.get(safeSessionId) || null;
+  const cachedMessages = chatMessagesStore.get(safeSessionId) || [];
+
+  if (cachedSession && cachedMessages.length > 0) {
+    return { session: cachedSession, messages: cachedMessages };
+  }
+
+  // Check DB
+  const db = getUserMemoryDb();
+  if (db) {
+    try {
+      const sessionRows = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.id, safeSessionId))
+        .limit(1);
+
+      if (sessionRows && sessionRows.length > 0) {
+        const sRow = sessionRows[0];
+        const session: StoredChatSession = {
+          id: sRow.id,
+          buyer_id: sRow.buyer_id,
+          title: sRow.title,
+          metadata: (sRow.metadata as Record<string, unknown>) || undefined,
+          created_at: sRow.created_at ? new Date(sRow.created_at).toISOString() : new Date().toISOString(),
+          updated_at: sRow.updated_at ? new Date(sRow.updated_at).toISOString() : new Date().toISOString(),
+        };
+
+        const msgRows = await db
+          .select()
+          .from(chatMessages)
+          .where(eq(chatMessages.id, safeSessionId))
+          .orderBy(chatMessages.created_at);
+
+        const messages: StoredChatMessage[] = msgRows.map((m: any) => ({
+          id: m.id,
+          session_id: m.session_id,
+          role: m.role as any,
+          content: m.content,
+          action: m.action as any,
+          selected_product_ids: m.selected_product_ids || undefined,
+          attached_products: m.attached_products as any,
+          tool_calls: m.tool_calls,
+          created_at: m.created_at ? new Date(m.created_at).toISOString() : new Date().toISOString(),
+        }));
+
+        session.message_count = messages.length;
+        chatSessionsStore.set(safeSessionId, session);
+        chatMessagesStore.set(safeSessionId, messages);
+
+        return { session, messages };
+      }
+    } catch (dbErr: any) {
+      logger.warn('Failed to query session with messages from database; using L1 fallback', {
+        sessionId: safeSessionId,
+        error: dbErr?.message,
+      });
+    }
+  }
+
+  return { session: cachedSession, messages: cachedMessages };
+}
+
+export async function listChatSessions(
+  buyerId: string = 'demo',
+  limit: number = 20
+): Promise<StoredChatSession[]> {
+  const safeBuyerId = sanitizeUserId(buyerId);
+  const db = getUserMemoryDb();
+
+  if (db) {
+    try {
+      const rows = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.buyer_id, safeBuyerId))
+        .orderBy(desc(chatSessions.updated_at))
+        .limit(limit);
+
+      if (rows && rows.length > 0) {
+        return rows.map((r: any) => {
+          const cached = chatSessionsStore.get(r.id);
+          return {
+            id: r.id,
+            buyer_id: r.buyer_id,
+            title: r.title,
+            metadata: (r.metadata as Record<string, unknown>) || undefined,
+            created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+            updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+            message_count: cached?.message_count ?? (chatMessagesStore.get(r.id)?.length || 0),
+          };
+        });
+      }
+    } catch (dbErr: any) {
+      logger.warn('Failed to list chat sessions from database; falling back to L1 cache', {
+        buyerId: safeBuyerId,
+        error: dbErr?.message,
+      });
+    }
+  }
+
+  // Fallback to L1 cache
+  const result: StoredChatSession[] = [];
+  for (const session of chatSessionsStore.values()) {
+    if (session.buyer_id === safeBuyerId) {
+      result.push({
+        ...session,
+        message_count: chatMessagesStore.get(session.id)?.length || session.message_count || 0,
+      });
+    }
+  }
+
+  result.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+  return result.slice(0, limit);
+}
+
+export async function deleteChatSession(sessionId: string): Promise<boolean> {
+  const safeSessionId = (sessionId || '').trim();
+  if (!safeSessionId) return false;
+
+  chatSessionsStore.delete(safeSessionId);
+  chatMessagesStore.delete(safeSessionId);
+
+  const db = getUserMemoryDb();
+  if (db) {
+    try {
+      await db.delete(chatSessions).where(eq(chatSessions.id, safeSessionId));
+      logger.info('Deleted chat session from database', { sessionId: safeSessionId });
+    } catch (err: any) {
+      logger.warn('Failed to delete chat session from database', { sessionId: safeSessionId, error: err?.message });
+    }
+  }
+
+  return true;
 }

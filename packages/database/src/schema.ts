@@ -186,6 +186,7 @@ export const disputeArbitrations = pgTable(
 );
 
 export * from './schema/user-memories.js';
+export * from './schema/chat-sessions.js';
 
 /**
  * SQLite PRAGMA and DDL Deep Logging & Execution Subsystem

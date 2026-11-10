@@ -8,10 +8,12 @@
     "build": "next build",
     "start": "next start -p 3000",
     "lint": "next lint",
-    "test": "tsx --test src/app/judge/e2eProductionPipeline.test.ts src/app/judge/chaosSimulator.test.ts src/app/judge/disputeHardening.test.ts src/components/buyer/buyerChatComponents.test.ts src/workers/duckdbOptimization.test.ts src/components/ag-studio/merchantWidgets.test.ts src/components/bryntum/DisputeSlaScheduler.test.ts src/components/buyer/hitlComponents.test.ts src/components/common/canvasEffects.test.ts src/lib/share.test.ts src/hooks/useX402.test.ts \"src/app/(buyer)/buyerPages.test.ts\" src/components/merchant/merchantReporting.test.ts src/components/ag-grid/renderers/renderers.test.ts src/components/ag-grid/agGridIntegration.test.ts"
+    "test": "tsx --test src/app/judge/e2eProductionPipeline.test.ts src/app/judge/chaosSimulator.test.ts src/app/judge/disputeHardening.test.ts src/components/buyer/buyerChatComponents.test.ts src/components/buyer/assistantUiIntegration.test.ts src/workers/duckdbOptimization.test.ts src/components/ag-studio/merchantWidgets.test.ts src/components/bryntum/DisputeSlaScheduler.test.ts src/components/buyer/hitlComponents.test.ts src/components/common/canvasEffects.test.ts src/lib/share.test.ts src/hooks/useX402.test.ts \"src/app/(buyer)/buyerPages.test.ts\" src/components/merchant/merchantReporting.test.ts src/components/ag-grid/renderers/renderers.test.ts src/components/ag-grid/agGridIntegration.test.ts"
   },
   "dependencies": {
     "@aegispay/shared-types": "workspace:*",
+    "@assistant-ui/react": "^0.15.34",
+    "@assistant-ui/react-markdown": "^0.14.25",
     "@bryntum/scheduler-trial": "^7.3.8",
     "@duckdb/duckdb-wasm": "1.33.1-dev57.0",
     "ag-grid-community": "^36.3.0",

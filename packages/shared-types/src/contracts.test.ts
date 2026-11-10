@@ -2989,3 +2989,200 @@ test('AllowAgent Constitutional Firewall & SpendPolicy schemas and utilities ver
   };
   assert.equal(PayPalSandboxStateSchema.safeParse(sandboxState).success, true);
 });
+
+test('Upgrade B: ActiveTurnProductSchema, ChatMessageTurnSchema, and ConversationalChatPayloadSchema validation', async () => {
+  const {
+    ActiveTurnProductSchema,
+    ChatMessageTurnSchema,
+    ConversationalChatPayloadSchema,
+  } = await import('./index.js');
+
+  const validActiveProduct = {
+    index: 1,
+    product_id: 'ch3_rowenta_steam_01',
+    title: 'Rowenta Steam Iron 1710W',
+    price_cents: 4999,
+    merchant_domain: 'bestbuy.com',
+    rating: 4.8,
+    free_shipping: true,
+    specs: { Wattage: '1710W', Soleplate: 'Stainless Steel' },
+  };
+  assert.equal(ActiveTurnProductSchema.safeParse(validActiveProduct).success, true);
+
+  const turnMessage = {
+    id: 'turn-msg-01',
+    role: 'assistant' as const,
+    content: 'Here are the matching steam irons for your search:',
+    attached_products: [
+      {
+        product_id: 'ch3_rowenta_steam_01',
+        title: 'Rowenta Steam Iron 1710W',
+        description: 'Professional grade steam iron with 1710W power output.',
+        category_id: 'home_appliances',
+        price_cents: 4999,
+        compare_at_price_cents: 5999,
+        commission_rebate_cents: 500,
+        commission_rate: 0.1,
+        rating: 4.8,
+        review_count: 120,
+        shipping_fee_cents: 0,
+        free_shipping: true,
+        merchant_domain: 'bestbuy.com',
+        merchant_credibility_score: 98,
+        stock_status: 'IN_STOCK' as const,
+        delivery_window: '2-Day Express',
+        image_url: 'https://images.example.com/iron.jpg',
+        specs: { Wattage: '1710W' },
+      },
+    ],
+    focused_product_id: 'ch3_rowenta_steam_01',
+    selected_product_ids: ['ch3_rowenta_steam_01', 'ch3_black_decker_02'],
+    timestamp: new Date().toISOString(),
+  };
+  assert.equal(ChatMessageTurnSchema.safeParse(turnMessage).success, true);
+
+  const conversationalPayload = {
+    session_id: 'sess_turn_test_123',
+    message: 'Which of these two is better for delicate silk and linen?',
+    history: [
+      { role: 'user' as const, content: 'Find me steam irons under $50' },
+      { role: 'assistant' as const, content: 'Here are the matching steam irons:' },
+    ],
+    selected_product_ids: ['ch3_rowenta_steam_01', 'ch3_black_decker_02'],
+    active_turn_products: [validActiveProduct],
+    budget_cap_cents: 10000,
+    zip_code: '94016',
+  };
+  assert.equal(ConversationalChatPayloadSchema.safeParse(conversationalPayload).success, true);
+});
+
+test('Phase 1: Mastra 4-Tool Schemas and Fastify Data Stream Protocol validation', async () => {
+  const {
+    FilterTurnProductsInputSchema,
+    FilterTurnProductsOutputSchema,
+    CompareProductsInputSchema,
+    CompareProductsOutputSchema,
+    PrepareCheckoutInputSchema,
+    PrepareCheckoutOutputSchema,
+    SearchCatalogInputSchema,
+    SearchCatalogOutputSchema,
+    DataStreamFrameSchema,
+    formatDataStreamText,
+    formatDataStreamToolCall,
+    formatDataStreamToolResult,
+    formatDataStreamFinish,
+    formatDataStreamError,
+  } = await import('./index.js');
+
+  // 1. FilterTurnProductsInputSchema & Output
+  const filterInput = {
+    criteria: 'steam iron under 50',
+    max_price_usd: 50,
+    top_n: 3,
+    sort_by: 'price_asc' as const,
+    active_turn_products: [
+      {
+        index: 0,
+        product_id: 'p1',
+        title: 'Rowenta Steam Iron',
+        price_cents: 4500,
+        merchant_domain: 'bestbuy.com',
+        rating: 4.8,
+        free_shipping: true,
+      },
+    ],
+  };
+  assert.equal(FilterTurnProductsInputSchema.safeParse(filterInput).success, true);
+
+  const filterOutput = {
+    products: [
+      {
+        product_id: 'p1',
+        title: 'Rowenta Steam Iron',
+        description: 'Great iron',
+        category_id: 'home',
+        price_cents: 4500,
+        compare_at_price_cents: 5500,
+        commission_rebate_cents: 450,
+        commission_rate: 0.1,
+        rating: 4.8,
+        review_count: 50,
+        shipping_fee_cents: 0,
+        free_shipping: true,
+        merchant_domain: 'bestbuy.com',
+        merchant_credibility_score: 95,
+        stock_status: 'IN_STOCK' as const,
+        delivery_window: '2-Day Express',
+        image_url: 'https://images.example.com/iron.jpg',
+      },
+    ],
+    filtered_count: 1,
+    applied_criteria: 'steam iron',
+  };
+  assert.equal(FilterTurnProductsOutputSchema.safeParse(filterOutput).success, true);
+
+  // 2. CompareProductsInputSchema & Output
+  const compareInput = {
+    product_ids: ['p1', 'p2'],
+  };
+  assert.equal(CompareProductsInputSchema.safeParse(compareInput).success, true);
+  assert.equal(CompareProductsInputSchema.safeParse({ product_ids: [] }).success, false);
+
+  // 3. PrepareCheckoutInputSchema (enforces strict 1 <= quantity <= 5)
+  assert.equal(PrepareCheckoutInputSchema.safeParse({ product_id: 'p1', quantity: 1 }).success, true);
+  assert.equal(PrepareCheckoutInputSchema.safeParse({ product_id: 'p1', quantity: 5 }).success, true);
+  assert.equal(PrepareCheckoutInputSchema.safeParse({ product_id: 'p1', quantity: 0 }).success, false);
+  assert.equal(PrepareCheckoutInputSchema.safeParse({ product_id: 'p1', quantity: 6 }).success, false);
+  assert.equal(PrepareCheckoutInputSchema.safeParse({ product_id: 'p1', quantity: 9999 }).success, false);
+
+  // 4. SearchCatalogInputSchema & Output
+  const searchInput = {
+    query: 'wireless headphones',
+    max_price_usd: 250,
+    limit: 5,
+  };
+  assert.equal(SearchCatalogInputSchema.safeParse(searchInput).success, true);
+
+  // 5. Data Stream Protocol frame formatters
+  const textFrame = formatDataStreamText('Top recommendations:');
+  assert.equal(textFrame, '0:"Top recommendations:"\n');
+
+  const toolCallFrame = formatDataStreamToolCall('call_01', 'search_catalog', { query: 'headphones' });
+  assert.equal(toolCallFrame, '9:{"toolCallId":"call_01","toolName":"search_catalog","args":{"query":"headphones"}}\n');
+
+  const toolResultFrame = formatDataStreamToolResult('call_01', { total_found: 2 });
+  assert.equal(toolResultFrame, 'a:{"toolCallId":"call_01","result":{"total_found":2}}\n');
+
+  const finishFrame = formatDataStreamFinish('stop', { promptTokens: 10, completionTokens: 20 });
+  assert.equal(finishFrame, 'd:{"finishReason":"stop","usage":{"promptTokens":10,"completionTokens":20}}\n');
+
+  const errorFrame = formatDataStreamError('Network timeout');
+  assert.equal(errorFrame, '3:"Network timeout"\n');
+
+  // 6. DataStreamFrameSchema validation
+  assert.equal(DataStreamFrameSchema.safeParse({ type: 'text', delta: 'hello' }).success, true);
+  assert.equal(
+    DataStreamFrameSchema.safeParse({
+      type: 'tool_call',
+      toolCallId: 'c1',
+      toolName: 'search_catalog',
+      args: { query: 'test' },
+    }).success,
+    true
+  );
+  assert.equal(
+    DataStreamFrameSchema.safeParse({
+      type: 'tool_result',
+      toolCallId: 'c1',
+      result: { ok: true },
+    }).success,
+    true
+  );
+  assert.equal(
+    DataStreamFrameSchema.safeParse({
+      type: 'finish',
+      finishReason: 'stop',
+    }).success,
+    true
+  );
+});

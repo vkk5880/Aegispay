@@ -434,6 +434,34 @@ export const ProductBadgeSchema = z.object({
 });
 export type ProductBadge = z.infer<typeof ProductBadgeSchema>;
 
+export const ProductVariantOptionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  price_cents: z.number().int().nonnegative().optional(),
+  stock_status: z.enum(['IN_STOCK', 'OUT_OF_STOCK']).optional().default('IN_STOCK'),
+  sku: z.string().optional(),
+});
+export type ProductVariantOption = z.infer<typeof ProductVariantOptionSchema>;
+
+export const RecoveryPillActionSchema = z.enum([
+  'ALTERNATIVE_PRODUCT',
+  'ADJUST_BUDGET',
+  'SWITCH_SHIPPING',
+  'CUSTOM',
+]);
+export type RecoveryPillAction = z.infer<typeof RecoveryPillActionSchema>;
+
+export const RecoveryPillSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  action: RecoveryPillActionSchema,
+  product_id: z.string().optional(),
+  suggested_budget_cents: z.number().int().positive().optional(),
+  shipping_type: z.string().optional(),
+  message_prompt: z.string(),
+});
+export type RecoveryPill = z.infer<typeof RecoveryPillSchema>;
+
 export const ProductCardDataSchema = z.object({
   product_id: z.string(),
   title: z.string(),
@@ -472,6 +500,8 @@ export const ProductCardDataSchema = z.object({
   adjusted_rating: z.number().optional(),
   verdict: z.string().optional(),
   verdict_colour: z.string().optional(),
+  variants: z.array(ProductVariantOptionSchema).optional(),
+  selected_variant_id: z.string().optional(),
 });
 
 export const ComparisonMatrixRowSchema = z.object({
@@ -544,7 +574,188 @@ export const ChatResponsePayloadSchema = z.object({
   thought_trace: z.array(z.string()).optional(),
   active_model: z.string().optional(),
   requires_human_confirmation: z.boolean().optional(),
+  recovery_pills: z.array(RecoveryPillSchema).optional(),
 });
+
+/**
+ * Upgrade B: Turn-Level Active Product Context & Multi-Product Binding Schemas
+ * Derives from assistant_ui_agentic_chat_upgrade_plan.md Section 3.2
+ */
+export const ActiveTurnProductSchema = z.object({
+  index: z.number().int().nonnegative(),
+  product_id: z.string().min(1),
+  title: z.string(),
+  price_cents: z.number().int().nonnegative(),
+  merchant_domain: z.string(),
+  rating: z.number(),
+  free_shipping: z.boolean(),
+  specs: z.record(z.string()).optional(),
+});
+
+export const ChatMessageTurnSchema = z.object({
+  id: z.string(),
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  attached_products: z.array(ProductCardDataSchema).optional(),
+  focused_product_id: z.string().optional(),
+  selected_product_ids: z.array(z.string()).optional(),
+  timestamp: z.string(),
+  action: ShoppingActionTypeSchema.optional(),
+  products: z.array(ProductCardDataSchema).optional(),
+  comparison: ComparisonMatrixSchema.optional(),
+  product_detail: ProductCardDataSchema.optional(),
+  cart: z.any().optional(),
+  stock_reservation: z.any().optional(),
+  thought_trace: z.array(z.string()).optional(),
+  follow_up_suggestions: z.array(z.string()).optional(),
+  recovery_pills: z.array(RecoveryPillSchema).optional(),
+});
+
+export const ConversationalChatPayloadSchema = z.object({
+  session_id: z.string(),
+  message: z.string(),
+  history: z.array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      content: z.string(),
+    })
+  ),
+  selected_product_ids: z.array(z.string()).optional(),
+  active_turn_products: z.array(ActiveTurnProductSchema).optional(),
+  budget_cap_cents: z.number().int().positive().optional(),
+  zip_code: z.string().optional(),
+  action: ShoppingActionTypeSchema.optional(),
+  product_ids: z.array(z.string()).optional(),
+  model: z.string().optional(),
+  provider: z.string().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  user_api_key: z.string().max(256).optional(),
+  stream: z.boolean().optional(),
+});
+
+/**
+ * Phase 1 / Upgrade D: Mastra 4-Tool Suite & Fastify Data Stream Protocol Contracts
+ * Derives from assistant_ui_agentic_chat_upgrade_plan.md Section 3.3 & Section 3.4
+ */
+
+export const FilterTurnProductsInputSchema = z.object({
+  criteria: z.string().optional().describe('Filter criteria keyword or intent'),
+  max_price_usd: z.number().positive().optional().describe('Maximum budget ceiling in USD'),
+  top_n: z.number().int().positive().optional().describe('Number of items to keep'),
+  sort_by: z.enum(['price_asc', 'rating_desc', 'trust_desc']).optional(),
+  active_turn_products: z.array(ActiveTurnProductSchema).optional(),
+});
+export type FilterTurnProductsInput = z.infer<typeof FilterTurnProductsInputSchema>;
+
+export const FilterTurnProductsOutputSchema = z.object({
+  products: z.array(ProductCardDataSchema),
+  filtered_count: z.number().int().nonnegative(),
+  applied_criteria: z.string().optional(),
+});
+export type FilterTurnProductsOutput = z.infer<typeof FilterTurnProductsOutputSchema>;
+
+export const CompareProductsInputSchema = z.object({
+  product_ids: z.array(z.string()).min(1),
+  active_turn_products: z.array(ActiveTurnProductSchema).optional(),
+});
+export type CompareProductsInput = z.infer<typeof CompareProductsInputSchema>;
+
+export const CompareProductsOutputSchema = z.object({
+  comparison: ComparisonMatrixSchema,
+  products: z.array(ProductCardDataSchema),
+  winner_product_id: z.string().optional(),
+});
+export type CompareProductsOutput = z.infer<typeof CompareProductsOutputSchema>;
+
+export const PrepareCheckoutInputSchema = z.object({
+  product_id: z.string().min(1).max(64),
+  quantity: z.number().int().min(1).max(5).default(1),
+  budget_cap_cents: z.number().int().positive().optional(),
+  zip_code: z.string().optional(),
+});
+export type PrepareCheckoutInput = z.infer<typeof PrepareCheckoutInputSchema>;
+
+export const PrepareCheckoutOutputSchema = z.object({
+  all_held: z.boolean(),
+  reservation_id: z.string(),
+  product: ProductCardDataSchema.optional(),
+  cart: ExplainableCartPayloadSchema.optional(),
+  total_expenditure_cents: z.number().int().nonnegative(),
+  hitl_required: z.boolean(),
+  requires_approval: z.boolean(),
+  recovery_pills: z.array(RecoveryPillSchema).optional(),
+});
+export type PrepareCheckoutOutput = z.infer<typeof PrepareCheckoutOutputSchema>;
+
+export const SearchCatalogInputSchema = z.object({
+  query: z.string(),
+  category: z.string().optional(),
+  max_price_usd: z.number().positive().optional(),
+  limit: z.number().int().positive().optional().default(10),
+});
+export type SearchCatalogInput = z.infer<typeof SearchCatalogInputSchema>;
+
+export const SearchCatalogOutputSchema = z.object({
+  products: z.array(ProductCardDataSchema),
+  total_found: z.number().int().nonnegative(),
+});
+export type SearchCatalogOutput = z.infer<typeof SearchCatalogOutputSchema>;
+
+export const DataStreamFrameSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('text'),
+    delta: z.string(),
+  }),
+  z.object({
+    type: z.literal('tool_call'),
+    toolCallId: z.string(),
+    toolName: z.string(),
+    args: z.any(),
+  }),
+  z.object({
+    type: z.literal('tool_result'),
+    toolCallId: z.string(),
+    result: z.any(),
+  }),
+  z.object({
+    type: z.literal('finish'),
+    finishReason: z.string().default('stop'),
+    usage: z
+      .object({
+        promptTokens: z.number().default(0),
+        completionTokens: z.number().default(0),
+      })
+      .optional(),
+  }),
+  z.object({
+    type: z.literal('error'),
+    error: z.string(),
+  }),
+]);
+export type DataStreamFrame = z.infer<typeof DataStreamFrameSchema>;
+
+export function formatDataStreamText(delta: string): string {
+  return `0:${JSON.stringify(delta)}\n`;
+}
+
+export function formatDataStreamToolCall(toolCallId: string, toolName: string, args: any): string {
+  return `9:${JSON.stringify({ toolCallId, toolName, args })}\n`;
+}
+
+export function formatDataStreamToolResult(toolCallId: string, result: any): string {
+  return `a:${JSON.stringify({ toolCallId, result })}\n`;
+}
+
+export function formatDataStreamFinish(
+  finishReason = 'stop',
+  usage = { promptTokens: 0, completionTokens: 0 }
+): string {
+  return `d:${JSON.stringify({ finishReason, usage })}\n`;
+}
+
+export function formatDataStreamError(error: string): string {
+  return `3:${JSON.stringify(error)}\n`;
+}
 
 export type SpendMandate = z.infer<typeof SpendMandateSchema>;
 export type SessionMandate = z.infer<typeof SessionMandateSchema>;
@@ -565,6 +776,9 @@ export type ExplainableCartItem = z.infer<typeof ExplainableCartItemSchema>;
 export type ExplainableCartMerchantGroup = z.infer<typeof ExplainableCartMerchantGroupSchema>;
 export type ExplainableCartPayload = z.infer<typeof ExplainableCartPayloadSchema>;
 export type ChatResponsePayload = z.infer<typeof ChatResponsePayloadSchema>;
+export type ActiveTurnProduct = z.infer<typeof ActiveTurnProductSchema>;
+export type ChatMessageTurn = z.infer<typeof ChatMessageTurnSchema>;
+export type ConversationalChatPayload = z.infer<typeof ConversationalChatPayloadSchema>;
 
 /**
  * Custodian Reason Codes and Violation Taxonomies

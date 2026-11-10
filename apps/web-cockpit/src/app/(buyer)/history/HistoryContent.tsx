@@ -20,6 +20,8 @@ import {
   Inbox,
   Search,
   Truck,
+  MessageSquare,
+  ArrowLeft,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
@@ -157,11 +159,34 @@ export function HistoryContent({
   const [items, setItems] = useState<PurchaseHistoryItem[]>(initialItems);
   const [receipts, setReceipts] = useState<NFTReceiptItem[]>(initialReceipts);
   const [loading, setLoading] = useState<boolean>(true);
-  const [activeTab, setActiveTab] = useState<'orders' | 'receipts'>('orders');
+  const [activeTab, setActiveTab] = useState<'orders' | 'receipts' | 'chats'>('orders');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [targetOrderId, setTargetOrderId] = useState<string | null>(null);
+
+  // Phase 4: Chat session history state
+  const [chatSessions, setChatSessions] = useState<any[]>([
+    {
+      id: 'session_demo_audiophile',
+      buyer_id: 'demo',
+      title: 'Studio Headphones & Audio Setup',
+      created_at: '2026-11-09T18:00:00.000Z',
+      updated_at: '2026-11-09T18:30:00.000Z',
+      message_count: 4,
+    },
+    {
+      id: 'session_demo_irons',
+      buyer_id: 'demo',
+      title: 'Rowenta vs Black+Decker Steam Iron Face-Off',
+      created_at: '2026-11-08T14:00:00.000Z',
+      updated_at: '2026-11-08T14:15:00.000Z',
+      message_count: 6,
+    },
+  ]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionDetail, setSessionDetail] = useState<{ session: any; messages: any[] } | null>(null);
+  const [loadingSession, setLoadingSession] = useState<boolean>(false);
 
   useEffect(() => {
     let activeToken: string | null = null;
@@ -206,6 +231,18 @@ export function HistoryContent({
         }
       } catch (err) {
         console.warn('Backend receipts unreachable, using cached cryptographic receipts.', err);
+      }
+
+      try {
+        const resSessions = await fetch('/api/buyer/chat/sessions', { headers });
+        if (resSessions.ok) {
+          const sData = await resSessions.json();
+          if (sData.sessions && Array.isArray(sData.sessions) && sData.sessions.length > 0) {
+            setChatSessions(sData.sessions);
+          }
+        }
+      } catch (err) {
+        console.warn('Backend chat sessions unreachable, using cached sessions.', err);
       } finally {
         setLoading(false);
       }
@@ -213,6 +250,22 @@ export function HistoryContent({
 
     loadData();
   }, []);
+
+  const handleSelectSession = async (sessionId: string) => {
+    setSelectedSessionId(sessionId);
+    setLoadingSession(true);
+    try {
+      const res = await fetch(`/api/buyer/chat/sessions/${encodeURIComponent(sessionId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSessionDetail({ session: data.session, messages: data.messages || [] });
+      }
+    } catch (err) {
+      console.warn('Failed to fetch session detail', err);
+    } finally {
+      setLoadingSession(false);
+    }
+  };
 
   const handleEscrowAction = async (orderId: string, action: 'confirm' | 'refund') => {
     setActionLoading(orderId);
@@ -350,6 +403,20 @@ export function HistoryContent({
             {showTechnicalDetails
               ? `Cryptographic Proofs & Receipts (${receipts.length})`
               : `Official Receipts (${receipts.length})`}
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('chats');
+              setSelectedSessionId(null);
+            }}
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+              activeTab === 'chats'
+                ? 'bg-cyan-600 text-white shadow-lg shadow-cyan-950/50'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Chat Threads ({chatSessions.length})</span>
           </button>
         </div>
       </div>
@@ -651,6 +718,157 @@ export function HistoryContent({
                 </div>
               </div>
             ))
+          )}
+        </div>
+      )}
+
+      {/* Chat Threads Tab Content */}
+      {activeTab === 'chats' && (
+        <div className="space-y-4">
+          {!selectedSessionId ? (
+            chatSessions.length === 0 ? (
+              <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center">
+                <Inbox className="w-12 h-12 text-slate-600 mb-3" />
+                <h3 className="text-lg font-bold text-white mb-1">No Chat Sessions Found</h3>
+                <p className="text-xs text-slate-400 max-w-md mb-6">
+                  Conversations with your AegisPay Shopping Concierge will be persisted here with turn-attached products.
+                </p>
+                <Link
+                  href="/"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-bold text-xs shadow-md"
+                >
+                  Start New Shopping Chat
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {chatSessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="p-5 rounded-2xl bg-slate-900/60 border border-slate-800/80 hover:border-cyan-500/40 transition-all flex flex-col justify-between group"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span className="text-[11px] font-mono text-cyan-400 font-bold px-2 py-0.5 rounded bg-cyan-950/60 border border-cyan-500/30">
+                          {session.id}
+                        </span>
+                        <span className="text-[11px] text-slate-500 font-mono">
+                          {new Date(session.updated_at).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                      <h4 className="text-base font-bold text-white mb-1.5 group-hover:text-cyan-300 transition-colors">
+                        {session.title}
+                      </h4>
+                      <p className="text-xs text-slate-400 line-clamp-1 mb-3">
+                        Turn-bound context with {session.message_count || 2} message turns recorded.
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+                      <span className="text-[11px] text-slate-500 font-mono">
+                        {session.message_count || 2} turns
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSession(session.id)}
+                          className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-all cursor-pointer"
+                        >
+                          View Turns
+                        </button>
+                        <Link
+                          href={`/?session_id=${encodeURIComponent(session.id)}`}
+                          className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1"
+                        >
+                          <span>Resume in Chat</span>
+                          <ArrowRight className="w-3 h-3" />
+                        </Link>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 rounded-xl bg-slate-900/60 border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setSelectedSessionId(null)}
+                  className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white font-semibold transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to all conversations</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-slate-400 font-mono">Session ID: {selectedSessionId}</span>
+                  <Link
+                    href={`/?session_id=${encodeURIComponent(selectedSessionId)}`}
+                    className="px-3 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all flex items-center gap-1"
+                  >
+                    <span>Open in Cockpit</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </Link>
+                </div>
+              </div>
+
+              {loadingSession ? (
+                <div className="p-12 text-center text-slate-400 text-xs font-mono animate-pulse">
+                  Loading turn-bound conversation history...
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {(sessionDetail?.messages || []).map((msg: any) => (
+                    <div
+                      key={msg.id}
+                      className={`p-4 rounded-xl border transition-all ${
+                        msg.role === 'user'
+                          ? 'bg-slate-900/70 border-slate-700 text-slate-200 ml-8'
+                          : 'bg-slate-950/80 border-cyan-500/30 text-white mr-8'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1.5">
+                        <span className={`font-bold ${msg.role === 'user' ? 'text-slate-300' : 'text-cyan-400'}`}>
+                          {msg.role === 'user' ? '👤 Buyer' : '🤖 AegisPay Concierge'}
+                        </span>
+                        <span>{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <p className="text-xs leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+
+                      {msg.attached_products && msg.attached_products.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          {msg.attached_products.map((prod: any) => (
+                            <div
+                              key={prod.product_id}
+                              className="p-2.5 rounded-lg bg-slate-900/90 border border-slate-700 flex items-center gap-2.5"
+                            >
+                              {prod.cleaned_image_url && (
+                                <img
+                                  src={prod.cleaned_image_url}
+                                  alt={prod.title}
+                                  className="w-12 h-12 object-cover rounded-md shrink-0"
+                                />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <h5 className="text-[11px] font-bold text-white truncate">{prod.title}</h5>
+                                <div className="text-[10px] text-cyan-400 font-mono">
+                                  ${(prod.price_cents / 100).toFixed(2)} • {prod.merchant_domain}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}

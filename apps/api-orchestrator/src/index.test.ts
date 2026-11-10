@@ -938,4 +938,34 @@ test('Task 17: HTTP Route POST /api/buyer/chat processes conversational shopping
     },
   });
   assert.equal(invalidRes.statusCode, 400);
+
+  // Test streaming via POST /api/buyer/chat with stream: true
+  const streamChatRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    payload: {
+      message: 'Can you show me top noise cancelling headphones?',
+      stream: true,
+    },
+  });
+  assert.equal(streamChatRes.statusCode, 200);
+  assert.equal(streamChatRes.headers['x-vercel-ai-data-stream'], 'v1');
+  assert.ok(streamChatRes.body.includes('9:{"toolCallId":'));
+  assert.ok(streamChatRes.body.includes('search_catalog'));
+  assert.ok(streamChatRes.body.includes('a:{"toolCallId":'));
+  assert.ok(streamChatRes.body.includes('0:"'));
+  assert.ok(streamChatRes.body.includes('d:{"finishReason":"stop"'));
+
+  // Test explicit stream route POST /api/buyer/chat/stream
+  const explicitStreamRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat/stream',
+    payload: {
+      message: 'Show me studio headphones',
+    },
+  });
+  assert.equal(explicitStreamRes.statusCode, 200);
+  assert.equal(explicitStreamRes.headers['x-vercel-ai-data-stream'], 'v1');
+  assert.ok(explicitStreamRes.body.includes('9:{"toolCallId":'));
+  assert.ok(explicitStreamRes.body.includes('0:"'));
 });

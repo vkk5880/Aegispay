@@ -5,11 +5,10 @@ import { webLogger as logger } from '@/lib/logger';
 import type {
   ProductCardData,
   ComparisonMatrix,
-  ChatResponsePayload,
   ShoppingActionType,
+  ActiveTurnProduct,
 } from '@aegispay/shared-types';
 import {
-  Send,
   Sparkles,
   Bot,
   User,
@@ -30,15 +29,45 @@ import {
   Zap,
   Code,
   Key,
+  Columns,
+  X,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
+import { ChatInputBar } from './ChatInputBar';
+import {
+  AssistantRuntimeProvider,
+  ThreadPrimitive,
+  MessagePrimitive,
+} from '@assistant-ui/react';
+import { MarkdownTextPrimitive } from '@assistant-ui/react-markdown';
+import {
+  useShoppingAssistantRuntime,
+} from '@/lib/assistantUiRuntime';
+import {
+  SearchCatalogToolUI,
+  FilterTurnProductsToolUI,
+  CompareProductsToolUI,
+  PrepareCheckoutToolUI,
+  BuyerToolCallbacksProvider,
+  GenerativeProductCard,
+  ComparisonMatrixCard,
+} from './BuyerGenerativeTools';
+import { BattleArena } from './BattleArena';
+import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
+
+// Re-export for 100% backward compatibility
+export { GenerativeProductCard as ProductCard, ComparisonMatrixCard };
+export type { GenerativeProductCardProps as ProductCardProps, ComparisonMatrixCardProps } from './BuyerGenerativeTools';
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  timestamp: Date;
+  timestamp: Date | string;
+  attached_products?: ProductCardData[];
+  focused_product_id?: string;
+  selected_product_ids?: string[];
   action?: ShoppingActionType;
   products?: ProductCardData[];
   comparison?: ComparisonMatrix;
@@ -49,9 +78,7 @@ export interface ChatMessage {
   follow_up_suggestions?: string[];
 }
 
-import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
-
-interface ConversationalAgentChatProps {
+export interface ConversationalAgentChatProps {
   onSelectProductForDetails?: (product: ProductCardData) => void;
   onSelectProductForCompare?: (product: ProductCardData) => void;
   onSelectProductForBuy?: (product: ProductCardData) => void;
@@ -73,668 +100,460 @@ export function ConversationalAgentChat({
   budgetCapCents = 50000,
   zipCode = '94016',
   developerModeEnabled: devProp = false,
-  selectedModel,
+  selectedModel = 'google/gemini-2.5-flash',
   userApiKey,
 }: ConversationalAgentChatProps) {
   const { showTechnicalDetails } = useUiMode();
   const developerModeEnabled = devProp || showTechnicalDetails;
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-1',
-      role: 'assistant',
-      content: showTechnicalDetails
-        ? 'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.'
-        : 'Hello! I am your AegisPay Shopping Assistant. I can discover products across verified stores, compare features side-by-side, calculate instant cashback savings, and verify live stock before you purchase.',
-      timestamp: new Date(),
-      follow_up_suggestions: [
-        'Find me wireless noise-cancelling headphones under $350',
-        'Compare audiophile setups',
-        'Minimalist walnut desk workspace under $400',
-      ],
-    },
-  ]);
   const [inputMessage, setInputMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [expandedTraceId, setExpandedTraceId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState<ProductCardData[]>([]);
+  const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Active comparison & cart state for the Cockpit Drawer
+  const [activeComparison, setActiveComparison] = useState<ComparisonMatrix | null>(null);
+  const [activeCart, setActiveCart] = useState<any | null>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  // Split-screen Cockpit state
+  const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
+
+  const sessionIdRef = useRef<string>(`sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+  const activeTurnProductsRef = useRef<ActiveTurnProduct[]>([]);
+  const viewportEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-open side panel when 2 or more products are selected for comparison
+  useEffect(() => {
+    if (selectedProducts.length >= 2 && !isSidePanelOpen) {
+      logger.info('[BuyerChat:Layout] Multi-product selection detected; opening cockpit side panel', {
+        selectedCount: selectedProducts.length,
+      });
+      setIsSidePanelOpen(true);
+    }
+  }, [selectedProducts.length, isSidePanelOpen]);
+
+  // Handle Multi-Select Product Toggle
+  const handleToggleSelectProduct = (product: ProductCardData) => {
+    setSelectedProducts((prev) => {
+      const exists = prev.some((p) => p.product_id === product.product_id);
+      if (exists) {
+        logger.info('[BuyerChat:MultiSelect] Deselecting product', { productId: product.product_id });
+        if (focusedProductId === product.product_id) {
+          setFocusedProductId(null);
+        }
+        return prev.filter((p) => p.product_id !== product.product_id);
+      } else {
+        logger.info('[BuyerChat:MultiSelect] Selecting product for multi-item action', {
+          productId: product.product_id,
+          title: product.title,
+          newCount: prev.length + 1,
+        });
+        return [...prev, product];
+      }
+    });
   };
 
-  useEffect(() => {
-    logger.debug('[BuyerChat:Render] Message state updated, scrolling to bottom', {
-      messageCount: messages.length,
-      isLoading,
+  // Handle Single Item Focus
+  const handleAskAboutSingle = (product: ProductCardData) => {
+    logger.info('[BuyerChat:SingleItemDeepDive] Focusing product for AI deep-dive', {
+      productId: product.product_id,
+      title: product.title,
     });
-    scrollToBottom();
-  }, [messages, isLoading]);
+    setFocusedProductId(product.product_id);
+    setSelectedProducts([product]);
+    setInputMessage(`What are the key specs, warranty, and seller credibility for ${product.title}?`);
+    if (onSelectProductForDetails) {
+      onSelectProductForDetails(product);
+    }
+  };
 
-  const handleSendMessage = async (textToSend?: string, actionOverride?: ShoppingActionType, productIds?: string[]) => {
+  // Initialize the assistant-ui local streaming runtime
+  const runtime = useShoppingAssistantRuntime({
+    sessionId: sessionIdRef.current,
+    getActiveTurnProducts: () => activeTurnProductsRef.current,
+    getSelectedProductIds: () => selectedProducts.map((p) => p.product_id),
+    budgetCapCents,
+    zipCode,
+    developerModeEnabled,
+    selectedModel,
+    userApiKey,
+    onTurnProductsReceived: (products) => {
+      logger.info('[BuyerChat:TurnProducts] Grounded turn products bound to context', { count: products.length });
+      activeTurnProductsRef.current = products.map((p, idx) => ({
+        index: idx + 1,
+        product_id: p.product_id,
+        title: p.title,
+        price_cents: p.price_cents,
+        merchant_domain: p.merchant_domain,
+        rating: p.rating,
+        free_shipping: Boolean(p.free_shipping),
+        specs: p.specs,
+      }));
+    },
+    onComparisonReceived: (comp) => {
+      logger.info('[BuyerChat:Comparison] Comparison matrix received; updating arena drawer');
+      setActiveComparison(comp);
+      setIsSidePanelOpen(true);
+    },
+    onCartReceived: (cartData) => {
+      logger.info('[BuyerChat:Cart] Cart settlement payload received');
+      setActiveCart(cartData);
+    },
+    onError: (err) => {
+      logger.error('[BuyerChat:Runtime] Chat stream encountered error', { error: err.message });
+      setIsSubmitting(false);
+    },
+  });
+
+  const handleSendMessage = (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
-    if (!text && !actionOverride) {
-      logger.debug('[BuyerChat:Send] Aborted send due to empty text and no action override');
-      return;
-    }
+    if (!text && selectedProducts.length === 0) return;
 
-    const userMsgId = `msg-${Date.now()}`;
-    const userMsg: ChatMessage = {
-      id: userMsgId,
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-    };
+    const messageText =
+      text ||
+      (selectedProducts.length >= 2
+        ? `Compare these ${selectedProducts.length} selected products side-by-side`
+        : `Inspect selected item ${selectedProducts[0]?.title || ''}`);
 
-    logger.info('[BuyerChat:Send] User chat submission initiated', {
-      userMsgId,
-      contentLength: text.length,
-      actionOverride,
-      productIds,
-      developerModeEnabled,
-      selectedModel,
+    logger.info('[BuyerChat:Send] Submitting user message to assistant-ui thread', {
+      textLength: messageText.length,
+      selectedCount: selectedProducts.length,
+      activeTurnCount: activeTurnProductsRef.current.length,
     });
 
-    setMessages((prev) => [...prev, userMsg]);
-    if (!textToSend) setInputMessage('');
-    setIsLoading(true);
-
+    setIsSubmitting(true);
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (developerModeEnabled && userApiKey && userApiKey.trim().length > 0) {
-        headers['x-user-llm-api-key'] = userApiKey.trim();
-        logger.debug('[BuyerChat:Auth] Injected user-scoped LLM API key header');
-      }
-
-      const payload: Record<string, any> = {
-        message: text,
-        action: actionOverride,
-        product_ids: productIds,
-        budget_cap_cents: budgetCapCents,
-        zip_code: zipCode,
-      };
-
-      if (developerModeEnabled && selectedModel && selectedModel.trim().length > 0) {
-        payload.model = selectedModel.trim();
-        if (userApiKey && userApiKey.trim().length > 0) {
-          payload.user_api_key = userApiKey.trim();
-        }
-      }
-
-      logger.debug('[BuyerChat:Fetch] Dispatching POST /api/buyer/chat', {
-        action: payload.action,
-        budgetCapCents: payload.budget_cap_cents,
-        zipCode: payload.zip_code,
-        hasModelOverride: !!payload.model,
-      });
-
-      const res = await fetch('/api/buyer/chat', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        logger.warn('[BuyerChat:Fetch] HTTP error response from /api/buyer/chat', {
-          status: res.status,
-          statusText: res.statusText,
-        });
-      }
-
-      const data: ChatResponsePayload = await res.json();
-
-      logger.info('[BuyerChat:Response] Received response from /api/buyer/chat', {
-        action: data.action,
-        productCount: data.products?.length || 0,
-        hasComparison: !!data.comparison,
-        hasCart: !!data.cart,
-        hasStockReservation: !!data.stock_reservation,
-        thoughtTraceSteps: data.thought_trace?.length || 0,
-        followUpCount: data.follow_up_suggestions?.length || 0,
-      });
-
-      const assistantMsg: ChatMessage = {
-        id: `assistant-${Date.now()}`,
-        role: 'assistant',
-        content: data.markdown || 'Here is what I found for you.',
-        timestamp: new Date(),
-        action: data.action,
-        products: data.products,
-        comparison: data.comparison,
-        product_detail: data.product_detail,
-        cart: data.cart,
-        stock_reservation: data.stock_reservation,
-        thought_trace: data.thought_trace,
-        follow_up_suggestions: data.follow_up_suggestions,
-      };
-
-      setMessages((prev) => [...prev, assistantMsg]);
+      runtime.thread.append(messageText);
     } catch (err: any) {
-      logger.error('[BuyerChat:Error] Exception occurred during chat submission', {
-        error: err?.message || String(err),
-        stack: err?.stack,
-        text,
-        actionOverride,
-      });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: '⚠️ I encountered an error connecting to the shopping agent. Please try again or rephrase your request.',
-          timestamp: new Date(),
-        },
-      ]);
+      logger.warn('[BuyerChat:Send] Failed to append message directly to thread', { error: err?.message });
     } finally {
-      setIsLoading(false);
+      setIsSubmitting(false);
+      if (!textToSend) setInputMessage('');
     }
+  };
+
+  const handleCompareSelected = () => {
+    if (selectedProducts.length < 2) return;
+    const titles = selectedProducts.map((p) => p.title).join(' vs ');
+    logger.info('[BuyerChat:CompareSelected] Triggering multi-product comparison', {
+      selectedCount: selectedProducts.length,
+    });
+    handleSendMessage(`Compare these ${selectedProducts.length} products side-by-side: ${titles}`);
+  };
+
+  const handleBundleSelected = () => {
+    if (selectedProducts.length < 1) return;
+    logger.info('[BuyerChat:BundleSelected] Triggering multi-item bundling feasibility');
+    handleSendMessage(
+      `Can I buy all ${selectedProducts.length} of these items within my $${(budgetCapCents / 100).toFixed(0)} budget cap?`
+    );
   };
 
   const handleActionClick = (action: ShoppingActionType, product: ProductCardData) => {
-    logger.info('[BuyerChat:ActionClick] Product card action clicked', {
+    logger.info('[BuyerChat:ActionClick] Triggering quick product action', {
       action,
       productId: product.product_id,
       title: product.title,
-      priceCents: product.price_cents,
-      merchantDomain: product.merchant_domain,
     });
 
-    if (action === 'DETAILS') {
-      if (onSelectProductForDetails) {
-        onSelectProductForDetails(product);
-      }
-      handleSendMessage(`Show details and specs for ${product.title}`, 'DETAILS', [product.product_id]);
-    } else if (action === 'COMPARE') {
-      if (onSelectProductForCompare) {
-        onSelectProductForCompare(product);
-      }
-      handleSendMessage(`Compare ${product.title} with alternative products`, 'COMPARE', [product.product_id]);
+    if (action === 'COMPARE') {
+      handleToggleSelectProduct(product);
+      if (onSelectProductForCompare) onSelectProductForCompare(product);
+    } else if (action === 'DETAILS') {
+      handleAskAboutSingle(product);
     } else if (action === 'BUY') {
-      if (onSelectProductForBuy) {
-        onSelectProductForBuy(product);
-      }
-      handleSendMessage(`Proceed to buy ${product.title}`, 'BUY', [product.product_id]);
+      if (onSelectProductForBuy) onSelectProductForBuy(product);
+      handleSendMessage(`Buy ${product.title} for me with 2PC stock verification`);
     }
   };
 
+  const handlePurchaseConfirmedInternal = (result: { orderId: string; authorizedCents: number }) => {
+    logger.info('[BuyerChat:PurchaseConfirmed] Purchase confirmed in thread', result);
+    if (onPurchaseConfirmed) {
+      onPurchaseConfirmed(result);
+    }
+    try {
+      runtime.thread.append(
+        `🎉 **Purchase Confirmed!**\n\nOrder \`${result.orderId}\` authorized for ${formatCents(result.authorizedCents)} via vaulted PayPal token. Real-time 72-hour price drop escrow active.`
+      );
+    } catch (e) {
+      // ignore append error if already resolved
+    }
+  };
+
+  const promptSuggestions = [
+    'Find me wireless noise-cancelling headphones under $350',
+    'Compare audiophile setups side-by-side',
+    'Minimalist walnut desk workspace under $400',
+    'Can I buy these within budget with 2PC hold?',
+  ];
+
   return (
-    <div className="bg-white dark:bg-[#0b1324] border border-cyan-200/80 dark:border-cyan-500/30 rounded-2xl shadow-sm dark:shadow-2xl overflow-hidden flex flex-col h-[700px] transition-colors">
-      {/* Chat Header */}
-      <div className="px-5 py-4 border-b border-slate-200 dark:border-[#1e293b] bg-slate-50/70 dark:bg-[#070d18]/70 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
-              <Bot className="w-5 h-5" />
-            </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 border-2 border-white dark:border-[#0b1324]" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h3 className="font-bold text-slate-900 dark:text-white text-sm">
-                {showTechnicalDetails ? 'AegisPay Shopping Concierge' : 'AegisPay Shopping Assistant'}
-              </h3>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-500/15 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/30">
-                {showTechnicalDetails ? 'Channel3 Vector Grounded' : 'Live Store Search'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Promo code: <code className="text-cyan-600 dark:text-cyan-400 font-bold">PAYPAL-HACKATHON-2026</code> •{' '}
-              {showTechnicalDetails ? '2PC Stock Verified' : 'Verified In-Stock'}
-            </p>
-          </div>
-        </div>
+    <AssistantRuntimeProvider runtime={runtime}>
+      <BuyerToolCallbacksProvider
+        value={{
+          selectedProducts,
+          onToggleSelectProduct: handleToggleSelectProduct,
+          onAskAi: handleAskAboutSingle,
+          onAction: handleActionClick,
+          zipCode,
+          onViewFullCart: onOpenCart,
+          onPurchaseConfirmed: handlePurchaseConfirmedInternal,
+        }}
+      >
+        {/* Generative Tool UI Mounts */}
+        <SearchCatalogToolUI />
+        <FilterTurnProductsToolUI />
+        <CompareProductsToolUI />
+        <PrepareCheckoutToolUI />
 
-        <div className="hidden sm:flex items-center gap-3 text-xs font-mono text-slate-500 dark:text-slate-400">
-          {developerModeEnabled ? (
-            <div
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 font-sans text-[11px] font-semibold"
-              title={userApiKey ? 'User-Scoped BYOK Key Active' : 'Developer Model Override Active'}
-            >
-              <Code className="w-3.5 h-3.5 text-amber-500" />
-              <span>Dev: {selectedModel ? selectedModel.split('/')[1] || selectedModel : 'Default Deployment'}</span>
-              {userApiKey && <Key className="w-3 h-3 text-amber-600 dark:text-amber-400" />}
-            </div>
-          ) : (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800/70 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-sans text-[11px] font-medium">
-              <Sparkles className="w-3 h-3 text-cyan-500" />
-              <span>Smart Assistant</span>
-            </div>
-          )}
-          <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400 text-xs">
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-            <span>{showTechnicalDetails ? 'Escrow Protected' : 'Purchase Protected'}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Message History */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-        {messages.map((msg) => (
+        {/* Responsive Cockpit Container: Split-Screen Desktop & Mobile Drawer */}
+        <div className="flex flex-col lg:flex-row gap-4 h-[760px] bg-white/80 dark:bg-[#070d1a]/90 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden backdrop-blur-md shadow-xl transition-all">
+          {/* Main Left Panel: Conversation Thread & Input Bar */}
           <div
-            key={msg.id}
-            className={`flex gap-3 max-w-4xl ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'}`}
+            className={`flex flex-col h-full transition-all duration-300 ${
+              isSidePanelOpen ? 'lg:w-3/5 w-full' : 'w-full'
+            }`}
           >
-            {/* Avatar */}
-            <div
-              className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center text-xs ${
-                msg.role === 'user'
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30'
-              }`}
-            >
-              {msg.role === 'user' ? <User className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-            </div>
-
-            {/* Bubble Content */}
-            <div className={`space-y-3 ${msg.role === 'user' ? 'items-end' : 'items-start'} max-w-[88%]`}>
-              <div
-                className={`p-4 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-tr-xs shadow-md shadow-blue-500/10'
-                    : 'bg-slate-100 dark:bg-[#070e1c] border border-slate-200 dark:border-slate-800/80 text-slate-900 dark:text-slate-200 rounded-tl-xs shadow-xs'
-                }`}
-              >
-                {/* Markdown text rendered cleanly */}
-                <div className="whitespace-pre-line text-[13.5px] leading-relaxed">
-                  {msg.content}
-                </div>
-
-                {/* Thought Trace Accordion */}
-                {msg.thought_trace && msg.thought_trace.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/80">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextId = expandedTraceId === msg.id ? null : msg.id;
-                        logger.debug('[BuyerChat:ThoughtTrace] Toggled thought trace accordion', {
-                          messageId: msg.id,
-                          expanded: nextId !== null,
-                        });
-                        setExpandedTraceId(nextId);
-                      }}
-                      className="flex items-center gap-1.5 text-[11px] font-mono text-cyan-700 dark:text-cyan-400 hover:underline cursor-pointer"
-                    >
-                      <Sparkles className="w-3 h-3" />
-                      <span>
-                        {showTechnicalDetails
-                          ? expandedTraceId === msg.id
-                            ? 'Hide Agent Thought Trace'
-                            : 'View Agent Thought Trace'
-                          : expandedTraceId === msg.id
-                          ? 'Hide recommendation steps'
-                          : 'How we found this recommendation'}
-                      </span>
-                      {expandedTraceId === msg.id ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                    </button>
-
-                    {expandedTraceId === msg.id && (
-                      <div className="mt-2 p-2.5 rounded-lg bg-black/5 dark:bg-black/30 border border-slate-200 dark:border-slate-800 font-mono text-[11px] text-slate-600 dark:text-slate-400 space-y-1">
-                        {msg.thought_trace.map((step, idx) => (
-                          <div key={idx} className="flex items-start gap-1.5">
-                            <span className="text-cyan-500 shrink-0">›</span>
-                            <span>{step}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+            {/* Thread Header Toolbar */}
+            <div className="px-5 py-3.5 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-[#081124] dark:to-[#0a152e] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
+                    <Bot className="w-4 h-4" />
                   </div>
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                      {showTechnicalDetails ? 'AegisPay Autonomous Concierge' : 'AegisPay Shopping Assistant'}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-[10px] font-mono border border-cyan-500/30">
+                      Mastra SSE
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-2">
+                    <span>Model: {selectedModel.split('/').pop()}</span>
+                    <span>•</span>
+                    <span>Cap: {formatCents(budgetCapCents)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons: Toggle Cockpit Side Panel */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all border flex items-center gap-1.5 cursor-pointer ${
+                    isSidePanelOpen
+                      ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200 border-cyan-500'
+                      : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-cyan-500/40'
+                  }`}
+                  title={isSidePanelOpen ? 'Collapse side cockpit panel' : 'Expand side comparison arena'}
+                >
+                  <Columns className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">
+                    {isSidePanelOpen ? 'Hide Arena' : 'Side-by-Side Arena'}
+                  </span>
+                  {selectedProducts.length > 0 && (
+                    <span className="w-4 h-4 rounded-full bg-cyan-600 text-white text-[10px] flex items-center justify-center font-bold">
+                      {selectedProducts.length}
+                    </span>
+                  )}
+                </button>
+
+                {onOpenCart && (
+                  <button
+                    type="button"
+                    onClick={onOpenCart}
+                    className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-cyan-500 border border-slate-200 dark:border-slate-700 transition-colors"
+                    title="Open Unified Cart"
+                  >
+                    <ShoppingBag className="w-4 h-4" />
+                  </button>
                 )}
               </div>
+            </div>
 
-              {/* Generative Product Cards Grid */}
-              {msg.products && msg.products.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-1 w-full">
-                  {msg.products.map((product) => (
-                    <ProductCard
-                      key={product.product_id}
-                      product={product}
-                      onAction={(act) => handleActionClick(act, product)}
-                    />
-                  ))}
+            {/* assistant-ui Thread Messages Viewport */}
+            <ThreadPrimitive.Root className="flex flex-col flex-1 overflow-hidden">
+              <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto px-5 py-4 space-y-4 scroll-smooth">
+                <ThreadPrimitive.Messages
+                  components={{
+                    Message: () => (
+                      <MessagePrimitive.Root className="flex flex-col gap-2">
+                        {/* User Message Rendering */}
+                        <MessagePrimitive.If user>
+                          <div className="flex items-start justify-end gap-2.5 max-w-2xl ml-auto">
+                            <div className="flex flex-col items-end gap-1">
+                              <div className="px-4 py-2.5 rounded-2xl rounded-tr-xs bg-gradient-to-r from-cyan-600 to-blue-600 text-white text-xs leading-relaxed shadow-xs">
+                                <MessagePrimitive.Parts
+                                  components={{
+                                    Text: () => (
+                                      <MarkdownTextPrimitive className="prose dark:prose-invert max-w-none text-xs text-white" />
+                                    ),
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0 mt-0.5">
+                              <User className="w-3.5 h-3.5 text-slate-700 dark:text-slate-200" />
+                            </div>
+                          </div>
+                        </MessagePrimitive.If>
+
+                        {/* Assistant Message Rendering */}
+                        <MessagePrimitive.If assistant>
+                          <div className="flex items-start gap-2.5 max-w-full">
+                            <div className="w-7 h-7 rounded-full bg-cyan-600/20 border border-cyan-500/40 flex items-center justify-center shrink-0 mt-0.5">
+                              <Bot className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                            </div>
+                            <div className="flex flex-col gap-2 flex-1 overflow-hidden">
+                              <div className="px-4 py-3 rounded-2xl rounded-tl-xs bg-slate-100/80 dark:bg-[#070f20] border border-slate-200 dark:border-slate-800/80 text-xs text-slate-800 dark:text-slate-200 leading-relaxed shadow-2xs">
+                                <MessagePrimitive.Parts
+                                  components={{
+                                    Text: () => (
+                                      <div className="prose dark:prose-invert max-w-none text-xs text-slate-800 dark:text-slate-200 leading-relaxed space-y-2">
+                                        <MarkdownTextPrimitive />
+                                      </div>
+                                    ),
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        </MessagePrimitive.If>
+                      </MessagePrimitive.Root>
+                    ),
+                  }}
+                />
+                <div ref={viewportEndRef} />
+              </ThreadPrimitive.Viewport>
+
+              {/* Follow-up Quick Suggestion Chips */}
+              <div className="px-5 py-2 bg-slate-50/50 dark:bg-[#080f20]/50 border-t border-slate-100 dark:border-slate-800/60 flex flex-wrap gap-1.5 shrink-0">
+                {promptSuggestions.map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSendMessage(suggestion)}
+                    className="px-2.5 py-1 rounded-full bg-white dark:bg-slate-800 hover:bg-cyan-500/10 text-slate-600 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[11px] font-medium transition-all border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1"
+                  >
+                    <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
+                    <span>{suggestion}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Phase 3 Interactive Multi-Chip ChatInputBar */}
+              <div className="p-3 bg-white dark:bg-[#081124] border-t border-slate-200 dark:border-slate-800 shrink-0">
+                <ChatInputBar
+                  inputMessage={inputMessage}
+                  onInputChange={setInputMessage}
+                  onSubmit={() => handleSendMessage()}
+                  isLoading={isSubmitting}
+                  selectedProducts={selectedProducts}
+                  onRemoveSelectedProduct={(productId) => {
+                    logger.info('[BuyerChat:RemoveChip] Removing selected product chip', {
+                      productId,
+                    });
+                    setSelectedProducts((prev) => prev.filter((p) => p.product_id !== productId));
+                    if (focusedProductId === productId) {
+                      setFocusedProductId(null);
+                    }
+                  }}
+                  onClearAllSelected={() => {
+                    logger.info('[BuyerChat:ClearAll] Cleared all selected product chips');
+                    setSelectedProducts([]);
+                    setFocusedProductId(null);
+                  }}
+                  onCompareSelected={handleCompareSelected}
+                  onBundleSelected={handleBundleSelected}
+                  onAskAboutSingle={handleAskAboutSingle}
+                  budgetCapCents={budgetCapCents}
+                />
+              </div>
+            </ThreadPrimitive.Root>
+          </div>
+
+          {/* Right Panel: Split-Screen Cockpit Arena / Comparison / Cart Drawer on Desktop */}
+          {isSidePanelOpen && (
+            <div className="hidden lg:flex lg:w-2/5 flex-col h-full border-l border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-[#070e1c]/80 p-4 overflow-y-auto space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
+                  <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                  <span>Cockpit Decision Arena</span>
                 </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setIsSidePanelOpen(false)}
+                  className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  title="Close side panel"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
 
-              {/* Side-by-side Comparison Matrix Card */}
-              {msg.comparison && (
-                <div className="w-full pt-1">
-                  <ComparisonMatrixCard
-                    matrix={msg.comparison}
-                    onAction={(act, prod) => handleActionClick(act, prod)}
+              {/* Active Multi-Product Arena or Selected Contenders */}
+              {selectedProducts.length >= 2 ? (
+                <div className="space-y-4">
+                  <BattleArena
+                    contenders={selectedProducts}
+                    winner={selectedProducts[0]}
+                    battleReport="Active contender comparison from your multi-chip selection. Real-time referee score and head-to-head metrics displayed."
+                    onSelectWinner={(winProd) => handleActionClick('BUY', winProd)}
                   />
+                  <button
+                    type="button"
+                    onClick={handleCompareSelected}
+                    className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Run AI Spec Comparison in Stream</span>
+                  </button>
                 </div>
-              )}
-
-              {/* Pre-Purchase Confirmation Card for BUY actions */}
-              {msg.cart && (
-                <div className="w-full pt-2">
+              ) : activeComparison ? (
+                <div className="space-y-4">
+                  <BattleArena
+                    contenders={activeComparison.products || []}
+                    winner={(activeComparison.products || []).find((p) => p.product_id === activeComparison.winner_product_id) || null}
+                    battleReport={activeComparison.rationale}
+                    onSelectWinner={(winProd) => handleActionClick('BUY', winProd)}
+                  />
+                  <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
+                </div>
+              ) : activeCart ? (
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                    <span>Two-Phase Commit (2PC) Hold Active</span>
+                  </div>
                   <PurchaseConfirmationCard
-                    cart={msg.cart}
+                    cart={activeCart}
                     zipCode={zipCode}
                     onViewFullCart={onOpenCart}
-                    onConfirmPurchase={(result) => {
-                      logger.info('[BuyerChat:PurchaseConfirmed] PurchaseConfirmationCard authorized order', {
-                        orderId: result.orderId,
-                        authorizedCents: result.authorizedCents,
-                      });
-                      if (onPurchaseConfirmed) {
-                        onPurchaseConfirmed({
-                          orderId: result.orderId,
-                          authorizedCents: result.authorizedCents,
-                        });
-                      }
-                      const confMsg: ChatMessage = {
-                        id: `conf-${Date.now()}`,
-                        role: 'assistant',
-                        content: `🎉 **Purchase Successfully Confirmed!**\n\nYour order \`${result.orderId}\` has been authorized via your vaulted PayPal payment token. AegisPay is actively monitoring prices for the next 72 hours under automated escrow protection.`,
-                        timestamp: new Date(),
-                      };
-                      setMessages((prev) => [...prev, confMsg]);
-                    }}
+                    onConfirmPurchase={handlePurchaseConfirmedInternal}
                   />
                 </div>
-              )}
-
-              {/* Follow-up Suggestion Chips */}
-              {msg.follow_up_suggestions && msg.follow_up_suggestions.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {msg.follow_up_suggestions.map((suggestion, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => {
-                        logger.info('[BuyerChat:FollowUp] Follow-up suggestion chip selected', { suggestion, idx });
-                        handleSendMessage(suggestion);
-                      }}
-                      className="text-xs px-2.5 py-1 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/25 transition-all text-left flex items-center gap-1 hover:scale-102"
-                    >
-                      <Tag className="w-2.5 h-2.5 text-cyan-500" />
-                      <span>{suggestion}</span>
-                    </button>
-                  ))}
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500 dark:text-slate-400 space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+                    <Scale className="w-6 h-6" />
+                  </div>
+                  <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                    No Contenders Selected
+                  </h4>
+                  <p className="text-xs max-w-xs leading-relaxed">
+                    Click <strong>[⚖️ Select]</strong> on two or more product cards to compare specs side-by-side in this live arena.
+                  </p>
                 </div>
               )}
             </div>
-          </div>
-        ))}
-
-        {/* Loading Indicator */}
-        {isLoading && (
-          <div className="flex gap-3 max-w-xl mr-auto items-center text-xs text-slate-500 dark:text-slate-400">
-            <div className="w-8 h-8 rounded-lg bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30 flex items-center justify-center animate-pulse">
-              <Bot className="w-4 h-4" />
-            </div>
-            <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-[#070e1c] border border-slate-200 dark:border-slate-800 text-xs flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:-0.3s]" />
-              <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:-0.15s]" />
-              <span className="w-2 h-2 rounded-full bg-cyan-500 animate-bounce" />
-              <span className="font-mono text-[11px] text-cyan-700 dark:text-cyan-300 ml-1">
-                Querying Channel3 & verifying stock...
-              </span>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input Bar */}
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          handleSendMessage();
-        }}
-        className="p-3 sm:p-4 border-t border-slate-200 dark:border-[#1e293b] bg-slate-50/70 dark:bg-[#070d18]/70"
-      >
-        <div className="relative flex items-center">
-          <input
-            type="text"
-            value={inputMessage}
-            onChange={(e) => setInputMessage(e.target.value)}
-            placeholder="Ask about products, compare specs, or say 'Buy for me'..."
-            disabled={isLoading}
-            className="w-full pl-4 pr-24 py-3 bg-white dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans"
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !inputMessage.trim()}
-            className="absolute right-1.5 px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40"
-          >
-            <span>Send</span>
-            <Send className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-// --- Product Card Subcomponent ---
-
-interface ProductCardProps {
-  product: ProductCardData;
-  onAction: (action: ShoppingActionType) => void;
-}
-
-export function ProductCard({ product, onAction }: ProductCardProps) {
-  const netCents = product.price_cents - (product.commission_rebate_cents || 0);
-
-  return (
-    <div className="bg-white dark:bg-[#080f20] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs hover:shadow-md hover:border-cyan-500/40 transition-all flex flex-col group">
-      {/* Product Image & Badges */}
-      <div className="relative aspect-4/3 w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={product.cleaned_image_url || product.image_url}
-          alt={product.title}
-          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
-        />
-
-        {/* Badges Overlay */}
-        <div className="absolute top-2 left-2 flex flex-col gap-1">
-          {product.free_shipping && (
-            <span className="px-2 py-0.5 rounded-md bg-emerald-500/90 text-white text-[10px] font-bold shadow-xs flex items-center gap-1 backdrop-blur-xs">
-              <Truck className="w-2.5 h-2.5" /> Free Shipping
-            </span>
-          )}
-          {product.commission_rebate_cents > 0 && (
-            <span className="px-2 py-0.5 rounded-md bg-cyan-600/90 text-white text-[10px] font-bold shadow-xs backdrop-blur-xs">
-              Rebate: -{formatCents(product.commission_rebate_cents)}
-            </span>
           )}
         </div>
-
-        <div className="absolute top-2 right-2">
-          <span className="px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-mono backdrop-blur-xs flex items-center gap-1">
-            <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
-            {product.merchant_credibility_score}%
-          </span>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
-        <div className="space-y-1">
-          <div className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400">
-            {product.merchant_domain}
-          </div>
-          <h4 className="font-bold text-slate-900 dark:text-white text-xs line-clamp-2 leading-snug">
-            {product.title}
-          </h4>
-        </div>
-
-        {/* Pricing */}
-        <div className="pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-baseline justify-between">
-          <div>
-            <div className="text-sm font-black text-slate-900 dark:text-white">
-              {formatCents(netCents)}
-            </div>
-            {product.commission_rebate_cents > 0 && (
-              <div className="text-[10px] text-slate-500 line-through">
-                {formatCents(product.price_cents)}
-              </div>
-            )}
-          </div>
-
-          <div className="text-right text-[10px] text-slate-500 dark:text-slate-400">
-            <span>★ {product.rating}</span>
-            <span className="text-slate-400 ml-1">({product.review_count})</span>
-          </div>
-        </div>
-
-        {/* Action Buttons: [Details], [Compare], [Buy for Me] */}
-        <div className="grid grid-cols-3 gap-1 pt-1">
-          <button
-            type="button"
-            onClick={() => onAction('DETAILS')}
-            className="px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/10 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[11px] font-semibold transition-all border border-slate-200 dark:border-slate-700 text-center"
-          >
-            Details
-          </button>
-          <button
-            type="button"
-            onClick={() => onAction('COMPARE')}
-            className="px-2 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/10 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[11px] font-semibold transition-all border border-slate-200 dark:border-slate-700 text-center"
-          >
-            Compare
-          </button>
-          <button
-            type="button"
-            onClick={() => onAction('BUY')}
-            className="px-2 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-[11px] font-bold transition-all shadow-xs text-center flex items-center justify-center gap-0.5"
-          >
-            <span>Buy</span>
-            <ArrowRight className="w-2.5 h-2.5" />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// --- Side-by-side Comparison Matrix Subcomponent ---
-
-interface ComparisonMatrixCardProps {
-  matrix: ComparisonMatrix;
-  onAction: (action: ShoppingActionType, product: ProductCardData) => void;
-}
-
-export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardProps) {
-  const products = matrix.products || [];
-
-  return (
-    <div className="bg-white dark:bg-[#070e1c] border border-cyan-500/30 rounded-xl overflow-hidden shadow-sm">
-      <div className="px-4 py-3 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-b border-cyan-500/20 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-          <h4 className="font-bold text-xs text-slate-900 dark:text-white uppercase tracking-wider">
-            Side-by-Side Comparison Matrix
-          </h4>
-        </div>
-        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
-          {products.length} Products Evaluated
-        </span>
-      </div>
-
-      {matrix.rationale && (
-        <div className="p-3 bg-cyan-50/50 dark:bg-cyan-950/20 border-b border-cyan-200/50 dark:border-cyan-500/20 text-xs text-slate-700 dark:text-slate-300 flex items-start gap-2">
-          <Sparkles className="w-4 h-4 text-cyan-600 shrink-0 mt-0.5" />
-          <div>
-            <strong className="text-cyan-700 dark:text-cyan-300">Winning Rationale: </strong>
-            <span>{matrix.rationale}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Comparison Table */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0a1222]">
-              <th className="py-2.5 px-3 font-semibold text-slate-500 dark:text-slate-400 w-36">
-                Feature / Spec
-              </th>
-              {products.map((p) => {
-                const isWinner = p.product_id === matrix.winner_product_id;
-                return (
-                  <th
-                    key={p.product_id}
-                    className={`py-2.5 px-3 font-bold text-slate-900 dark:text-white min-w-[180px] ${
-                      isWinner ? 'bg-cyan-500/10 border-l border-r border-cyan-500/30' : ''
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="line-clamp-1">{p.title}</span>
-                      {isWinner && (
-                        <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[9px] font-bold border border-amber-500/40 shrink-0">
-                          Top Pick
-                        </span>
-                      )}
-                    </div>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
-            {matrix.rows.map((row, idx) => (
-              <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
-                <td className="py-2 px-3 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
-                  {row.attribute}
-                </td>
-                {products.map((p) => {
-                  const val = row.values[p.product_id] || '-';
-                  const isHighlighted = row.highlighted_product_id === p.product_id;
-                  const isWinner = p.product_id === matrix.winner_product_id;
-                  return (
-                    <td
-                      key={p.product_id}
-                      className={`py-2 px-3 text-[11.5px] ${
-                        isHighlighted
-                          ? 'font-bold text-cyan-600 dark:text-cyan-400'
-                          : 'text-slate-700 dark:text-slate-300'
-                      } ${isWinner ? 'bg-cyan-500/5 border-l border-r border-cyan-500/20' : ''}`}
-                    >
-                      {val}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#0a1222]">
-              <td className="py-2.5 px-3 font-semibold text-slate-500 dark:text-slate-400 text-[11px]">
-                Instant Action
-              </td>
-              {products.map((p) => {
-                const isWinner = p.product_id === matrix.winner_product_id;
-                return (
-                  <td
-                    key={p.product_id}
-                    className={`py-2.5 px-3 ${
-                      isWinner ? 'bg-cyan-500/10 border-l border-r border-cyan-500/30' : ''
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => onAction('BUY', p)}
-                      className={`w-full py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1 ${
-                        isWinner
-                          ? 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white'
-                          : 'bg-slate-200 dark:bg-slate-800 hover:bg-cyan-500/20 text-slate-800 dark:text-slate-200'
-                      }`}
-                    >
-                      <span>Buy for Me</span>
-                      <ArrowRight className="w-3 h-3" />
-                    </button>
-                  </td>
-                );
-              })}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
+      </BuyerToolCallbacksProvider>
+    </AssistantRuntimeProvider>
   );
 }
