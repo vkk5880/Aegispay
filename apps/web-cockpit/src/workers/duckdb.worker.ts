@@ -1,5 +1,8 @@
 import * as duckdb from '@duckdb/duckdb-wasm';
+import { createLogger, type Logger } from '@aegispay/shared-types';
 import { translateSsrmRequestToSql } from '../lib/ag-grid/DuckDbServerSideDatasource.js';
+
+const logger: Logger = createLogger('Worker:DuckDB');
 
 export interface AnonymizedDisputeRecord {
   paypal_dispute_id: string;
@@ -76,53 +79,64 @@ export interface DisputeTierAggregationResult {
  */
 export function validateWorkerMessage(message: unknown): message is DuckDBWorkerMessage {
   if (!message || typeof message !== 'object') {
+    logger.warn('[duckdb.worker] validateWorkerMessage rejected: message is null, undefined, or non-object');
     return false;
   }
 
   const msg = message as Record<string, any>;
 
   if (typeof msg.id !== 'string' || msg.id.trim() === '') {
+    logger.warn('[duckdb.worker] validateWorkerMessage rejected: missing or empty message.id');
     return false;
   }
 
   const validActions: DuckDBWorkerAction[] = ['QUERY', 'INGEST', 'INGEST_RECORD_BATCH', 'AGGREGATE', 'CLEAR_CACHE', 'SSRM_QUERY'];
   if (!validActions.includes(msg.action)) {
+    logger.warn('[duckdb.worker] validateWorkerMessage rejected: invalid action', { action: msg.action });
     return false;
   }
 
   if (msg.action === 'SSRM_QUERY') {
     if (!msg.payload || typeof msg.payload !== 'object' || !msg.payload.request || typeof msg.payload.request !== 'object') {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: invalid SSRM_QUERY payload');
       return false;
     }
   }
 
   if (msg.action === 'QUERY') {
     if (!msg.payload || typeof msg.payload !== 'object') {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: missing QUERY payload');
       return false;
     }
     if (typeof msg.payload.query !== 'string' || msg.payload.query.trim() === '') {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: missing or empty query string');
       return false;
     }
     if (msg.payload.params !== undefined && !Array.isArray(msg.payload.params)) {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: query params must be an array');
       return false;
     }
   }
 
   if (msg.action === 'INGEST' || msg.action === 'INGEST_RECORD_BATCH') {
     if (!msg.payload || typeof msg.payload !== 'object' || !Array.isArray(msg.payload.records)) {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: records must be an array for INGEST');
       return false;
     }
   }
 
   if (msg.action === 'AGGREGATE') {
     if (msg.payload !== undefined && (typeof msg.payload !== 'object' || msg.payload === null)) {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: invalid AGGREGATE payload');
       return false;
     }
     if (msg.payload?.records !== undefined && !Array.isArray(msg.payload.records)) {
+      logger.warn('[duckdb.worker] validateWorkerMessage rejected: AGGREGATE records must be an array');
       return false;
     }
   }
 
+  logger.debug('[duckdb.worker] validateWorkerMessage validated successfully', { id: msg.id, action: msg.action });
   return true;
 }
 
@@ -176,6 +190,7 @@ export async function fetchDisputeDossier(disputeId: string, apiBaseUrl = ''): P
  */
 export function validateReadOnlySelectQuery(query: string): boolean {
   if (!query || typeof query !== 'string') {
+    logger.warn('[duckdb.worker] validateReadOnlySelectQuery rejected: query is null or non-string');
     return false;
   }
 
@@ -186,6 +201,7 @@ export function validateReadOnlySelectQuery(query: string): boolean {
     .trim();
 
   if (!sanitized) {
+    logger.warn('[duckdb.worker] validateReadOnlySelectQuery rejected: empty sanitized query');
     return false;
   }
 
@@ -193,17 +209,22 @@ export function validateReadOnlySelectQuery(query: string): boolean {
   // If a semicolon exists before the end of the query and is followed by any non-whitespace, reject.
   const withoutTrailingSemicolons = sanitized.replace(/;+\s*$/, '');
   if (withoutTrailingSemicolons.includes(';')) {
+    logger.warn('[duckdb.worker] validateReadOnlySelectQuery rejected: stacked query / semicolon detected', {
+      sanitized: withoutTrailingSemicolons,
+    });
     return false;
   }
 
   // Check for unbalanced string quotes which can break parser state
   const singleQuotes = (sanitized.match(/'/g) || []).length;
   if (singleQuotes % 2 !== 0) {
+    logger.warn('[duckdb.worker] validateReadOnlySelectQuery rejected: unbalanced single quotes');
     return false;
   }
 
   // Must start with SELECT or WITH (case-insensitive)
   if (!/^(SELECT|WITH)\b/i.test(withoutTrailingSemicolons)) {
+    logger.warn('[duckdb.worker] validateReadOnlySelectQuery rejected: query does not start with SELECT or WITH');
     return false;
   }
 
@@ -220,10 +241,14 @@ export function validateReadOnlySelectQuery(query: string): boolean {
 
   for (const regex of forbiddenKeywords) {
     if (regex.test(withoutTrailingSemicolons)) {
+      logger.warn('[duckdb.worker] validateReadOnlySelectQuery rejected: matched forbidden keyword or I/O function', {
+        pattern: regex.toString(),
+      });
       return false;
     }
   }
 
+  logger.debug('[duckdb.worker] validateReadOnlySelectQuery approved query');
   return true;
 }
 
@@ -296,13 +321,19 @@ async function evictOldestIfNeeded(): Promise<void> {
   while (statementCache.size >= currentMaxCacheSize) {
     const oldestKey = statementCache.keys().next().value;
     if (!oldestKey) break;
+    logger.debug('[duckdb.worker] Evicting oldest prepared statement from LRU cache', {
+      key: oldestKey,
+      currentCacheSize: statementCache.size,
+    });
     const stmt = statementCache.get(oldestKey);
     statementCache.delete(oldestKey);
     if (stmt) {
       try {
         await stmt.close();
-      } catch {
-        // ignore close error during eviction
+      } catch (err: any) {
+        logger.warn('[duckdb.worker] Failed to close prepared statement during eviction', {
+          error: err?.message,
+        });
       }
     }
   }
@@ -312,16 +343,28 @@ async function evictOldestIfNeeded(): Promise<void> {
  * Clears the prepared statement cache and closes each prepared statement.
  */
 export async function clearStatementCache(): Promise<void> {
+  logger.info('[duckdb.worker] Clearing prepared statement cache', {
+    cachedStatementsCount: statementCache.size,
+  });
   const closePromises: Promise<void>[] = [];
   for (const stmt of statementCache.values()) {
     try {
-      closePromises.push(stmt.close().catch(() => {}));
-    } catch {
-      // ignore close failures
+      closePromises.push(
+        stmt.close().catch((err) => {
+          logger.warn('[duckdb.worker] Error closing statement during clearStatementCache', {
+            error: err?.message,
+          });
+        })
+      );
+    } catch (err: any) {
+      logger.warn('[duckdb.worker] Exception closing statement during clearStatementCache', {
+        error: err?.message,
+      });
     }
   }
   await Promise.all(closePromises);
   statementCache.clear();
+  logger.info('[duckdb.worker] Prepared statement cache cleared');
 }
 
 /**
@@ -399,15 +442,21 @@ export function computeDisputeAnalyticsFallback(
 }
 
 export async function initDuckDbWorker() {
+  logger.info('[duckdb.worker] Initializing DuckDB-WASM Worker and bundle selection');
   const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
 
   const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+  logger.debug('[duckdb.worker] DuckDB bundle selected', {
+    mainModule: bundle.mainModule,
+    pthreadWorker: bundle.pthreadWorker,
+  });
 
   const worker = new Worker(bundle.mainWorker!);
-  const logger = new duckdb.ConsoleLogger();
-  const db = new duckdb.AsyncDuckDB(logger, worker);
+  const duckLogger = new duckdb.ConsoleLogger();
+  const db = new duckdb.AsyncDuckDB(duckLogger, worker);
 
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  logger.info('[duckdb.worker] DuckDB-WASM database instantiated successfully');
 
   return db;
 }
@@ -422,26 +471,49 @@ export async function queryAnonymizedFinancialLedger(
   query: string,
   params: any[] = []
 ) {
+  logger.info('[duckdb.worker] Executing queryAnonymizedFinancialLedger', {
+    queryPreview: query.slice(0, 100),
+    paramsCount: params.length,
+  });
+
   if (!validateReadOnlySelectQuery(query)) {
+    logger.error('[duckdb.worker] Query rejected by validateReadOnlySelectQuery', { query });
     throw new Error('Query rejected: Only read-only SELECT queries are permitted');
   }
 
+  const startTime = Date.now();
   const conn = await db.connect();
 
   try {
     let stmt = statementCache.get(query);
     if (!stmt) {
+      logger.debug('[duckdb.worker] Statement cache miss, compiling new prepared statement');
       await evictOldestIfNeeded();
       stmt = await conn.prepare(query);
       statementCache.set(query, stmt);
     } else {
+      logger.debug('[duckdb.worker] Statement cache hit, reusing prepared statement');
       // Re-insert to refresh LRU order
       statementCache.delete(query);
       statementCache.set(query, stmt);
     }
 
     const result = await stmt.query(...params);
-    return result.toArray();
+    const rows = result.toArray();
+    const durationMs = Date.now() - startTime;
+    logger.info('[duckdb.worker] Query executed successfully via DuckDB-WASM', {
+      durationMs,
+      rowsReturned: rows.length,
+    });
+    return rows;
+  } catch (err: any) {
+    const durationMs = Date.now() - startTime;
+    logger.error('[duckdb.worker] Query execution failed in DuckDB-WASM', {
+      error: err?.message,
+      stack: err?.stack,
+      durationMs,
+    });
+    throw err;
   } finally {
     await conn.close();
   }
@@ -458,16 +530,29 @@ export async function queryFinancialLedgerWithFallback(
   fallbackRecords: AnonymizedDisputeRecord[] = []
 ): Promise<{ result: any[]; fallback: boolean }> {
   if (!validateReadOnlySelectQuery(query)) {
+    logger.error('[duckdb.worker] queryFinancialLedgerWithFallback rejected: non-read-only query', { query });
     throw new Error('Query rejected: Only read-only SELECT queries are permitted');
   }
 
-  if (db && isWasmSupported()) {
+  const wasmOk = isWasmSupported();
+  logger.debug('[duckdb.worker] queryFinancialLedgerWithFallback assessing execution path', {
+    hasDb: Boolean(db),
+    wasmSupported: wasmOk,
+  });
+
+  if (db && wasmOk) {
     try {
       const rows = await queryAnonymizedFinancialLedger(db, query, params);
       return { result: rows, fallback: false };
-    } catch {
+    } catch (err: any) {
+      logger.warn('[duckdb.worker] WASM query execution failed, falling back to pure-TS aggregation', {
+        error: err?.message,
+        stack: err?.stack,
+      });
       // If WASM execution fails (e.g. heap exhaustion or runtime panic), fallback gracefully
     }
+  } else {
+    logger.info('[duckdb.worker] Running pure-TS in-memory aggregation fallback (WASM unavailable or db null)');
   }
 
   // Graceful pure TS fallback
@@ -485,6 +570,7 @@ export async function handleWorkerMessage(
   cachedRecords: AnonymizedDisputeRecord[] = []
 ): Promise<DuckDBWorkerResponse> {
   if (!validateWorkerMessage(message)) {
+    logger.warn('[duckdb.worker] handleWorkerMessage failed contract validation', { message });
     return {
       id: typeof (message as any)?.id === 'string' ? (message as any).id : 'unknown',
       success: false,
@@ -494,37 +580,60 @@ export async function handleWorkerMessage(
   }
 
   const startTime = Date.now();
+  logger.info('[duckdb.worker] handleWorkerMessage processing action', {
+    id: message.id,
+    action: message.action,
+  });
 
   try {
     switch (message.action) {
       case 'QUERY': {
         const payload = message.payload as DuckDBQueryPayload;
+        logger.debug('[duckdb.worker] Action QUERY details', { id: message.id, query: payload.query });
         const res = await queryFinancialLedgerWithFallback(
           db,
           payload.query,
           payload.params || [],
           cachedRecords
         );
+        const elapsed = Date.now() - startTime;
+        logger.info('[duckdb.worker] Action QUERY completed', {
+          id: message.id,
+          fallback: res.fallback,
+          rows: res.result.length,
+          executionTimeMs: elapsed,
+        });
         return {
           id: message.id,
           action: message.action,
           success: true,
           data: res.result,
           fallback: res.fallback,
-          executionTimeMs: Date.now() - startTime,
+          executionTimeMs: elapsed,
         };
       }
       case 'AGGREGATE': {
         const payload = (message.payload || {}) as DuckDBAggregatePayload;
         const records = payload.records || cachedRecords;
+        logger.debug('[duckdb.worker] Action AGGREGATE details', {
+          id: message.id,
+          dimension: payload.dimension,
+          recordsCount: records.length,
+        });
         const aggResult = computeDisputeAnalyticsFallback(records, payload.dimension);
+        const elapsed = Date.now() - startTime;
+        logger.info('[duckdb.worker] Action AGGREGATE completed', {
+          id: message.id,
+          categories: aggResult.length,
+          executionTimeMs: elapsed,
+        });
         return {
           id: message.id,
           action: message.action,
           success: true,
           data: aggResult,
           fallback: true,
-          executionTimeMs: Date.now() - startTime,
+          executionTimeMs: elapsed,
         };
       }
       case 'SSRM_QUERY': {
@@ -532,21 +641,37 @@ export async function handleWorkerMessage(
         const request = payload.request;
         const tableName = payload.tableName || 'dispute_arbitrations';
         const { dataQuery, countQuery, params } = translateSsrmRequestToSql(request, tableName);
+        logger.debug('[duckdb.worker] Action SSRM_QUERY SQL translated', {
+          id: message.id,
+          tableName,
+          dataQuery,
+          countQuery,
+        });
 
         if (db && isWasmSupported()) {
           try {
             const rows = await queryAnonymizedFinancialLedger(db, dataQuery, params);
             const countRows = await queryAnonymizedFinancialLedger(db, countQuery, params);
             const totalCount = countRows?.[0]?.total_count ?? (countRows?.[0]?.count ? Number(countRows[0].count) : rows.length);
+            const elapsed = Date.now() - startTime;
+            logger.info('[duckdb.worker] Action SSRM_QUERY completed via WASM', {
+              id: message.id,
+              rowCount: totalCount,
+              returnedRows: rows.length,
+              executionTimeMs: elapsed,
+            });
             return {
               id: message.id,
               action: message.action,
               success: true,
               data: { rowData: rows, rowCount: totalCount },
               fallback: false,
-              executionTimeMs: Date.now() - startTime,
+              executionTimeMs: elapsed,
             };
-          } catch {
+          } catch (err: any) {
+            logger.warn('[duckdb.worker] SSRM_QUERY failed in WASM, falling back to sliced memory array', {
+              error: err?.message,
+            });
             // Fall through to fallback
           }
         }
@@ -555,38 +680,64 @@ export async function handleWorkerMessage(
         const start = request.startRow ?? 0;
         const end = request.endRow ?? (start + 100);
         const sliced = cachedRecords.slice(start, end);
+        const elapsed = Date.now() - startTime;
+        logger.info('[duckdb.worker] Action SSRM_QUERY completed via in-memory fallback', {
+          id: message.id,
+          start,
+          end,
+          slicedCount: sliced.length,
+          totalCached: cachedRecords.length,
+          executionTimeMs: elapsed,
+        });
         return {
           id: message.id,
           action: message.action,
           success: true,
           data: { rowData: sliced, rowCount: cachedRecords.length },
           fallback: true,
-          executionTimeMs: Date.now() - startTime,
+          executionTimeMs: elapsed,
         };
       }
       case 'CLEAR_CACHE': {
+        logger.info('[duckdb.worker] Action CLEAR_CACHE invoked', { id: message.id });
         await clearStatementCache();
+        const elapsed = Date.now() - startTime;
         return {
           id: message.id,
           action: message.action,
           success: true,
           data: { cleared: true },
-          executionTimeMs: Date.now() - startTime,
+          executionTimeMs: elapsed,
         };
       }
       case 'INGEST':
       case 'INGEST_RECORD_BATCH': {
         const payload = message.payload as DuckDBIngestPayload;
+        logger.info('[duckdb.worker] Ingesting record batch into worker state', {
+          id: message.id,
+          recordsCount: payload.records.length,
+          action: message.action,
+        });
         const projected = payload.records.map(projectOptimizedDisputeRecord);
+        const elapsed = Date.now() - startTime;
+        logger.info('[duckdb.worker] Record batch projection complete', {
+          id: message.id,
+          projectedCount: projected.length,
+          executionTimeMs: elapsed,
+        });
         return {
           id: message.id,
           action: message.action,
           success: true,
           data: { ingested_count: projected.length },
-          executionTimeMs: Date.now() - startTime,
+          executionTimeMs: elapsed,
         };
       }
       default: {
+        logger.warn('[duckdb.worker] Unhandled worker action received', {
+          id: message.id,
+          action: (message as any).action,
+        });
         return {
           id: message.id,
           success: false,
@@ -596,6 +747,14 @@ export async function handleWorkerMessage(
       }
     }
   } catch (err: any) {
+    const elapsed = Date.now() - startTime;
+    logger.error('[duckdb.worker] Worker message processing encountered uncaught error', {
+      id: message.id,
+      action: message.action,
+      error: err?.message,
+      stack: err?.stack,
+      executionTimeMs: elapsed,
+    });
     return {
       id: message.id,
       action: message.action,

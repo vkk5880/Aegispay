@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   enableDevValidations,
   type ColDef,
@@ -23,6 +23,7 @@ import { CarrierTrackerCellRenderer } from '@/components/ag-grid/renderers/Carri
 import { MonetarySplitCellRenderer } from '@/components/ag-grid/renderers/MonetarySplitCellRenderer';
 import { SlaCountdownCellRenderer } from '@/components/ag-grid/renderers/SlaCountdownCellRenderer';
 import { useRealtimeGridStream } from '@/hooks/useRealtimeGridStream';
+import { webLogger as logger } from '@/lib/logger';
 import {
   Download,
   FileSpreadsheet,
@@ -188,12 +189,31 @@ export function DataGrid({
     autoSimulateIntervalMs: 0,
   });
 
+  useEffect(() => {
+    logger.info('[DataGrid] Mounted DataGrid component', {
+      rowCount: rows.length,
+      columnsCount: columns.length,
+      rowModelType,
+      isPivotMode,
+      density,
+    });
+    return () => {
+      logger.info('[DataGrid] Unmounting DataGrid component');
+    };
+  }, []);
+
   const onGridReady = useCallback((params: GridReadyEvent) => {
+    logger.info('[DataGrid] onGridReady fired', {
+      rowModelType,
+      hasServerSideDatasource: Boolean(serverSideDatasource),
+      columnsCount: columns.length,
+    });
     setGridApi(params.api);
     if (serverSideDatasource && rowModelType === 'serverSide') {
+      logger.debug('[DataGrid] Registering serverSideDatasource on AG Grid instance');
       params.api.setGridOption('serverSideDatasource', serverSideDatasource);
     }
-  }, [serverSideDatasource, rowModelType]);
+  }, [serverSideDatasource, rowModelType, columns.length]);
 
   const sanitizedSearch = sanitizeQuickFilter(search);
 
@@ -219,12 +239,19 @@ export function DataGrid({
 
   const onRowClicked = useCallback((event: RowClickedEvent<Row>) => {
     if (event.data) {
+      logger.info('[DataGrid] Row clicked in grid', {
+        id: event.data.id || event.data.transaction_id || event.data.dispute_id,
+        rowIndex: event.rowIndex,
+      });
       setSelectedRow(event.data);
+    } else {
+      logger.debug('[DataGrid] Row clicked without data payload');
     }
   }, []);
 
   // Native AG Grid Enterprise Excel Export
   const handleExcelExport = useCallback(() => {
+    logger.info('[DataGrid] handleExcelExport requested');
     if (gridApi && typeof gridApi.exportDataAsExcel === 'function') {
       try {
         gridApi.exportDataAsExcel({
@@ -233,42 +260,76 @@ export function DataGrid({
           author: 'AegisPay Autonomous Clearinghouse Cockpit',
           columnWidth: 120,
         });
+        logger.info('[DataGrid] Exported native Excel workbook successfully (.xlsx)');
         setActionNotice('Native Enterprise Excel workbook exported (.xlsx)');
         setTimeout(() => setActionNotice(null), 3500);
         return;
-      } catch {
-        // Fallback below
+      } catch (err: any) {
+        logger.warn('[DataGrid] Native Excel export threw error, using CSV fallback', {
+          error: err?.message,
+          stack: err?.stack,
+        });
       }
+    } else {
+      logger.debug('[DataGrid] Native exportDataAsExcel not available, falling back to CSV export');
     }
-    exportToCsv(rows, 'aegispay-paypal-settlement.csv');
-    setActionNotice('Settlement export downloaded successfully');
+    try {
+      exportToCsv(rows, 'aegispay-paypal-settlement.csv');
+      logger.info('[DataGrid] Fallback CSV export completed');
+      setActionNotice('Settlement export downloaded successfully');
+    } catch (err: any) {
+      logger.error('[DataGrid] Fallback CSV export failed', {
+        error: err?.message,
+        stack: err?.stack,
+      });
+    }
     setTimeout(() => setActionNotice(null), 3500);
   }, [gridApi, rows]);
 
   // Streaming CSV Export
   const handleCsvExport = useCallback(() => {
+    logger.info('[DataGrid] handleCsvExport requested');
     if (gridApi && typeof gridApi.exportDataAsCsv === 'function') {
       try {
         gridApi.exportDataAsCsv({ fileName: 'aegispay-settlement-records.csv' });
+        logger.info('[DataGrid] Exported streaming Enterprise CSV');
         setActionNotice('Streaming Enterprise CSV exported');
         setTimeout(() => setActionNotice(null), 3000);
         return;
-      } catch {
-        // Fallback below
+      } catch (err: any) {
+        logger.warn('[DataGrid] Streaming exportDataAsCsv threw error, using fallback', {
+          error: err?.message,
+          stack: err?.stack,
+        });
       }
+    } else {
+      logger.debug('[DataGrid] Native exportDataAsCsv not available, using client CSV fallback');
     }
-    exportToCsv(rows);
-    setActionNotice('Settlement CSV exported successfully');
+    try {
+      exportToCsv(rows);
+      logger.info('[DataGrid] Client CSV export completed');
+      setActionNotice('Settlement CSV exported successfully');
+    } catch (err: any) {
+      logger.error('[DataGrid] Client CSV export failed', {
+        error: err?.message,
+        stack: err?.stack,
+      });
+    }
     setTimeout(() => setActionNotice(null), 3000);
   }, [gridApi, rows]);
 
   // Integrated AG Charts: Programmatic Range Chart
   const handleGenerateChart = useCallback(() => {
-    if (!gridApi) return;
+    logger.info('[DataGrid] handleGenerateChart requested');
+    if (!gridApi) {
+      logger.warn('[DataGrid] Chart generation aborted: GridApi not initialized');
+      return;
+    }
     try {
       const numCols = columns.filter((c) => c.type === 'money' || c.aggFunc === 'sum').map((c) => c.field as string);
       const catCols = columns.filter((c) => c.field === 'currency' || c.field === 'counterparty' || c.field === 'name' || c.field === 'status').map((c) => c.field as string);
 
+      logger.debug('[DataGrid] Creating range chart with columns', { numCols, catCols });
       gridApi.createRangeChart({
         cellRange: {
           rowStartIndex: 0,
@@ -277,18 +338,27 @@ export function DataGrid({
         },
         chartType: 'groupedColumn',
       });
+      logger.info('[DataGrid] Range chart created successfully');
       setActionNotice('Integrated AG Chart created over active range');
       setTimeout(() => setActionNotice(null), 3500);
-    } catch {
+    } catch (err: any) {
+      logger.warn('[DataGrid] Failed to generate range chart', {
+        error: err?.message,
+        stack: err?.stack,
+      });
       setActionNotice('Select numeric range cells to generate chart');
       setTimeout(() => setActionNotice(null), 3000);
     }
   }, [gridApi, columns, rows]);
 
   const handleTogglePivot = useCallback(() => {
-    if (!gridApi) return;
+    if (!gridApi) {
+      logger.warn('[DataGrid] Pivot toggle aborted: GridApi not initialized');
+      return;
+    }
     setIsPivotMode((prev) => {
       const nextMode = !prev;
+      logger.info('[DataGrid] Toggling pivot mode', { previous: prev, next: nextMode });
       gridApi.setGridOption('pivotMode', nextMode);
       setActionNotice(nextMode ? 'Pivot Mode Activated' : 'Standard Grid Layout Restored');
       setTimeout(() => setActionNotice(null), 2500);
@@ -297,13 +367,21 @@ export function DataGrid({
   }, [gridApi]);
 
   const handleAction = useCallback((actionType: 'approve' | 'refund' | 'escalate') => {
-    if (!selectedRow) return;
+    if (!selectedRow) {
+      logger.warn('[DataGrid] Action invoked without selectedRow', { actionType });
+      return;
+    }
     const msg =
       actionType === 'approve'
         ? 'Order hold approved and released to settlement'
         : actionType === 'refund'
         ? 'Compensating 100% refund initiated'
         : 'Dispute escalated to Tier 5 SLA human review';
+    logger.info('[DataGrid] Executed custody action on selected row', {
+      actionType,
+      message: msg,
+      rowId: selectedRow.id || selectedRow.transaction_id || selectedRow.dispute_id,
+    });
     setActionNotice(msg);
     setSelectedRow(null);
     setTimeout(() => setActionNotice(null), 4000);
@@ -387,7 +465,10 @@ export function DataGrid({
               <button
                 key={d}
                 type="button"
-                onClick={() => setDensity(d)}
+                    onClick={() => {
+                      logger.info('[DataGrid] Density changed', { previous: density, next: d });
+                      setDensity(d);
+                    }}
                 className={`px-2.5 py-1 rounded-lg capitalize transition-all duration-200 cursor-pointer ${
                   density === d
                     ? 'bg-white dark:bg-[#0e172a] text-cyan-600 dark:text-cyan-400 font-bold shadow-xs border border-slate-200/60 dark:border-cyan-500/30'

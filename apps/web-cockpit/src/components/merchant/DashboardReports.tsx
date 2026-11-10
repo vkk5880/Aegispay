@@ -1,9 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { Package, Repeat, FileText, Wallet, ArrowLeftRight, TrendingUp, ShieldCheck, ArrowUpRight } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
+import { webLogger as logger } from '@/lib/logger';
 
 export interface DashboardReportMetrics {
   totalProducts?: number;
@@ -15,6 +16,18 @@ export interface DashboardReportMetrics {
 
 export function DashboardReports({ metrics = {} }: { metrics?: DashboardReportMetrics }) {
   const { showTechnicalDetails } = useUiMode();
+
+  useEffect(() => {
+    logger.info('[DashboardReports] Rendered DashboardReports with metrics', {
+      totalProducts: metrics.totalProducts ?? 2,
+      activePlans: metrics.activePlans ?? 1,
+      openInvoices: metrics.openInvoices ?? 1,
+      usdBalance: metrics.usdBalance ?? '$14,800.00',
+      recentTxCount: metrics.recentTxCount ?? 1,
+      showTechnicalDetails,
+    });
+  }, [metrics, showTechnicalDetails]);
+
   const cards = [
     {
       title: 'Catalog Products',
@@ -106,6 +119,13 @@ export function DashboardReports({ metrics = {} }: { metrics?: DashboardReportMe
             <Link
               key={card.title}
               href={card.href}
+              onClick={() => {
+                logger.info('[DashboardReports] Report card navigation clicked', {
+                  title: card.title,
+                  href: card.href,
+                  currentCount: card.count,
+                });
+              }}
               className="group relative p-4 rounded-2xl border border-slate-200/80 dark:border-white/10 bg-white/90 dark:bg-[#0c1424]/90 backdrop-blur-xl hover:border-cyan-500/40 dark:hover:border-cyan-500/40 transition-all duration-300 hover:shadow-xl hover:shadow-cyan-500/5 dark:hover:shadow-cyan-950/20 hover:-translate-y-0.5 flex flex-col justify-between overflow-hidden"
             >
               {/* Subtle top card glow line */}

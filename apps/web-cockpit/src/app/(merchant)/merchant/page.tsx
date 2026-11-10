@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { AutonomyDialWidget } from '@/components/ag-studio/AutonomyDialWidget';
@@ -10,21 +10,55 @@ import { LiveStudioCanvas } from '@/components/ag-studio/LiveStudioCanvas';
 import { DashboardReports } from '@/components/merchant/DashboardReports';
 import { Store, Database, ArrowLeft, Bot, Sparkles } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
+import { webLogger as logger } from '@/lib/logger';
 
 const DisputeSlaScheduler = dynamic(
-  () => import('@/components/bryntum/DisputeSlaScheduler').then((mod) => mod.DisputeSlaScheduler),
+  () =>
+    import('@/components/bryntum/DisputeSlaScheduler')
+      .then((mod) => {
+        logger.info('[MerchantCockpitPage] Dynamic DisputeSlaScheduler chunk loaded successfully');
+        return mod.DisputeSlaScheduler;
+      })
+      .catch((err) => {
+        logger.error('[MerchantCockpitPage] Failed to dynamically load DisputeSlaScheduler chunk', {
+          error: err?.message,
+          stack: err?.stack,
+        });
+        throw err;
+      }),
   {
     ssr: false,
-    loading: () => (
-      <div className="flex items-center justify-center p-6 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-[#080d19]/50 min-h-[300px] text-slate-400 text-xs">
-        <span className="font-mono">Loading Bryntum SLA Scheduler...</span>
-      </div>
-    ),
+    loading: () => {
+      logger.debug('[MerchantCockpitPage] DisputeSlaScheduler chunk loading fallback rendered');
+      return (
+        <div className="flex items-center justify-center p-6 border border-slate-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-[#080d19]/50 min-h-[300px] text-slate-400 text-xs">
+          <span className="font-mono">Loading Bryntum SLA Scheduler...</span>
+        </div>
+      );
+    },
   }
 );
 
 export default function MerchantCockpitPage() {
   const { showTechnicalDetails } = useUiMode();
+
+  useEffect(() => {
+    logger.info('[MerchantCockpitPage] Mounted Merchant Cockpit page', {
+      showTechnicalDetails,
+      timestamp: new Date().toISOString(),
+      viewport: typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : 'SSR',
+    });
+
+    if (showTechnicalDetails) {
+      logger.debug('[MerchantCockpitPage] Operating in TECHNICAL mode: displaying AG Studio 3 harness & Bryntum scheduler details');
+    } else {
+      logger.debug('[MerchantCockpitPage] Operating in CONSUMER / SELLER mode: simplified dispute & resolution descriptions active');
+    }
+
+    return () => {
+      logger.info('[MerchantCockpitPage] Unmounting Merchant Cockpit page');
+    };
+  }, [showTechnicalDetails]);
 
   return (
     <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full transition-colors">

@@ -23,6 +23,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
+import { chaosLogger as logger } from '@/lib/logger';
 
 interface TerminalOutput {
   actionTitle: string;
@@ -39,20 +40,37 @@ export default function JudgeChaosPortal() {
   const [copiedTerminal, setCopiedTerminal] = useState<string | null>(null);
 
   const copyToClipboard = (text: string, id: string) => {
+    logger.info('[JudgeChaosPortal] Copying terminal output to clipboard', { id, textLength: text.length });
     if (typeof navigator !== 'undefined' && navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setCopiedTerminal(id);
       setTimeout(() => setCopiedTerminal(null), 2000);
+    } else {
+      logger.warn('[JudgeChaosPortal] navigator.clipboard is not available in current environment');
     }
   };
 
   const fetchVerifyLedger = async () => {
+    logger.info('[JudgeChaosPortal] Fetching verification ledger from /api/integrations/verify');
     setLoadingVerify(true);
+    const startTime = Date.now();
     try {
       const res = await fetch('/api/integrations/verify');
       const json = await res.json();
+      const elapsed = Date.now() - startTime;
+      logger.info('[JudgeChaosPortal] Verification ledger fetched successfully', {
+        status: json.status,
+        integrationsCount: json.integrations ? Object.keys(json.integrations).length : 0,
+        elapsedMs: elapsed,
+      });
       setVerifyData(json);
     } catch (err: any) {
+      const elapsed = Date.now() - startTime;
+      logger.error('[JudgeChaosPortal] Failed to query /api/integrations/verify', {
+        error: err?.message,
+        stack: err?.stack,
+        elapsedMs: elapsed,
+      });
       setVerifyData({ error: 'Failed to query /api/integrations/verify', details: err.message });
     } finally {
       setLoadingVerify(false);
@@ -60,11 +78,17 @@ export default function JudgeChaosPortal() {
   };
 
   useEffect(() => {
+    logger.info('[JudgeChaosPortal] Mounted Judge Chaos Portal component');
     fetchVerifyLedger();
+    return () => {
+      logger.info('[JudgeChaosPortal] Unmounting Judge Chaos Portal component');
+    };
   }, []);
 
   const triggerChaos = async (action: string, title: string) => {
+    logger.info('[JudgeChaosPortal] Triggering chaos action', { action, title });
     setLoadingAction(action);
+    const startTime = Date.now();
     try {
       const res = await fetch('/api/chaos', {
         method: 'POST',
@@ -72,6 +96,13 @@ export default function JudgeChaosPortal() {
         body: JSON.stringify({ action }),
       });
       const data = await res.json();
+      const elapsed = Date.now() - startTime;
+      logger.info('[JudgeChaosPortal] Chaos action completed', {
+        action,
+        title,
+        status: data.status || 'SUCCESS',
+        elapsedMs: elapsed,
+      });
       setTerminalLogs({
         actionTitle: title,
         timestamp: new Date().toLocaleTimeString(),
@@ -81,6 +112,14 @@ export default function JudgeChaosPortal() {
       // Refresh ledger after mutation
       fetchVerifyLedger();
     } catch (err: any) {
+      const elapsed = Date.now() - startTime;
+      logger.error('[JudgeChaosPortal] Chaos action dispatch failed', {
+        action,
+        title,
+        error: err?.message,
+        stack: err?.stack,
+        elapsedMs: elapsed,
+      });
       setTerminalLogs({
         actionTitle: title,
         timestamp: new Date().toLocaleTimeString(),

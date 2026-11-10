@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { setupStudioHarness, executeStudioPrompt, type AgStudioMock } from './studioHarness';
 import { Bot, Sparkles, Send, Filter, CheckCircle2, RefreshCw, BarChart2, ShieldAlert } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
+import { webLogger as logger } from '@/lib/logger';
 
 export function LiveStudioCanvas() {
   const { showTechnicalDetails } = useUiMode();
@@ -14,27 +15,79 @@ export function LiveStudioCanvas() {
   const [activeFilters, setActiveFilters] = useState<any[]>([]);
 
   useEffect(() => {
-    const s = setupStudioHarness();
-    setStudio(s);
+    logger.info('[LiveStudioCanvas] Initializing AG Studio 3 Live Canvas harness');
+    try {
+      const s = setupStudioHarness();
+      setStudio(s);
+      logger.info('[LiveStudioCanvas] AG Studio 3 Live Canvas harness initialized successfully', {
+        registeredAgentsCount: s.registeredAgents.length,
+        commandsCount: s.commands.size,
+        widgetsCount: s.customWidgets.size,
+      });
+    } catch (err: any) {
+      logger.error('[LiveStudioCanvas] Error initializing AG Studio 3 harness', {
+        error: err?.message,
+        stack: err?.stack,
+      });
+    }
+
+    return () => {
+      logger.info('[LiveStudioCanvas] Unmounting AG Studio 3 Live Canvas');
+    };
   }, []);
 
   const handleRunPrompt = async (textToRun?: string) => {
     const query = (textToRun ?? promptInput).trim();
-    if (!query || !studio) return;
+    logger.info('[LiveStudioCanvas] handleRunPrompt triggered', {
+      query,
+      hasStudio: Boolean(studio),
+      isProcessing,
+    });
+
+    if (!query) {
+      logger.warn('[LiveStudioCanvas] handleRunPrompt ignored empty prompt query');
+      return;
+    }
+    if (!studio) {
+      logger.warn('[LiveStudioCanvas] handleRunPrompt aborted: AG Studio instance not initialized');
+      return;
+    }
 
     setIsProcessing(true);
     setAiResponse(null);
 
+    const startTime = Date.now();
     try {
+      logger.debug('[LiveStudioCanvas] Executing AG Studio prompt with harness...', { query });
       const res = await executeStudioPrompt(studio, query);
+      const elapsedMs = Date.now() - startTime;
+      logger.info('[LiveStudioCanvas] AG Studio prompt executed successfully', {
+        query,
+        commandExecuted: res.commandExecuted,
+        hasFilters: Boolean(res.filters && res.filters.length > 0),
+        filtersCount: res.filters ? res.filters.length : 0,
+        elapsedMs,
+      });
+
       setAiResponse(res.message);
       if (res.filters) {
+        logger.debug('[LiveStudioCanvas] Setting active cross-filters on canvas', { filters: res.filters });
         setActiveFilters(res.filters);
+      } else {
+        logger.debug('[LiveStudioCanvas] No new filters returned; keeping existing filters', { currentCount: activeFilters.length });
       }
     } catch (err: any) {
+      const elapsedMs = Date.now() - startTime;
+      logger.error('[LiveStudioCanvas] AG Studio prompt execution failed', {
+        query,
+        error: err?.message,
+        stack: err?.stack,
+        elapsedMs,
+      });
       setAiResponse(`Error: ${err?.message || 'Agent command execution failed'}`);
     } finally {
       setIsProcessing(false);
+      logger.debug('[LiveStudioCanvas] handleRunPrompt execution cycle completed');
     }
   };
 
@@ -113,6 +166,7 @@ export function LiveStudioCanvas() {
               key={idx}
               type="button"
               onClick={() => {
+                logger.info('[LiveStudioCanvas] Preset prompt selected', { preset, index: idx });
                 setPromptInput(preset);
                 handleRunPrompt(preset);
               }}
@@ -133,7 +187,10 @@ export function LiveStudioCanvas() {
           </div>
           <button
             type="button"
-            onClick={() => setAiResponse(null)}
+            onClick={() => {
+              logger.debug('[LiveStudioCanvas] Dismissing AI response banner');
+              setAiResponse(null);
+            }}
             className="text-slate-400 hover:text-white text-xs ml-2"
           >
             ✕

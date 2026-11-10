@@ -1,15 +1,16 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import '@bryntum/scheduler-trial/scheduler.css';
 import { Clock, Filter, AlertTriangle, ShieldCheck, CheckCircle2, ShieldAlert } from 'lucide-react';
 import {
   getSlaCountdownTier,
   getSlaBarColorClasses,
   validateTimeInterval,
-  SlaUrgencyTier,
+  type SlaUrgencyTier,
 } from './bryntumConfig';
 import { BryntumSchedulerWrapper } from './BryntumSchedulerWrapper';
+import { webLogger as logger } from '@/lib/logger';
 
 export interface SlaDisputeItem {
   id: string;
@@ -101,9 +102,27 @@ export function DisputeSlaScheduler() {
   const [disputes] = useState<SlaDisputeItem[]>(INITIAL_DISPUTES);
   const [filterImminentBreach, setFilterImminentBreach] = useState(false);
 
+  useEffect(() => {
+    logger.info('[DisputeSlaScheduler] Mounted DisputeSlaScheduler component', {
+      totalDisputes: disputes.length,
+      initialFilterImminentBreach: filterImminentBreach,
+    });
+    return () => {
+      logger.info('[DisputeSlaScheduler] Unmounting DisputeSlaScheduler component');
+    };
+  }, []);
+
   // Filter disputes if "Imminent Breach (< 12h)" toggle is active
   const displayedDisputes = filterImminentBreach
-    ? disputes.filter((d) => d.remainingHours < 12)
+    ? disputes.filter((d) => {
+        const matches = d.remainingHours < 12;
+        logger.debug('[DisputeSlaScheduler] Evaluating imminent breach filter on item', {
+          disputeId: d.disputeId,
+          remainingHours: d.remainingHours,
+          matches,
+        });
+        return matches;
+      })
     : disputes;
 
   const unallocatedCount = disputes.filter(
@@ -111,6 +130,31 @@ export function DisputeSlaScheduler() {
   ).length;
 
   const imminentCount = disputes.filter((d) => d.remainingHours < 12).length;
+
+  useEffect(() => {
+    logger.debug('[DisputeSlaScheduler] SLA state evaluation updated', {
+      totalCount: disputes.length,
+      displayedCount: displayedDisputes.length,
+      unallocatedCount,
+      imminentCount,
+      filterImminentBreach,
+    });
+    if (unallocatedCount > 0) {
+      logger.warn('[DisputeSlaScheduler] Unallocated SLA deadlines detected needing analyst assignment', {
+        unallocatedCount,
+      });
+    }
+  }, [displayedDisputes.length, unallocatedCount, imminentCount, filterImminentBreach]);
+
+  const handleToggleImminentFilter = () => {
+    const nextState = !filterImminentBreach;
+    logger.info('[DisputeSlaScheduler] Toggling Imminent Breach filter', {
+      previous: filterImminentBreach,
+      next: nextState,
+      affectedItems: imminentCount,
+    });
+    setFilterImminentBreach(nextState);
+  };
 
   return (
     <BryntumSchedulerWrapper
@@ -141,7 +185,7 @@ export function DisputeSlaScheduler() {
             <button
               type="button"
               data-testid="filter-imminent-breach-btn"
-              onClick={() => setFilterImminentBreach(!filterImminentBreach)}
+              onClick={handleToggleImminentFilter}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer shadow-xs ${
                 filterImminentBreach
                   ? 'bg-rose-600 text-white border-rose-600 shadow-md shadow-rose-600/20'
@@ -214,6 +258,13 @@ export function DisputeSlaScheduler() {
             {displayedDisputes.map((item) => {
               // Validate timeline intervals against inverted dates
               const { wasInverted } = validateTimeInterval(item.startDate, item.endDate);
+              if (wasInverted) {
+                logger.warn('[DisputeSlaScheduler] Inverted time interval detected and corrected for item', {
+                  disputeId: item.disputeId,
+                  startDate: item.startDate,
+                  endDate: item.endDate,
+                });
+              }
 
               // Determine urgency bar styling via centralized helper
               const tier: SlaUrgencyTier = getSlaCountdownTier(item.remainingHours, item.status);
@@ -235,6 +286,13 @@ export function DisputeSlaScheduler() {
                 statusLabel = 'Evidence Submitted';
                 StatusIcon = CheckCircle2;
               }
+
+              logger.debug('[DisputeSlaScheduler] Rendered dispute SLA timeline item', {
+                disputeId: item.disputeId,
+                tier,
+                remainingHours: item.remainingHours,
+                analyst: item.analyst || 'UNASSIGNED',
+              });
 
               return (
                 <div
