@@ -1,6 +1,9 @@
 import { verifySessionMandateSignature } from '@aegispay/mcp-enforcer';
 import type { SpendMandate } from '@aegispay/shared-types';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { PayPalApimaticClient, defaultPayPalClient } from './paypal-apimatic.js';
+
+const logger = createLogger('API:Services:Financial').child('CounterBidEngine');
 
 export interface CounterBidTurn {
   turn_number: number;
@@ -65,6 +68,7 @@ export class CounterBidEngine {
 
   constructor(paypalClient?: PayPalApimaticClient) {
     this.paypalClient = paypalClient || defaultPayPalClient;
+    logger.debug('CounterBidEngine initialized');
   }
 
   /**
@@ -77,8 +81,25 @@ export class CounterBidEngine {
     const currentTurn = request.turn || 1;
     const history: CounterBidTurn[] = request.turn_history ? [...request.turn_history] : [];
 
+    logger.info('Evaluating counter bid negotiation', {
+      voucherId: request.voucher_id,
+      channel3ProductId: request.channel3_product_id,
+      merchantDomain: request.merchant_domain,
+      buyerBidCents: request.buyer_bid_cents,
+      retailOfferCents: request.retail_offer_cents,
+      merchantMinFloorCents: request.merchant_min_floor_cents,
+      currentTurn,
+      historyLength: history.length,
+      autoAcceptBufferCents: request.auto_accept_buffer_cents,
+    });
+
     // Verify cryptographic Ed25519 mandate
+    logger.debug('Verifying Ed25519 mandate signature', { mandateId: request.mandate.mandate_id });
     const isEd25519Valid = await verifySessionMandateSignature(request.mandate);
+    logger.info('Ed25519 mandate signature verification completed', {
+      mandateId: request.mandate.mandate_id,
+      isValid: isEd25519Valid,
+    });
 
     const now = Date.now();
     const isMandateActive =
@@ -88,9 +109,24 @@ export class CounterBidEngine {
     const remainingBudget =
       request.mandate.max_total_spend_cents - request.mandate.cumulative_spent_cents;
 
+    logger.debug('Evaluated mandate active status and remaining budget', {
+      mandateId: request.mandate.mandate_id,
+      status: request.mandate.status,
+      expiresAt: request.mandate.expires_at,
+      isMandateActive,
+      remainingBudgetCents: remainingBudget,
+      maxSingleMerchantCents: request.mandate.max_single_merchant_cents,
+    });
+
     // Enforce maximum 2 negotiation turns per voucher to avoid denial-of-service loops
     const merchantTurnsCount = history.filter((h) => h.proposer === 'MERCHANT').length;
     if (currentTurn > 2 || merchantTurnsCount >= 2) {
+      logger.warn('Negotiation turn limit exceeded (max 2 turns per voucher). Negotiation halted.', {
+        voucherId: request.voucher_id,
+        currentTurn,
+        merchantTurnsCount,
+      });
+
       return {
         status: 'REJECTED_OUT_OF_BOUNDS',
         turn: currentTurn,
@@ -117,6 +153,10 @@ export class CounterBidEngine {
 
     // Record buyer initial turn if history is empty
     if (history.length === 0) {
+      logger.debug('Recording initial buyer synthetic intent bid in history', {
+        buyerBidCents: request.buyer_bid_cents,
+        channel3ProductId: request.channel3_product_id,
+      });
       history.push({
         turn_number: 1,
         proposer: 'BUYER',
@@ -130,6 +170,16 @@ export class CounterBidEngine {
     if (request.buyer_bid_cents >= request.merchant_min_floor_cents) {
       const withinTotal = request.buyer_bid_cents <= remainingBudget;
       const withinMerchant = request.buyer_bid_cents <= request.mandate.max_single_merchant_cents;
+
+      logger.info('Buyer bid meets or exceeds merchant floor; direct acceptance verdict', {
+        voucherId: request.voucher_id,
+        buyerBidCents: request.buyer_bid_cents,
+        merchantMinFloorCents: request.merchant_min_floor_cents,
+        withinTotal,
+        withinMerchant,
+        isEd25519Valid,
+        isMandateActive,
+      });
 
       return {
         status: 'DIRECT_ACCEPTED',
@@ -149,6 +199,12 @@ export class CounterBidEngine {
 
     // If floor is above retail price or unreasonable, reject out of bounds
     if (request.merchant_min_floor_cents > request.retail_offer_cents) {
+      logger.warn('Merchant minimum floor price exceeds retail offer; rejecting out of bounds', {
+        voucherId: request.voucher_id,
+        merchantMinFloorCents: request.merchant_min_floor_cents,
+        retailOfferCents: request.retail_offer_cents,
+      });
+
       return {
         status: 'REJECTED_OUT_OF_BOUNDS',
         turn: currentTurn,
@@ -175,9 +231,19 @@ export class CounterBidEngine {
       // e.g., floor + 40% of (retail - floor)
       const marginGap = request.retail_offer_cents - request.merchant_min_floor_cents;
       merchantCounterCents = Math.round(request.merchant_min_floor_cents + marginGap * 0.40);
+      logger.info('Turn 1 compromise bid calculated (40% margin concession above floor)', {
+        marginGap,
+        merchantMinFloorCents: request.merchant_min_floor_cents,
+        retailOfferCents: request.retail_offer_cents,
+        calculatedCounterCents: merchantCounterCents,
+      });
     } else {
       // Turn 2: Merchant concedes to absolute floor
       merchantCounterCents = request.merchant_min_floor_cents;
+      logger.info('Turn 2 Dutch auction concession calculated (dropped directly to floor)', {
+        merchantMinFloorCents: request.merchant_min_floor_cents,
+        calculatedCounterCents: merchantCounterCents,
+      });
     }
 
     const discountFromRetailPct = Number(
@@ -197,6 +263,14 @@ export class CounterBidEngine {
       expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min expiry
     };
 
+    logger.info('Merchant counter voucher minted', {
+      counterVoucherId,
+      merchantDomain: request.merchant_domain,
+      counterCents: merchantCounterCents,
+      discountPct: discountFromRetailPct,
+      turn: currentTurn,
+    });
+
     history.push({
       turn_number: currentTurn,
       proposer: 'MERCHANT',
@@ -210,11 +284,28 @@ export class CounterBidEngine {
     const withinMerchantCap = merchantCounterCents <= request.mandate.max_single_merchant_cents;
     const isCompliant = isEd25519Valid && isMandateActive && withinTotalBudget && withinMerchantCap;
 
+    logger.debug('Evaluated policy compliance for merchant counter', {
+      withinTotalBudget,
+      withinMerchantCap,
+      isEd25519Valid,
+      isMandateActive,
+      isCompliant,
+    });
+
     const autoAcceptBuffer = request.auto_accept_buffer_cents ?? 1500; // default $15 allowance buffer over bid
 
     // If counter is within buyer's auto-accept buffer above their initial bid AND compliant with mandate:
     // Auto-accept!
     if (isCompliant && merchantCounterCents <= (request.buyer_bid_cents + autoAcceptBuffer)) {
+      const resultingOrderId = `ORD-COUNTER-${Date.now()}`;
+      logger.info('Negotiation verdict: AUTO_ACCEPTED (within auto-accept buffer and compliant)', {
+        counterVoucherId,
+        merchantCounterCents,
+        buyerBidCents: request.buyer_bid_cents,
+        autoAcceptBuffer,
+        resultingOrderId,
+      });
+
       return {
         status: 'AUTO_ACCEPTED',
         turn: currentTurn,
@@ -227,7 +318,7 @@ export class CounterBidEngine {
           mandate_active: isMandateActive,
           remaining_budget_cents: remainingBudget,
         },
-        resulting_order_id: `ORD-COUNTER-${Date.now()}`,
+        resulting_order_id: resultingOrderId,
         history,
       };
     }
@@ -237,6 +328,14 @@ export class CounterBidEngine {
     if (isCompliant) {
       const diffCents = merchantCounterCents - request.buyer_bid_cents;
       const diffDollars = (diffCents / 100).toFixed(2);
+      logger.info('Negotiation verdict: HITL_CONFIRMATION_REQUIRED (exceeds auto-buffer, within mandate)', {
+        counterVoucherId,
+        merchantCounterCents,
+        buyerBidCents: request.buyer_bid_cents,
+        diffCents,
+        diffDollars,
+      });
+
       return {
         status: 'HITL_CONFIRMATION_REQUIRED',
         turn: currentTurn,
@@ -263,6 +362,15 @@ export class CounterBidEngine {
     }
 
     // Exceeds mandate policy entirely
+    logger.warn('Negotiation verdict: REJECTED_OUT_OF_BOUNDS (exceeds mandate policy constraints)', {
+      counterVoucherId,
+      merchantCounterCents,
+      withinTotalBudget,
+      withinMerchantCap,
+      isEd25519Valid,
+      isMandateActive,
+    });
+
     return {
       status: 'REJECTED_OUT_OF_BOUNDS',
       turn: currentTurn,

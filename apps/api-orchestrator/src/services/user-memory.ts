@@ -15,9 +15,12 @@ import {
   DynamicBuyerProfile,
   UniversalBuyerFacets,
   DomainFacet,
+  createLogger,
+  sanitizeForLogging,
 } from '@aegispay/shared-types';
 import { createDb, userMemoriesTable, eq } from '@aegispay/database';
 
+const logger = createLogger('API:Services:Financial').child('UserMemory');
 
 export interface UserPreferences {
   preferred_brands: string[];
@@ -64,9 +67,19 @@ function sanitizeUserId(userId: string): string {
 export function loadUserPreferences(userId: string = 'demo'): UserPreferences {
   const safeId = sanitizeUserId(userId);
   if (!memoryPrefsStore.has(safeId)) {
+    logger.info('User preferences L1 cache miss, backfilling defaults', { userId: safeId });
     memoryPrefsStore.set(safeId, { ...DEFAULT_PREFERENCES });
+  } else {
+    logger.debug('User preferences L1 cache hit', { userId: safeId });
   }
-  return { ...memoryPrefsStore.get(safeId)! };
+  const loaded = { ...memoryPrefsStore.get(safeId)! };
+  logger.info('Loaded user preferences', {
+    userId: safeId,
+    preferred_brands_count: loaded.preferred_brands?.length || 0,
+    avoided_brands_count: loaded.avoided_brands?.length || 0,
+    max_price_cents: loaded.max_price_cents,
+  });
+  return loaded;
 }
 
 /**
@@ -78,9 +91,11 @@ export function saveUserPreference<K extends keyof UserPreferences>(
   value: UserPreferences[K]
 ): UserPreferences {
   const safeId = sanitizeUserId(userId);
+  logger.info('Saving user preference key', { userId: safeId, key, value: sanitizeForLogging(value) });
   const prefs = loadUserPreferences(safeId);
   prefs[key] = value;
   memoryPrefsStore.set(safeId, prefs);
+  logger.info('Successfully updated user preference in L1 store', { userId: safeId, key });
   return { ...prefs };
 }
 
@@ -93,10 +108,14 @@ export function addToListPreference(
   value: string
 ): UserPreferences {
   const safeId = sanitizeUserId(userId);
+  logger.info('Appending item to user list preference', { userId: safeId, key, value });
   const prefs = loadUserPreferences(safeId);
   const list = prefs[key] || [];
   if (!list.includes(value)) {
     list.push(value);
+    logger.debug('Appended new value to preference list', { userId: safeId, key, value, newLength: list.length });
+  } else {
+    logger.debug('Value already present in preference list, skipping duplicate', { userId: safeId, key, value });
   }
   prefs[key] = list;
   memoryPrefsStore.set(safeId, prefs);
@@ -114,23 +133,44 @@ export function applyUserRules(
 ): ProductCardData[] {
   const avoided = (prefs.avoided_brands || []).map(b => b.toLowerCase().trim()).filter(Boolean);
   const maxPrice = prefs.max_price_cents;
+  const initialCount = products.length;
 
-  return products.filter(product => {
+  logger.debug('Applying user rules filtering to candidate products', {
+    total_candidates: initialCount,
+    avoided_brands: avoided,
+    max_price_cents: maxPrice,
+  });
+
+  let excludedAvoidedBrand = 0;
+  let excludedMaxPrice = 0;
+
+  const filtered = products.filter(product => {
     const titleLower = (product.title || '').toLowerCase();
     const descLower = (product.description || '').toLowerCase();
 
     // Avoided brand filter
     if (avoided.some(brand => titleLower.includes(brand) || descLower.includes(brand))) {
+      excludedAvoidedBrand++;
       return false;
     }
 
     // Max price cap filter
     if (maxPrice !== undefined && maxPrice > 0 && product.price_cents > maxPrice) {
+      excludedMaxPrice++;
       return false;
     }
 
     return true;
   });
+
+  logger.info('Applied user rules filtering summary', {
+    initial_candidates: initialCount,
+    retained_candidates: filtered.length,
+    excluded_avoided_brand: excludedAvoidedBrand,
+    excluded_max_price: excludedMaxPrice,
+  });
+
+  return filtered;
 }
 
 /**
@@ -138,6 +178,14 @@ export function applyUserRules(
  */
 export function logPurchase(entry: Omit<PurchaseLogEntry, 'timestamp'>): PurchaseLogEntry {
   const safeId = sanitizeUserId(entry.user_id);
+  logger.info('Logging purchase transaction', {
+    userId: safeId,
+    orderId: entry.order_id,
+    priceCents: entry.price_cents,
+    merchantDomain: entry.merchant_domain,
+    escrowStatus: entry.escrow_status,
+  });
+
   const fullEntry: PurchaseLogEntry = {
     ...entry,
     user_id: safeId,
@@ -148,6 +196,12 @@ export function logPurchase(entry: Omit<PurchaseLogEntry, 'timestamp'>): Purchas
   list.unshift(fullEntry); // Newest first
   purchaseHistoryStore.set(safeId, list);
 
+  logger.debug('Purchase logged successfully in L1 history store', {
+    userId: safeId,
+    orderId: entry.order_id,
+    totalHistoryEntries: list.length,
+  });
+
   return fullEntry;
 }
 
@@ -156,8 +210,11 @@ export function logPurchase(entry: Omit<PurchaseLogEntry, 'timestamp'>): Purchas
  */
 export function getPurchaseHistory(userId: string = 'demo', limit: number = 50): PurchaseLogEntry[] {
   const safeId = sanitizeUserId(userId);
+  logger.debug('Fetching purchase history', { userId: safeId, limit });
   const list = purchaseHistoryStore.get(safeId) || [];
-  return list.slice(0, limit);
+  const result = list.slice(0, limit);
+  logger.info('Retrieved purchase history', { userId: safeId, count: result.length, totalAvailable: list.length });
+  return result;
 }
 
 /**
@@ -169,12 +226,21 @@ export function updatePurchaseStatus(
   newStatus: 'HELD' | 'CAPTURED' | 'REFUNDED' | 'DISPUTED'
 ): boolean {
   const safeId = sanitizeUserId(userId);
+  logger.info('Updating purchase escrow status', { userId: safeId, orderId, newStatus });
   const list = purchaseHistoryStore.get(safeId) || [];
   const target = list.find(item => item.order_id === orderId);
   if (target) {
+    const oldStatus = target.escrow_status;
     target.escrow_status = newStatus;
+    logger.info('Purchase escrow status successfully updated', {
+      userId: safeId,
+      orderId,
+      oldStatus,
+      newStatus,
+    });
     return true;
   }
+  logger.warn('Purchase entry not found for escrow status update', { userId: safeId, orderId, targetStatus: newStatus });
   return false;
 }
 
@@ -187,6 +253,7 @@ const receiptLedgerStore = new Map<string, Array<Record<string, any>>>();
  */
 export function getNextReceiptNumber(scope: string = 'global'): number {
   globalReceiptCounter += 1;
+  logger.debug('Incremented global monotonic receipt counter', { scope, nextReceiptNumber: globalReceiptCounter });
   return globalReceiptCounter;
 }
 
@@ -195,14 +262,19 @@ export function getNextReceiptNumber(scope: string = 'global'): number {
  */
 export function logReceipt(userId: string = 'demo', receiptData: Record<string, any>): Record<string, any> {
   const safeId = sanitizeUserId(userId);
+  const receiptNum = receiptData.receipt_number || getNextReceiptNumber();
+  logger.info('Logging transaction receipt voucher', { userId: safeId, receiptNumber: receiptNum });
+
   const entry = {
     ...receiptData,
-    receipt_number: receiptData.receipt_number || getNextReceiptNumber(),
+    receipt_number: receiptNum,
     timestamp: new Date().toISOString(),
   };
   const list = receiptLedgerStore.get(safeId) || [];
   list.unshift(entry);
   receiptLedgerStore.set(safeId, list);
+
+  logger.debug('Transaction receipt appended to user ledger', { userId: safeId, receiptNumber: receiptNum, totalReceipts: list.length });
   return entry;
 }
 
@@ -211,7 +283,9 @@ export function logReceipt(userId: string = 'demo', receiptData: Record<string, 
  */
 export function getReceipts(userId: string = 'demo'): Array<Record<string, any>> {
   const safeId = sanitizeUserId(userId);
-  return receiptLedgerStore.get(safeId) || [];
+  const list = receiptLedgerStore.get(safeId) || [];
+  logger.debug('Retrieved user transaction receipts', { userId: safeId, receiptCount: list.length });
+  return list;
 }
 
 // ── Watchlist Management (Harvested from agents/watchlist.py) ──────────────
@@ -247,6 +321,14 @@ export function addToWatchlist(
   }
 ): WatchlistItem {
   const safeId = sanitizeUserId(userId);
+  logger.info('Adding item to price-drop watchlist', {
+    userId: safeId,
+    title: item.title,
+    currentPriceCents: item.current_price_cents,
+    targetPriceCents: item.target_price_cents,
+    source: item.source,
+  });
+
   const items = watchlistStore.get(safeId) || [];
   
   const entry: WatchlistItem = {
@@ -264,8 +346,10 @@ export function addToWatchlist(
 
   const existingIdx = items.findIndex(i => i.title.toLowerCase() === item.title.toLowerCase());
   if (existingIdx >= 0) {
+    logger.info('Updating existing watchlist item in-place', { userId: safeId, id: entry.id, title: item.title });
     items[existingIdx] = entry;
   } else {
+    logger.info('Inserting new watchlist item entry', { userId: safeId, id: entry.id, title: item.title });
     items.push(entry);
   }
   watchlistStore.set(safeId, items);
@@ -277,7 +361,9 @@ export function addToWatchlist(
  */
 export function getWatchlist(userId: string = 'demo'): WatchlistItem[] {
   const safeId = sanitizeUserId(userId);
-  return watchlistStore.get(safeId) || [];
+  const items = watchlistStore.get(safeId) || [];
+  logger.debug('Retrieved user price-drop watchlist', { userId: safeId, itemCount: items.length });
+  return items;
 }
 
 /**
@@ -285,12 +371,15 @@ export function getWatchlist(userId: string = 'demo'): WatchlistItem[] {
  */
 export function removeFromWatchlist(userId: string = 'demo', identifier: string): boolean {
   const safeId = sanitizeUserId(userId);
+  logger.info('Removing item from price-drop watchlist', { userId: safeId, identifier });
   const items = watchlistStore.get(safeId) || [];
   const filtered = items.filter(i => i.id !== identifier && i.title.toLowerCase() !== identifier.toLowerCase());
   if (filtered.length !== items.length) {
     watchlistStore.set(safeId, filtered);
+    logger.info('Successfully removed item from price-drop watchlist', { userId: safeId, identifier, remainingCount: filtered.length });
     return true;
   }
+  logger.warn('Watchlist removal identifier not found', { userId: safeId, identifier });
   return false;
 }
 
@@ -301,11 +390,26 @@ export function checkWatchlistItem(
   item: WatchlistItem,
   currentPriceCents: number
 ): { triggered: boolean; price_cents: number; saving_cents: number } | null {
+  logger.debug('Evaluating watchlist item against market price', {
+    itemId: item.id,
+    title: item.title,
+    currentPriceCents,
+    targetPriceCents: item.target_price_cents,
+  });
+
   if (currentPriceCents > 0 && currentPriceCents <= item.target_price_cents) {
+    const savingCents = item.current_price_cents - currentPriceCents;
+    logger.info('Price-drop target met or exceeded! Triggering alert evaluation', {
+      itemId: item.id,
+      title: item.title,
+      foundPriceCents: currentPriceCents,
+      targetPriceCents: item.target_price_cents,
+      savingCents,
+    });
     return {
       triggered: true,
       price_cents: currentPriceCents,
-      saving_cents: item.current_price_cents - currentPriceCents,
+      saving_cents: savingCents,
     };
   }
   return null;
@@ -334,6 +438,15 @@ export function logWatchlistAlert(alert: Omit<WatchlistAlert, 'alert_id'>): Watc
     ...alert,
     alert_id: `alt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
   };
+  logger.info('Dispatching price-drop alert', {
+    alertId: fullAlert.alert_id,
+    userId: fullAlert.user_id,
+    itemId: fullAlert.item_id,
+    title: fullAlert.title,
+    targetPriceCents: fullAlert.target_price_cents,
+    foundPriceCents: fullAlert.found_price_cents,
+    savingCents: fullAlert.saving_cents,
+  });
   watchlistAlertsStore.unshift(fullAlert);
   return fullAlert;
 }
@@ -344,8 +457,11 @@ export function logWatchlistAlert(alert: Omit<WatchlistAlert, 'alert_id'>): Watc
 export function getWatchlistAlerts(userId?: string): WatchlistAlert[] {
   if (userId) {
     const safeId = sanitizeUserId(userId);
-    return watchlistAlertsStore.filter(a => a.user_id === safeId);
+    const userAlerts = watchlistAlertsStore.filter(a => a.user_id === safeId);
+    logger.debug('Retrieved watchlist alerts for user', { userId: safeId, count: userAlerts.length });
+    return userAlerts;
   }
+  logger.debug('Retrieved global watchlist alerts', { count: watchlistAlertsStore.length });
   return [...watchlistAlertsStore];
 }
 
@@ -367,26 +483,46 @@ export async function checkAllWatchlists(
   const triggeredAlerts: WatchlistAlert[] = [];
   let scannedItems = 0;
 
+  logger.info('Starting price fetcher check cycle across all registered user watchlists', {
+    totalUsers: watchlistStore.size,
+    hasCustomPriceFetcher: Boolean(priceFetcher),
+  });
+
   for (const [userId, items] of watchlistStore.entries()) {
+    logger.debug('Scanning watchlists for user', { userId, itemCount: items.length });
     for (const item of items) {
-      if (item.triggered) continue; // Already triggered — don't re-alert
+      if (item.triggered) {
+        logger.debug('Skipping already-triggered watchlist item', { userId, itemId: item.id, title: item.title });
+        continue;
+      }
       scannedItems++;
       item.last_checked = now;
 
       let currentMarketPrice = 0;
       if (priceFetcher) {
         try {
+          logger.debug('Invoking price fetcher for item', { query: item.query, itemId: item.id, title: item.title });
           const fetched = await priceFetcher(item.query, item);
           if (fetched !== null && fetched > 0) {
             currentMarketPrice = fetched;
+            logger.debug('Price fetcher returned valid quote', { itemId: item.id, fetchedPriceCents: currentMarketPrice });
+          } else {
+            logger.debug('Price fetcher returned null or non-positive price', { itemId: item.id, fetched });
           }
-        } catch (err) {
-          console.warn(`checkAllWatchlists: priceFetcher failed for ${item.title}:`, err);
+        } catch (err: any) {
+          logger.error('Price fetcher failed during watchlist check cycle', {
+            userId,
+            itemId: item.id,
+            title: item.title,
+            error: err?.message || String(err),
+            stack: err?.stack,
+          });
         }
       } else {
         // Default deterministic price evaluation: simulate slight price drop if near target
         if (item.current_price_cents > item.target_price_cents && Math.random() < 0.25) {
           currentMarketPrice = item.target_price_cents;
+          logger.debug('Simulated deterministic price drop hit for watchlist item', { itemId: item.id, targetPriceCents: currentMarketPrice });
         }
       }
 
@@ -407,12 +543,21 @@ export async function checkAllWatchlists(
     watchlistStore.set(userId, items);
   }
 
-  return {
+  const report: WatchlistCheckReport = {
     scanned_users: watchlistStore.size,
     scanned_items: scannedItems,
     triggered_alerts: triggeredAlerts,
     timestamp: now,
   };
+
+  logger.info('Completed price fetcher check cycle report', {
+    scannedUsers: report.scanned_users,
+    scannedItems: report.scanned_items,
+    triggeredAlertsCount: report.triggered_alerts.length,
+    timestamp: report.timestamp,
+  });
+
+  return report;
 }
 
 let watchlistSchedulerTimer: NodeJS.Timeout | null = null;
@@ -425,21 +570,35 @@ export function startWatchlistScheduler(
   intervalHours: number = 24,
   priceFetcher?: (query: string, item: WatchlistItem) => Promise<number | null>
 ): { status: string; interval_hours: number } {
+  logger.info('Starting watchlist background scheduler', { intervalHours });
   if (watchlistSchedulerTimer) {
+    logger.info('Clearing existing watchlist scheduler timer before restart');
     clearInterval(watchlistSchedulerTimer);
   }
 
-  checkAllWatchlists(priceFetcher).catch(err => console.error('Initial watchlist check failed:', err));
+  checkAllWatchlists(priceFetcher).catch(err => {
+    logger.error('Initial watchlist check failed during scheduler startup', {
+      error: err?.message || String(err),
+      stack: err?.stack,
+    });
+  });
 
   const ms = Math.max(1, intervalHours) * 60 * 60 * 1000;
   watchlistSchedulerTimer = setInterval(() => {
-    checkAllWatchlists(priceFetcher).catch(err => console.error('Periodic watchlist check failed:', err));
+    logger.debug('Executing periodic watchlist check in background scheduler');
+    checkAllWatchlists(priceFetcher).catch(err => {
+      logger.error('Periodic watchlist check failed during interval execution', {
+        error: err?.message || String(err),
+        stack: err?.stack,
+      });
+    });
   }, ms);
 
   if (watchlistSchedulerTimer.unref) {
     watchlistSchedulerTimer.unref();
   }
 
+  logger.info('Watchlist background scheduler successfully running', { status: 'STARTED', interval_hours: intervalHours });
   return { status: 'STARTED', interval_hours: intervalHours };
 }
 
@@ -448,10 +607,12 @@ export function startWatchlistScheduler(
  */
 export function stopWatchlistScheduler(): boolean {
   if (watchlistSchedulerTimer) {
+    logger.info('Stopping watchlist background scheduler');
     clearInterval(watchlistSchedulerTimer);
     watchlistSchedulerTimer = null;
     return true;
   }
+  logger.debug('Watchlist background scheduler was not running');
   return false;
 }
 
@@ -460,6 +621,7 @@ export function stopWatchlistScheduler(): boolean {
 const dynamicBuyerProfilesStore = new Map<string, DynamicBuyerProfile>();
 
 export function clearDynamicBuyerProfilesStore(): void {
+  logger.debug('Clearing dynamic buyer profiles L1 cache store');
   dynamicBuyerProfilesStore.clear();
 }
 
@@ -471,23 +633,30 @@ export function getUserMemoryDb(): ReturnType<typeof createDb> | null {
   }
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
+    logger.debug('DATABASE_URL not set; skipping PostgreSQL connection for user memory');
     return null;
   }
   try {
+    logger.info('Initializing PostgreSQL connection pool for dynamic buyer memory');
     dbClient = createDb(connectionString);
-  } catch (err) {
-    console.warn('[user-memory] Failed to initialize PostgreSQL client:', err);
+  } catch (err: any) {
+    logger.error('Failed to initialize PostgreSQL client for user memory', {
+      error: err?.message || String(err),
+      stack: err?.stack,
+    });
     dbClient = null;
   }
   return dbClient;
 }
 
 export function setUserMemoryDb(db: ReturnType<typeof createDb> | null): void {
+  logger.debug('Setting custom database client for user memory', { hasDb: Boolean(db) });
   dbClient = db;
 }
 
 export function createDefaultDynamicBuyerProfile(userId: string): DynamicBuyerProfile {
   const safeId = sanitizeUserId(userId);
+  logger.info('Creating default dynamic buyer profile', { userId: safeId });
   return {
     userId: safeId,
     universal: {
@@ -520,9 +689,13 @@ export function createDefaultDynamicBuyerProfile(userId: string): DynamicBuyerPr
  */
 export async function persistDynamicBuyerProfile(profile: DynamicBuyerProfile): Promise<void> {
   const safeId = sanitizeUserId(profile.userId);
+  logger.debug('Attempting L2 PostgreSQL persist for dynamic buyer profile', { userId: safeId });
   try {
     const db = getUserMemoryDb();
-    if (!db) return;
+    if (!db) {
+      logger.debug('No database available for dynamic buyer profile persist', { userId: safeId });
+      return;
+    }
 
     await db
       .insert(userMemoriesTable)
@@ -542,8 +715,17 @@ export async function persistDynamicBuyerProfile(profile: DynamicBuyerProfile): 
           updatedAt: new Date(profile.updated_at),
         },
       });
-  } catch (err) {
-    console.warn(`[user-memory] PostgreSQL persist failed for user ${safeId}:`, err);
+
+    logger.info('Successfully persisted dynamic buyer profile to PostgreSQL', {
+      userId: safeId,
+      updatedAt: profile.updated_at,
+    });
+  } catch (err: any) {
+    logger.error('PostgreSQL persist failed for dynamic buyer profile', {
+      userId: safeId,
+      error: err?.message || String(err),
+      stack: err?.stack,
+    });
   }
 }
 
@@ -558,8 +740,11 @@ export async function loadDynamicBuyerProfile(userId: string = 'demo'): Promise<
 
   // L1: In-memory cache check
   if (dynamicBuyerProfilesStore.has(safeId)) {
+    logger.debug('Dynamic buyer profile L1 cache hit', { userId: safeId });
     return { ...dynamicBuyerProfilesStore.get(safeId)! };
   }
+
+  logger.info('Dynamic buyer profile L1 cache miss, querying L2 PostgreSQL', { userId: safeId });
 
   // L2: PostgreSQL via Drizzle query on cache miss
   try {
@@ -580,15 +765,22 @@ export async function loadDynamicBuyerProfile(userId: string = 'demo'): Promise<
           purchase_velocity: row.purchaseVelocity as any,
           updated_at: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : String(row.updatedAt),
         };
+        logger.info('Dynamic buyer profile found in L2 PostgreSQL, warming L1 cache', { userId: safeId });
         dynamicBuyerProfilesStore.set(safeId, loaded);
         return { ...loaded };
       }
+      logger.info('No record found in L2 PostgreSQL for user, falling back to defaults', { userId: safeId });
     }
-  } catch (err) {
-    console.warn(`[user-memory] PostgreSQL query failed for user ${safeId}:`, err);
+  } catch (err: any) {
+    logger.error('PostgreSQL query failed for dynamic buyer profile in L2 lookup', {
+      userId: safeId,
+      error: err?.message || String(err),
+      stack: err?.stack,
+    });
   }
 
   // Fallback to default if uninitialized
+  logger.info('Falling back to default dynamic buyer profile', { userId: safeId });
   const defaultProfile = createDefaultDynamicBuyerProfile(safeId);
   dynamicBuyerProfilesStore.set(safeId, defaultProfile);
   return { ...defaultProfile };
@@ -600,7 +792,10 @@ export async function loadDynamicBuyerProfile(userId: string = 'demo'): Promise<
 export function loadDynamicBuyerProfileSync(userId: string = 'demo'): DynamicBuyerProfile {
   const safeId = sanitizeUserId(userId);
   if (!dynamicBuyerProfilesStore.has(safeId)) {
+    logger.info('loadDynamicBuyerProfileSync: L1 cache miss, backfilling default profile', { userId: safeId });
     dynamicBuyerProfilesStore.set(safeId, createDefaultDynamicBuyerProfile(safeId));
+  } else {
+    logger.debug('loadDynamicBuyerProfileSync: L1 cache hit', { userId: safeId });
   }
   return { ...dynamicBuyerProfilesStore.get(safeId)! };
 }
@@ -611,6 +806,12 @@ export function loadDynamicBuyerProfileSync(userId: string = 'demo'): DynamicBuy
  */
 export function saveDynamicBuyerProfile(profile: DynamicBuyerProfile): DynamicBuyerProfile {
   const safeId = sanitizeUserId(profile.userId);
+  logger.info('Saving dynamic buyer profile to L1 cache', {
+    userId: safeId,
+    lifetimeSpendCents: profile.purchase_velocity.lifetime_spend_cents,
+    ordersCompleted: profile.purchase_velocity.total_orders_completed,
+  });
+
   const updated: DynamicBuyerProfile = {
     ...profile,
     userId: safeId,
@@ -620,7 +821,11 @@ export function saveDynamicBuyerProfile(profile: DynamicBuyerProfile): DynamicBu
 
   // Asynchronously persist to PostgreSQL using an atomic upsert
   persistDynamicBuyerProfile(updated).catch(err => {
-    console.warn(`[user-memory] Async DB persist failed for user ${safeId}:`, err);
+    logger.error('Async DB persist failed for dynamic buyer profile', {
+      userId: safeId,
+      error: err?.message || String(err),
+      stack: err?.stack,
+    });
   });
 
   return updated;
@@ -651,12 +856,26 @@ export function compactBuyerMemoryFromSession(
   }
 ): DynamicBuyerProfile {
   const safeId = sanitizeUserId(userId);
+  logger.info('Compacting buyer memory from session', {
+    userId: safeId,
+    orderId: session.order_id,
+    totalCents: session.total_cents,
+    merchantDomain: session.merchant_domain,
+    itemCount: session.items?.length || 0,
+    hasIntentTrace: Boolean(intentTrace),
+  });
+
   const profile = loadDynamicBuyerProfileSync(safeId);
 
   // 1. Update purchase velocity & lifetime spend
   if (session.total_cents && session.total_cents > 0) {
     profile.purchase_velocity.lifetime_spend_cents += session.total_cents;
     profile.purchase_velocity.total_orders_completed += 1;
+    logger.debug('Updated purchase velocity', {
+      userId: safeId,
+      newLifetimeSpend: profile.purchase_velocity.lifetime_spend_cents,
+      newOrdersCompleted: profile.purchase_velocity.total_orders_completed,
+    });
   }
 
   // 2. Extract brand affinities from items
@@ -664,6 +883,7 @@ export function compactBuyerMemoryFromSession(
     for (const item of session.items) {
       if (item.brand && !profile.universal.preferred_brands.includes(item.brand)) {
         profile.universal.preferred_brands.push(item.brand);
+        logger.debug('Added newly discovered preferred brand from session', { userId: safeId, brand: item.brand });
       }
 
       // 3. Domain facets
@@ -689,6 +909,11 @@ export function compactBuyerMemoryFromSession(
         existingFacet.confidence_score = Math.min(1.0, existingFacet.confidence_score + 0.05);
         existingFacet.last_updated = new Date().toISOString();
         profile.domain_facets[cat] = existingFacet;
+        logger.debug('Updated category domain facet', {
+          userId: safeId,
+          category: cat,
+          newConfidence: existingFacet.confidence_score,
+        });
       }
     }
   }
@@ -719,12 +944,23 @@ export async function compactBuyerMemoryFromSessionAsync(
   }
 ): Promise<DynamicBuyerProfile> {
   const safeId = sanitizeUserId(userId);
+  logger.info('Compacting buyer memory from session asynchronously', {
+    userId: safeId,
+    orderId: session.order_id,
+    totalCents: session.total_cents,
+  });
+
   const profile = await loadDynamicBuyerProfile(safeId);
 
   // 1. Update purchase velocity & lifetime spend
   if (session.total_cents && session.total_cents > 0) {
     profile.purchase_velocity.lifetime_spend_cents += session.total_cents;
     profile.purchase_velocity.total_orders_completed += 1;
+    logger.debug('Updated purchase velocity (async)', {
+      userId: safeId,
+      newLifetimeSpend: profile.purchase_velocity.lifetime_spend_cents,
+      newOrdersCompleted: profile.purchase_velocity.total_orders_completed,
+    });
   }
 
   // 2. Extract brand affinities from items
@@ -732,6 +968,7 @@ export async function compactBuyerMemoryFromSessionAsync(
     for (const item of session.items) {
       if (item.brand && !profile.universal.preferred_brands.includes(item.brand)) {
         profile.universal.preferred_brands.push(item.brand);
+        logger.debug('Added newly discovered preferred brand from session (async)', { userId: safeId, brand: item.brand });
       }
 
       // 3. Domain facets
@@ -757,12 +994,18 @@ export async function compactBuyerMemoryFromSessionAsync(
         existingFacet.confidence_score = Math.min(1.0, existingFacet.confidence_score + 0.05);
         existingFacet.last_updated = new Date().toISOString();
         profile.domain_facets[cat] = existingFacet;
+        logger.debug('Updated category domain facet (async)', {
+          userId: safeId,
+          category: cat,
+          newConfidence: existingFacet.confidence_score,
+        });
       }
     }
   }
 
   const updated = saveDynamicBuyerProfile(profile);
   await persistDynamicBuyerProfile(updated);
+  logger.info('Completed async buyer memory compaction and persistence', { userId: safeId });
   return updated;
 }
 
@@ -779,19 +1022,33 @@ export function applyDynamicUserRules(
   const minTrust = profile.universal.merchant_minimum_trust_score;
   const targetCategory = category ? category.toLowerCase().trim() : undefined;
   const domainFacet = targetCategory ? profile.domain_facets[targetCategory] : undefined;
+  const initialCount = products.length;
 
-  return products.filter(product => {
+  logger.debug('Applying dynamic user rules filtering', {
+    candidateCount: initialCount,
+    userId: profile.userId,
+    targetCategory,
+    minTrust,
+    avoidedBrands: avoided,
+  });
+
+  let excludedAvoidedBrand = 0;
+  let excludedTrustScore = 0;
+
+  const filtered = products.filter(product => {
     const titleLower = (product.title || '').toLowerCase();
     const descLower = (product.description || '').toLowerCase();
 
     // Avoided brands check
     if (avoided.some(brand => titleLower.includes(brand) || descLower.includes(brand))) {
+      excludedAvoidedBrand++;
       return false;
     }
 
     // Minimum merchant credibility / trust score check (score out of 100)
     if (product.merchant_credibility_score !== undefined) {
       if (product.merchant_credibility_score < minTrust) {
+        excludedTrustScore++;
         return false;
       }
     }
@@ -812,5 +1069,13 @@ export function applyDynamicUserRules(
 
     return true;
   });
-}
 
+  logger.info('Applied dynamic user rules filtering summary', {
+    initialCandidates: initialCount,
+    retainedCandidates: filtered.length,
+    excludedAvoidedBrand,
+    excludedTrustScore,
+  });
+
+  return filtered;
+}

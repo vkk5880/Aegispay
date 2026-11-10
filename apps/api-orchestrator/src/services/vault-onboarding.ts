@@ -1,5 +1,8 @@
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { PayPalApimaticClient, defaultPayPalClient } from './paypal-apimatic.js';
 import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
+
+const logger = createLogger('API:Services:Financial').child('VaultOnboarding');
 
 /**
  * Canonical constant identifier for PayPal Vault v3 payment tokens in autonomous agent workflows
@@ -104,6 +107,7 @@ export class VaultOnboardingService {
 
   constructor(paypalClient?: PayPalApimaticClient) {
     this.paypalClient = paypalClient || defaultPayPalClient;
+    logger.debug('VaultOnboardingService initialized');
   }
 
   /**
@@ -112,33 +116,63 @@ export class VaultOnboardingService {
    */
   async createVaultSetupSession(params?: VaultSetupSessionParams): Promise<VaultSetupSessionResult> {
     const customerId = params?.customerId || (params?.mandateId ? `cust_${params.mandateId.slice(-8)}` : `cust_${Date.now()}`);
+    const returnUrl = params?.returnUrl || 'https://aegispay.dev/vault/return';
+    const cancelUrl = params?.cancelUrl || 'https://aegispay.dev/vault/cancel';
 
-    const response = await this.paypalClient.createVaultSetupToken({
-      customer: { id: customerId },
-      usageType: 'MERCHANT' as any,
-      paymentSource: {
-        paypal: {
-          usageType: 'MERCHANT',
-          experienceContext: {
-            returnUrl: params?.returnUrl || 'https://aegispay.dev/vault/return',
-            cancelUrl: params?.cancelUrl || 'https://aegispay.dev/vault/cancel',
-            shippingPreference: 'NO_SHIPPING',
+    logger.info('Initiating PayPal Vault v3 setup session', {
+      customerId,
+      mandateId: params?.mandateId,
+      returnUrl,
+      cancelUrl,
+      usageType: 'MERCHANT',
+    });
+
+    try {
+      const response = await this.paypalClient.createVaultSetupToken({
+        customer: { id: customerId },
+        usageType: 'MERCHANT' as any,
+        paymentSource: {
+          paypal: {
+            usageType: 'MERCHANT',
+            experienceContext: {
+              returnUrl,
+              cancelUrl,
+              shippingPreference: 'NO_SHIPPING',
+            },
           },
         },
-      },
-    }) as any;
+      }) as any;
 
-    const setupTokenId = response?.id || `setup_tok_${Date.now()}`;
-    const approveLink = response?.links?.find((l: any) => l.rel === 'approve')?.href;
+      const setupTokenId = response?.id || `setup_tok_${Date.now()}`;
+      const approveLink = response?.links?.find((l: any) => l.rel === 'approve')?.href;
 
-    return {
-      setup_token_id: setupTokenId,
-      status: response?.status || 'CREATED',
-      approve_url: approveLink || `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${setupTokenId}`,
-      customer_id: customerId,
-      mandate_id: params?.mandateId,
-      created_at: new Date().toISOString(),
-    };
+      const result: VaultSetupSessionResult = {
+        setup_token_id: setupTokenId,
+        status: response?.status || 'CREATED',
+        approve_url: approveLink || `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${setupTokenId}`,
+        customer_id: customerId,
+        mandate_id: params?.mandateId,
+        created_at: new Date().toISOString(),
+      };
+
+      logger.info('PayPal Vault v3 setup session created successfully', {
+        setupTokenId: result.setup_token_id,
+        status: result.status,
+        customerId: result.customer_id,
+        mandateId: result.mandate_id,
+        approveUrl: result.approve_url,
+      });
+
+      return result;
+    } catch (err: any) {
+      logger.error('Failed to create PayPal Vault v3 setup session', {
+        customerId,
+        mandateId: params?.mandateId,
+        error: err?.message || String(err),
+        stack: err?.stack,
+      });
+      throw err;
+    }
   }
 
   /**
@@ -150,37 +184,76 @@ export class VaultOnboardingService {
     customerId?: string;
     mandateId?: string;
   }): Promise<VaultConfirmResult> {
-    const response = await this.paypalClient.createVaultPaymentToken({
+    logger.info('Converting PayPal Vault setup token into durable payment token', {
       setupTokenId: params.setupTokenId,
-      customer: params.customerId ? { id: params.customerId } : undefined,
-    }) as any;
+      customerId: params.customerId,
+      mandateId: params.mandateId,
+    });
 
-    const paymentTokenId = response?.id || `pm_tok_${Date.now()}`;
-    const result: VaultConfirmResult = {
-      paypal_payment_token_id: paymentTokenId,
-      setup_token_id: params.setupTokenId,
-      status: response?.status || 'VAULTED',
-      customer_id: params.customerId,
-      mandate_id: params.mandateId,
-      vaulted_at: new Date().toISOString(),
-    };
+    try {
+      const response = await this.paypalClient.createVaultPaymentToken({
+        setupTokenId: params.setupTokenId,
+        customer: params.customerId ? { id: params.customerId } : undefined,
+      }) as any;
 
-    if (params.mandateId) {
-      this.vaultedTokens.set(params.mandateId, result);
+      const paymentTokenId = response?.id || `pm_tok_${Date.now()}`;
+      const result: VaultConfirmResult = {
+        paypal_payment_token_id: paymentTokenId,
+        setup_token_id: params.setupTokenId,
+        status: response?.status || 'VAULTED',
+        customer_id: params.customerId,
+        mandate_id: params.mandateId,
+        vaulted_at: new Date().toISOString(),
+      };
+
+      if (params.mandateId) {
+        this.vaultedTokens.set(params.mandateId, result);
+        logger.debug('Mapped vaulted token to mandate in in-memory registry', {
+          mandateId: params.mandateId,
+          paymentTokenId: result.paypal_payment_token_id,
+        });
+      }
+      this.vaultedTokens.set(paymentTokenId, result);
+
+      logger.info('Successfully converted and persisted PayPal Vault payment token', {
+        paymentTokenId: result.paypal_payment_token_id,
+        setupTokenId: result.setup_token_id,
+        status: result.status,
+        mandateId: result.mandate_id,
+      });
+
+      return result;
+    } catch (err: any) {
+      logger.error('Failed to convert PayPal Vault setup token to payment token', {
+        setupTokenId: params.setupTokenId,
+        customerId: params.customerId,
+        mandateId: params.mandateId,
+        error: err?.message || String(err),
+        stack: err?.stack,
+      });
+      throw err;
     }
-    this.vaultedTokens.set(paymentTokenId, result);
-
-    return result;
   }
 
   getVaultedTokenForMandate(mandateId: string): VaultConfirmResult | undefined {
-    return this.vaultedTokens.get(mandateId);
+    const token = this.vaultedTokens.get(mandateId);
+    if (token) {
+      logger.debug('Found vaulted token in registry for mandate', { mandateId, paymentTokenId: token.paypal_payment_token_id });
+    } else {
+      logger.debug('No vaulted token found in registry for mandate', { mandateId });
+    }
+    return token;
   }
 
   /**
    * Registers or updates an existing vaulted token in the in-memory registry
    */
   registerVaultedToken(tokenResult: VaultConfirmResult): void {
+    logger.info('Registering vaulted token in in-memory registry', {
+      mandateId: tokenResult.mandate_id,
+      paymentTokenId: tokenResult.paypal_payment_token_id,
+      status: tokenResult.status,
+    });
     if (tokenResult.mandate_id) {
       this.vaultedTokens.set(tokenResult.mandate_id, tokenResult);
     }
@@ -240,17 +313,26 @@ export class VaultOnboardingService {
     order: any;
     completedAt: string;
   }> {
+    logger.info('Executing delegated headless checkout', {
+      totalCents: params.totalCents,
+      mandateId: params.mandateId,
+      sessionId: params.sessionId,
+      payPalRequestId: params.payPalRequestId,
+    });
+
     // 1. Resolve vaulted payment token
     let effectiveTokenId = params.paymentTokenId || (params as any).paypal_payment_token_id;
     if (!effectiveTokenId && params.mandateId) {
       const storedToken = this.getVaultedTokenForMandate(params.mandateId);
       if (storedToken) {
         effectiveTokenId = storedToken.paypal_payment_token_id;
+        logger.debug('Resolved payment token from mandate registry', { mandateId: params.mandateId, effectiveTokenId });
       }
     }
 
     if (!effectiveTokenId) {
       effectiveTokenId = `vault_tok_${Date.now()}`;
+      logger.debug('No stored token found; generated fallback token ID', { effectiveTokenId });
     }
 
     const currency = (params.currency || 'USD').toUpperCase();
@@ -295,6 +377,14 @@ export class VaultOnboardingService {
       ];
     }
 
+    logger.info('Creating PayPal Orders v2 with intent: CAPTURE bound to vaulted token', {
+      paymentTokenId: effectiveTokenId,
+      currency,
+      totalAmount,
+      purchaseUnitsCount: units.length,
+      payPalRequestId: params.payPalRequestId,
+    });
+
     // 3. Create Orders v2 with intent: "CAPTURE" bound to vaulted payment source token
     const createdOrder = await this.paypalClient.createOrder({
       intent: 'CAPTURE',
@@ -304,19 +394,33 @@ export class VaultOnboardingService {
     }) as any;
 
     const orderId = createdOrder?.id || `ORD_${Date.now()}`;
+    logger.info('PayPal Orders v2 created', { orderId, status: createdOrder?.status });
 
     // 3.5 Evaluate 3D Secure liability shift per 3d-secure.md
     // liability_shift: POSSIBLE — proceed; NO — merchant bears liability, decline; UNKNOWN — issuer unavailable
     const cardVerification = createdOrder?.payment_source?.card?.authentication_result ||
       createdOrder?.attributes?.verification?.['3d_secure'];
     if (cardVerification?.liability_shift === 'NO') {
+      logger.error('3D Secure liability shift denied by card issuer', {
+        orderId,
+        liabilityShift: cardVerification?.liability_shift,
+        verification: sanitizeForLogging(cardVerification),
+      });
       throw new Error('LIABILITY_SHIFT_NO: Card issuer did not grant liability shift. Order capture declined for seller protection.');
+    } else {
+      logger.debug('3D Secure liability shift check passed or not applicable', {
+        orderId,
+        liabilityShift: cardVerification?.liability_shift || 'N/A',
+      });
     }
 
     // 4. Capture headless order if not already COMPLETED
     let captureResponse = createdOrder;
     if (createdOrder?.status !== 'COMPLETED') {
+      logger.info('Order not yet COMPLETED; executing captureOrder', { orderId });
       captureResponse = await this.paypalClient.captureOrder(orderId, params.payPalRequestId);
+    } else {
+      logger.debug('Order already in COMPLETED status upon creation', { orderId });
     }
 
     // Extract capture ID
@@ -326,9 +430,13 @@ export class VaultOnboardingService {
     if (captures && captures.length > 0 && captures[0].id) {
       captureId = captures[0].id;
     }
+    logger.info('Order capture resolved', { orderId, captureId });
 
     // 5. Mandatory server read-back verification (GET /v2/checkout/orders/{id})
+    logger.info('Performing mandatory server read-back verification', { orderId });
     const readBackOrder = await this.paypalClient.getOrder(orderId);
+    const readBackVerified = !!readBackOrder?.server_readback_verified;
+    logger.info('Server read-back verification result', { orderId, readBackVerified });
 
     return {
       status: 'COMPLETED',
@@ -336,7 +444,7 @@ export class VaultOnboardingService {
       captureId,
       intent: 'CAPTURE',
       paymentTokenId: effectiveTokenId,
-      readBackVerified: !!readBackOrder?.server_readback_verified,
+      readBackVerified,
       order: readBackOrder,
       completedAt: new Date().toISOString(),
     };
@@ -352,6 +460,14 @@ export class VaultOnboardingService {
     const maxRetries = params.maxRetries ?? 2;
     const initialBackoffMs = params.initialBackoffMs ?? 25;
     const enforceRollback = params.enforceCompensatingRollback !== false;
+
+    logger.info('Starting autonomous headless auto-buy pipeline', {
+      totalCents: params.totalCents,
+      mandateId: params.mandateId,
+      maxRetries,
+      initialBackoffMs,
+      enforceRollback,
+    });
 
     // 1. Resolve initial payment token
     let activeToken = params.paypal_payment_token_id || params.paymentTokenId;
@@ -376,6 +492,12 @@ export class VaultOnboardingService {
         ? params.fallbackPaymentTokenId
         : activeToken;
 
+      logger.info(`Headless auto-buy attempt ${attempt}/${maxRetries + 1}`, {
+        attempt,
+        tokenUsed: currentToken,
+        isFallbackToken: attempt > 1 && Boolean(params.fallbackPaymentTokenId),
+      });
+
       try {
         const checkoutResult = await this.executeDelegatedCheckout({
           paymentTokenId: currentToken,
@@ -397,6 +519,13 @@ export class VaultOnboardingService {
           tokenUsed: currentToken,
         });
 
+        logger.info(`Headless auto-buy succeeded on attempt ${attempt}`, {
+          orderId: checkoutResult.orderId,
+          captureId: checkoutResult.captureId,
+          recovered: attempt > 1,
+          tokenUsed: currentToken,
+        });
+
         return {
           ...checkoutResult,
           paypal_payment_token_id: currentToken,
@@ -414,9 +543,17 @@ export class VaultOnboardingService {
           tokenUsed: currentToken,
         });
 
+        logger.warn(`Headless auto-buy attempt ${attempt} failed`, {
+          attempt,
+          maxRetries,
+          error: err?.message || String(err),
+          tokenUsed: currentToken,
+        });
+
         // Exponential backoff sleep before next retry attempt
         if (attempt <= maxRetries) {
           const delay = initialBackoffMs * Math.pow(2, attempt - 1);
+          logger.info(`Sleeping ${delay}ms before headless auto-buy retry attempt ${attempt + 1}`);
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
@@ -424,16 +561,36 @@ export class VaultOnboardingService {
 
     // Retries exhausted: trigger compensating rollback on reservation hold
     if (enforceRollback && params.mandateId) {
+      logger.info('Headless auto-buy retries exhausted; triggering compensating rollback', {
+        mandateId: params.mandateId,
+        totalCents: params.totalCents,
+        merchantDomain: params.merchantDomain,
+      });
       try {
         await defaultAtomicSpendEnforcer.rollbackReservation(
           params.mandateId,
           params.totalCents,
           params.merchantDomain
         );
-      } catch (rollbackErr) {
-        // Rollback failure handled gracefully
+        logger.info('Compensating rollback executed successfully', {
+          mandateId: params.mandateId,
+          totalCents: params.totalCents,
+        });
+      } catch (rollbackErr: any) {
+        logger.error('Failed to execute compensating rollback for mandate', {
+          mandateId: params.mandateId,
+          totalCents: params.totalCents,
+          error: rollbackErr?.message || String(rollbackErr),
+          stack: rollbackErr?.stack,
+        });
       }
     }
+
+    logger.error('Headless auto-buy completely failed after exhausting retries', {
+      attempts: attempt,
+      mandateId: params.mandateId,
+      lastErrorMessage: lastError?.message || 'Unknown error',
+    });
 
     const failureError = new Error(
       `Autonomous Headless Auto-Buy failed after ${attempt} attempts: ${lastError?.message || 'Unknown error'}`
