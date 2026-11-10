@@ -1,16 +1,32 @@
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { validatePublicImageUrl } from '../custom-tools.js';
+
+const logger = createLogger('MCP:Enforcer:CatalogSearch', { stream: 'stderr' });
 
 /**
  * Sanitizes a raw search string by trimming whitespace, stripping non-printable
  * control characters and null bytes, and limiting overall character length.
  */
 export function sanitizeSearchQuery(query: string): string {
-  if (typeof query !== 'string') return '';
+  if (typeof query !== 'string') {
+    logger.debug('Non-string search query provided, defaulting to empty string', { queryType: typeof query });
+    return '';
+  }
+
+  const rawLength = query.length;
   // Strip control characters (ASCII 0-31 and 127) and null bytes
   const cleaned = query.replace(/[\x00-\x1F\x7F]/g, ' ').replace(/\s+/g, ' ').trim();
-  // Bound max length to 200 characters
-  return cleaned.slice(0, 200);
+  const truncated = cleaned.slice(0, 200);
+
+  logger.debug('Sanitized catalog search query', {
+    rawLength,
+    cleanedLength: cleaned.length,
+    finalLength: truncated.length,
+    wasTruncated: cleaned.length > 200,
+  });
+
+  return truncated;
 }
 
 /**
@@ -52,7 +68,19 @@ export const CatalogSearchInputSchema = z.object({
     .string()
     .url('Invalid image URL format')
     .max(1024, 'Image URL must not exceed 1024 characters')
-    .refine((url) => validatePublicImageUrl(url), {
+    .refine((url) => {
+      const isPublic = validatePublicImageUrl(url);
+      if (!isPublic) {
+        logger.warn('SSRF defense blocked image URL in catalog search input', {
+          url: sanitizeForLogging(url),
+        });
+      } else {
+        logger.debug('SSRF defense validated public image URL', {
+          url: sanitizeForLogging(url),
+        });
+      }
+      return isPublic;
+    }, {
       message: 'SSRF protection: loopback, link-local, or private IP addresses are strictly rejected',
     })
     .optional(),
@@ -70,7 +98,14 @@ export const CatalogSearchInputSchema = z.object({
 }).refine(
   (data) => {
     if (data.min_price_cents !== undefined && data.max_price_cents !== undefined) {
-      return data.max_price_cents >= data.min_price_cents;
+      const isValidRange = data.max_price_cents >= data.min_price_cents;
+      if (!isValidRange) {
+        logger.warn('Price range constraint violation: max_price_cents < min_price_cents', {
+          min_price_cents: data.min_price_cents,
+          max_price_cents: data.max_price_cents,
+        });
+      }
+      return isValidRange;
     }
     return true;
   },
@@ -113,10 +148,19 @@ export async function handleCatalogSearch(
   rawArgs: unknown,
   executor?: (sanitized: CatalogSearchInput) => Promise<{ total: number; items: CatalogSearchProduct[] }>
 ): Promise<CatalogSearchResult> {
+  logger.info('Evaluating catalog search request', { rawArgs: sanitizeForLogging(rawArgs) });
+
   try {
     const parseResult = CatalogSearchInputSchema.safeParse(rawArgs);
     if (!parseResult.success) {
       const issue = parseResult.error.issues[0];
+      const errorMessage = issue ? `${issue.path.join('.')}: ${issue.message}` : 'Invalid search arguments';
+      logger.warn('Catalog search input validation failed', {
+        errorCount: parseResult.error.issues.length,
+        primaryError: errorMessage,
+        issues: parseResult.error.issues,
+      });
+
       return {
         success: false,
         total_matches: 0,
@@ -125,15 +169,33 @@ export async function handleCatalogSearch(
         items: [],
         error: {
           code: 'ERR_INVALID_ARGUMENT',
-          message: issue ? `${issue.path.join('.')}: ${issue.message}` : 'Invalid search arguments',
+          message: errorMessage,
         },
       };
     }
 
     const sanitized = parseResult.data;
+    logger.debug('Catalog search inputs parsed and sanitized successfully', {
+      query: sanitized.query,
+      categoryCount: sanitized.category_ids?.length ?? 0,
+      minPrice: sanitized.min_price_cents,
+      maxPrice: sanitized.max_price_cents,
+      hasHexColor: Boolean(sanitized.hex_color),
+      hasImageUrl: Boolean(sanitized.image_url),
+      limit: sanitized.limit,
+      offset: sanitized.offset,
+    });
 
     if (executor) {
+      logger.debug('Invoking custom catalog search executor');
       const { total, items } = await executor(sanitized);
+      logger.info('Custom catalog search executor completed', {
+        totalMatches: total,
+        returnedItemsCount: items.length,
+        limit: sanitized.limit,
+        offset: sanitized.offset,
+      });
+
       return {
         success: true,
         query: sanitized.query,
@@ -145,6 +207,7 @@ export async function handleCatalogSearch(
     }
 
     // Default mock response when no external executor is supplied
+    logger.debug('No external executor supplied, returning default mock response');
     return {
       success: true,
       query: sanitized.query,
@@ -155,7 +218,11 @@ export async function handleCatalogSearch(
     };
   } catch (err: unknown) {
     // Safe error masking: Never leak internal error message or stack trace
-    console.error('[MCP Enforcer:catalog-search] Masked unexpected error:', err instanceof Error ? err.message : String(err));
+    logger.error('Masked unexpected error in catalog search handler', {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    });
+
     return {
       success: false,
       total_matches: 0,

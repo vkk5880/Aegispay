@@ -1,31 +1,9 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 
-/**
- * Sanitizes an object before stderr logging to avoid exposing tokens or keys.
- */
-function sanitizeForLogging(obj: any): any {
-  if (!obj || typeof obj !== 'object') return obj;
-  const clone = Array.isArray(obj) ? [...obj] : { ...obj };
-  for (const key of Object.keys(clone)) {
-    if (typeof clone[key] === 'string') {
-      const lowerKey = key.toLowerCase();
-      if (
-        lowerKey.includes('token') ||
-        lowerKey.includes('secret') ||
-        lowerKey.includes('signature') ||
-        lowerKey.includes('auth') ||
-        lowerKey.includes('key')
-      ) {
-        clone[key] = '[REDACTED]';
-      }
-    } else if (typeof clone[key] === 'object' && clone[key] !== null) {
-      clone[key] = sanitizeForLogging(clone[key]);
-    }
-  }
-  return clone;
-}
+const logger = createLogger('MCP:Enforcer:DisputeEvidence', { stream: 'stderr' });
 
 /**
  * Validates a filename / relative path to prevent path traversal attacks.
@@ -36,29 +14,44 @@ function sanitizeForLogging(obj: any): any {
  * - Backslashes or forward slashes in plain filenames
  */
 export function validateSafeFilePath(inputPath: string): boolean {
-  if (!inputPath || typeof inputPath !== 'string') return false;
+  logger.debug('Validating file path safety', { inputPath });
+
+  if (!inputPath || typeof inputPath !== 'string') {
+    logger.warn('File path safety validation failed: empty or non-string input', {
+      inputType: typeof inputPath,
+    });
+    return false;
+  }
 
   // Null byte injection check
   if (inputPath.includes('\0') || inputPath.includes('%00')) {
+    logger.warn('File path safety validation failed: null byte injection detected', { inputPath });
     return false;
   }
 
   // Directory traversal check
   if (inputPath.includes('..')) {
+    logger.warn('File path safety validation failed: directory traversal token detected', { inputPath });
     return false;
   }
 
   // Path normalization check
   const normalized = path.normalize(inputPath);
   if (normalized.startsWith('..') || path.isAbsolute(normalized)) {
+    logger.warn('File path safety validation failed: normalized path escapes root or is absolute', {
+      inputPath,
+      normalized,
+    });
     return false;
   }
 
   // Reject windows drive letters like C:\ or C:/
   if (/^[a-zA-Z]:/.test(inputPath)) {
+    logger.warn('File path safety validation failed: Windows drive letter detected', { inputPath });
     return false;
   }
 
+  logger.debug('File path verified safe', { inputPath, normalized });
   return true;
 }
 
@@ -75,11 +68,14 @@ export function validateSafeFilePath(inputPath: string): boolean {
 export function validateBoundingBoxCoordinates(
   coords: [number, number, number, number] | { ymin: number; xmin: number; ymax: number; xmax: number }
 ): { valid: boolean; error?: string } {
+  logger.debug('Validating bounding box coordinates', { coords });
   let ymin: number, xmin: number, ymax: number, xmax: number;
 
   if (Array.isArray(coords)) {
     if (coords.length !== 4) {
-      return { valid: false, error: 'Bounding coordinates array must contain exactly 4 numbers [ymin, xmin, ymax, xmax]' };
+      const err = 'Bounding coordinates array must contain exactly 4 numbers [ymin, xmin, ymax, xmax]';
+      logger.warn('Bounding box validation failed: invalid array length', { length: coords.length, error: err });
+      return { valid: false, error: err };
     }
     [ymin, xmin, ymax, xmax] = coords;
   } else if (coords && typeof coords === 'object') {
@@ -88,7 +84,9 @@ export function validateBoundingBoxCoordinates(
     ymax = coords.ymax;
     xmax = coords.xmax;
   } else {
-    return { valid: false, error: 'Bounding coordinates must be an array or object' };
+    const err = 'Bounding coordinates must be an array or object';
+    logger.warn('Bounding box validation failed: unsupported format', { coordsType: typeof coords, error: err });
+    return { valid: false, error: err };
   }
 
   if (
@@ -97,21 +95,50 @@ export function validateBoundingBoxCoordinates(
     typeof ymax !== 'number' || isNaN(ymax) ||
     typeof xmax !== 'number' || isNaN(xmax)
   ) {
-    return { valid: false, error: 'Bounding coordinates must be valid numbers' };
+    const err = 'Bounding coordinates must be valid numbers';
+    logger.warn('Bounding box validation failed: non-number or NaN coordinates detected', {
+      ymin,
+      xmin,
+      ymax,
+      xmax,
+      error: err,
+    });
+    return { valid: false, error: err };
   }
 
   if (ymin < 0 || ymin > 1 || xmin < 0 || xmin > 1 || ymax < 0 || ymax > 1 || xmax < 0 || xmax > 1) {
-    return { valid: false, error: 'Bounding coordinates must be normalized within range [0.0, 1.0]' };
+    const err = 'Bounding coordinates must be normalized within range [0.0, 1.0]';
+    logger.warn('Bounding box validation failed: coordinates out of range [0.0, 1.0]', {
+      ymin,
+      xmin,
+      ymax,
+      xmax,
+      error: err,
+    });
+    return { valid: false, error: err };
   }
 
   if (ymin >= ymax) {
-    return { valid: false, error: 'Invalid bounding box: ymin must be strictly less than ymax' };
+    const err = 'Invalid bounding box: ymin must be strictly less than ymax';
+    logger.warn('Bounding box validation failed: y-axis inverted or collapsed', {
+      ymin,
+      ymax,
+      error: err,
+    });
+    return { valid: false, error: err };
   }
 
   if (xmin >= xmax) {
-    return { valid: false, error: 'Invalid bounding box: xmin must be strictly less than xmax' };
+    const err = 'Invalid bounding box: xmin must be strictly less than xmax';
+    logger.warn('Bounding box validation failed: x-axis inverted or collapsed', {
+      xmin,
+      xmax,
+      error: err,
+    });
+    return { valid: false, error: err };
   }
 
+  logger.debug('Bounding box coordinates successfully validated', { ymin, xmin, ymax, xmax });
   return { valid: true };
 }
 
@@ -173,28 +200,69 @@ export interface DisputeEvidenceOutput {
  * Logs exclusively to stderr.
  */
 export async function handleDisputeEvidence(rawArgs: unknown): Promise<DisputeEvidenceOutput> {
-  console.error('[DisputeEvidence Tool] Validating dispute evidence bundle...', sanitizeForLogging(rawArgs));
+  logger.info('Evaluating dispute evidence bundle', { rawArgs: sanitizeForLogging(rawArgs) });
 
-  const parsed = DisputeEvidenceInputSchema.safeParse(rawArgs);
-  if (!parsed.success) {
-    const primaryError = parsed.error.issues[0]?.message || 'ERR_INVALID_DISPUTE_EVIDENCE_ARGUMENTS';
+  try {
+    const parsed = DisputeEvidenceInputSchema.safeParse(rawArgs);
+    if (!parsed.success) {
+      const primaryError = parsed.error.issues[0]?.message || 'ERR_INVALID_DISPUTE_EVIDENCE_ARGUMENTS';
+      const errorCode = primaryError.split(':')[0].trim();
+      const rawDisputeId = (rawArgs as any)?.paypal_dispute_id || 'UNKNOWN';
+
+      logger.warn('Dispute evidence schema validation failed', {
+        paypal_dispute_id: rawDisputeId,
+        primaryError,
+        errorCode,
+        issues: parsed.error.issues,
+      });
+
+      return {
+        status: 'REJECTED',
+        paypal_dispute_id: rawDisputeId,
+        error: primaryError,
+        error_code: errorCode,
+      };
+    }
+
+    const data = parsed.data;
+    const entropy = crypto.randomUUID().slice(0, 12);
+    const evidenceId = `ev_${data.paypal_dispute_id}_${entropy}`;
+
+    const trackingValidated = Boolean(data.carrier_tracking_number);
+    const defectMaskValidated = Boolean(data.vision_defect_mask);
+
+    logger.info('Dispute evidence bundle successfully validated and classified', {
+      evidenceId,
+      paypalDisputeId: data.paypal_dispute_id,
+      trackingValidated,
+      defectMaskValidated,
+      hasPolicyProof: Boolean(data.policy_proof_text),
+      hasAttachmentFile: Boolean(data.attachment_file_name || data.attachment_file_path),
+      evidenceTypeClassification: trackingValidated
+        ? 'PROOF_OF_FULFILLMENT'
+        : defectMaskValidated
+        ? 'DEFECT_FORENSICS'
+        : 'POLICY_EVIDENCE',
+    });
+
+    return {
+      status: 'SUBMITTED',
+      evidence_id: evidenceId,
+      paypal_dispute_id: data.paypal_dispute_id,
+      tracking_validated: trackingValidated,
+      defect_mask_validated: defectMaskValidated,
+    };
+  } catch (error: unknown) {
+    logger.error('Unexpected error handling dispute evidence submission', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+
     return {
       status: 'REJECTED',
       paypal_dispute_id: (rawArgs as any)?.paypal_dispute_id || 'UNKNOWN',
-      error: primaryError,
-      error_code: primaryError.split(':')[0].trim(),
+      error: 'ERR_INTERNAL_DISPUTE_PROCESSING_FAILURE',
+      error_code: 'ERR_INTERNAL_ERROR',
     };
   }
-
-  const data = parsed.data;
-  const entropy = crypto.randomUUID().slice(0, 12);
-  const evidenceId = `ev_${data.paypal_dispute_id}_${entropy}`;
-
-  return {
-    status: 'SUBMITTED',
-    evidence_id: evidenceId,
-    paypal_dispute_id: data.paypal_dispute_id,
-    tracking_validated: Boolean(data.carrier_tracking_number),
-    defect_mask_validated: Boolean(data.vision_defect_mask),
-  };
 }
