@@ -501,8 +501,20 @@ export function UserSettingsDrawer({
                           {
                             id: 'google/gemini-2.5-flash',
                             name: 'Gemini 2.5 Flash',
-                            badge: 'Fast & Default',
+                            badge: 'Recommended',
                             desc: 'Ultra-fast sub-second tool execution with 1M context window.',
+                          },
+                          {
+                            id: 'google/gemini-3.5-flash-lite',
+                            name: 'Gemini 3.5 Flash Lite',
+                            badge: 'Flash Lite 3.5',
+                            desc: 'Instant low-latency evaluation for fast product queries.',
+                          },
+                          {
+                            id: 'google/gemma-4-26b-a4b-it',
+                            name: 'Gemma 4 26B',
+                            badge: 'Gemma 4 26B',
+                            desc: 'Open-weights dense reasoning optimized for deterministic ranking.',
                           },
                           {
                             id: 'google/gemini-1.5-pro',

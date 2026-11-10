@@ -3,6 +3,12 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   transpilePackages: ['@aegispay/shared-types'],
+  // @ts-ignore
+  allowedDevOrigins: [
+    '3000-cs-441998344505-default.cs-asia-southeast1-seal.cloudshell.dev',
+    '*.cs-asia-southeast1-seal.cloudshell.dev',
+    '*.cloudshell.dev',
+  ],
   typescript: {
     ignoreBuildErrors: true,
   },

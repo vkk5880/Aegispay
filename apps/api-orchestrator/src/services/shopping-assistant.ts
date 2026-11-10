@@ -337,8 +337,24 @@ export const AVAILABLE_COMMERCE_MODELS: CommerceModelOption[] = [
     name: 'Gemini 2.5 Flash',
     provider: 'google',
     description: 'Sub-second tool latency, optimized for autonomous multi-vendor shopping concierges.',
-    badge: 'Recommended / Default',
+    badge: 'Recommended',
     contextWindow: '1M tokens',
+  },
+  {
+    id: 'google/gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash Lite',
+    provider: 'google',
+    description: 'Ultra-low latency lightweight intelligence for instant budget evaluation.',
+    badge: 'Flash Lite 3.5',
+    contextWindow: '1M tokens',
+  },
+  {
+    id: 'google/gemma-4-26b-a4b-it',
+    name: 'Gemma 4 26B',
+    provider: 'google',
+    description: 'Open-weights dense reasoning optimized for deterministic mathematical ranking.',
+    badge: 'Gemma 4 26B',
+    contextWindow: '256k tokens',
   },
   {
     id: 'google/gemini-1.5-pro',
@@ -1343,7 +1359,8 @@ export class ShoppingAssistantService {
     )) as { cart: KnapsackOptimizationResult };
 
     // Validate emitted cart against ExplainableCartPayloadSchema
-    const validatedCart: ExplainableCartPayload = ExplainableCartPayloadSchema.parse(solveCartRes.cart);
+    const rawCart = (solveCartRes as any)?.cart || solveCartRes;
+    const validatedCart: ExplainableCartPayload = ExplainableCartPayloadSchema.parse(rawCart);
 
     trace.push(
       `Knapsack solver bundled cart: Net buyer price: $${(validatedCart.net_buyer_expenditure_cents / 100).toFixed(2)}, ` +

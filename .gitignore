@@ -25,3 +25,4 @@ scripts/
 *.tar.gz
 .agents/
 skills-lock.json
+*.rdb
