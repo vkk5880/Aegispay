@@ -222,7 +222,7 @@ function safeString(value: unknown, fallback = ''): string {
 /**
  * Helper to ensure a valid UUID is returned for PayPal-Request-Id idempotency
  */
-function ensureRequestId(id?: string): string {
+export function ensureRequestId(id?: string): string {
   if (id && typeof id === 'string' && id.trim().length > 0) {
     return id.trim();
   }
@@ -232,7 +232,7 @@ function ensureRequestId(id?: string): string {
 /**
  * Parse Retry-After header (seconds or HTTP-date) to milliseconds
  */
-function parseRetryAfter(headerValue: string | null | undefined): number | null {
+export function parseRetryAfter(headerValue: string | null | undefined): number | null {
   if (!headerValue) return null;
   const numeric = Number(headerValue);
   if (!Number.isNaN(numeric) && numeric >= 0) {
@@ -244,6 +244,95 @@ function parseRetryAfter(headerValue: string | null | undefined): number | null 
     return delta > 0 ? delta : 0;
   }
   return null;
+}
+
+export interface MappedPayPalError {
+  statusCode: number;
+  error: string;
+  message: string;
+  details?: any;
+}
+
+/**
+ * Standardized APIMatic error mapper implementing Table 1b.4 ("When the API says no")
+ */
+export function mapPayPalError(err: any): MappedPayPalError {
+  const status = err?.statusCode || err?.status;
+
+  if (status === 400) {
+    const reason =
+      err?.result?.details?.[0]?.description ||
+      err?.result?.message ||
+      err?.message ||
+      'Bad Request';
+    return {
+      statusCode: 400,
+      error: 'BAD_REQUEST',
+      message: reason,
+      details: err?.result?.details || err?.details,
+    };
+  }
+
+  if (status === 401 || status === 403) {
+    return {
+      statusCode: 502,
+      error: 'UPSTREAM_AUTH_ERROR',
+      message: 'Upstream payment provider authorization error',
+    };
+  }
+
+  if (status === 422) {
+    const issue =
+      err?.result?.details?.[0]?.issue ||
+      err?.details?.[0]?.issue ||
+      err?.name ||
+      'UNPROCESSABLE_ENTITY';
+    const description =
+      err?.result?.details?.[0]?.description ||
+      err?.details?.[0]?.description ||
+      err?.message ||
+      'Unprocessable entity';
+    return {
+      statusCode: 422,
+      error: issue,
+      message: description,
+      details: err?.result?.details || err?.details,
+    };
+  }
+
+  if (status === 429) {
+    return {
+      statusCode: 503,
+      error: 'RATE_LIMIT_EXCEEDED',
+      message: 'Rate limit reached on payment clearinghouse',
+    };
+  }
+
+  if (status && status >= 500 && status < 600) {
+    return {
+      statusCode: 502,
+      error: 'UPSTREAM_SERVER_ERROR',
+      message: 'Payment clearinghouse temporary error',
+    };
+  }
+
+  const isTimeout =
+    err?.name === 'TIMEOUT' ||
+    err?.code === 'ETIMEDOUT' ||
+    err?.message?.includes('timed out');
+  if (isTimeout) {
+    return {
+      statusCode: 504,
+      error: 'UPSTREAM_TIMEOUT',
+      message: 'Connection to PayPal payment processor timed out',
+    };
+  }
+
+  return {
+    statusCode: 500,
+    error: err?.name || 'PAYMENT_OPERATION_FAILED',
+    message: err?.message || 'Payment operation failed',
+  };
 }
 
 export class PayPalApimaticClient {
@@ -724,6 +813,112 @@ export class PayPalApimaticClient {
   }
 
   /**
+   * Orders v2: Update order (PATCH /v2/checkout/orders/{id})
+   */
+  async patchOrder(orderId: string, patch: any[]) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+      return true;
+    }
+
+    try {
+      await this.executeWithRetry(() =>
+        this.ordersController.patchOrder({
+          id: orderId,
+          body: patch,
+        })
+      );
+      return true;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+        return true;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Orders v2: Confirm payment source (POST /v2/checkout/orders/{id}/confirm-payment-source)
+   */
+  async confirmOrder(orderId: string, body: any) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+      return {
+        id: orderId,
+        status: 'APPROVED',
+      };
+    }
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.ordersController.confirmOrder({
+          id: orderId,
+          body,
+        })
+      );
+      return response.result;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+        return {
+          id: orderId,
+          status: 'APPROVED',
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Orders v2: Add tracking to Order (POST /v2/checkout/orders/{id}/track)
+   */
+  async createOrderTracking(orderId: string, body: any) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+      return {
+        id: orderId,
+        status: 'COMPLETED',
+      };
+    }
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.ordersController.createOrderTracking({
+          id: orderId,
+          body,
+        })
+      );
+      return response.result;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+        return { id: orderId, status: 'COMPLETED' };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Orders v2: Update tracking on Order (PATCH /v2/checkout/orders/{id}/trackers/{tracker_id})
+   */
+  async updateOrderTracking(orderId: string, trackerId: string, body: any[]) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+      return true;
+    }
+
+    try {
+      await this.executeWithRetry(() =>
+        this.ordersController.updateOrderTracking({
+          id: orderId,
+          trackerId,
+          body,
+        })
+      );
+      return true;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || orderId.startsWith('MOCK_')) {
+        return true;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Authorize an approved order (POST /v2/checkout/orders/{id}/authorize)
    */
   async authorizeOrder(orderId: string, payPalRequestId?: string, mockResponse?: string) {
@@ -913,6 +1108,46 @@ export class PayPalApimaticClient {
   }
 
   /**
+   * Get authorized payment details (GET /v2/payments/authorizations/{id})
+   * Satisfies Table 1b.1 Unknown Outcomes re-read contract.
+   */
+  async getAuthorizedPayment(authorizationId: string, mockResponse?: string) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || authorizationId.startsWith('MOCK_') || authorizationId.startsWith('AUTH-')) {
+      return {
+        id: authorizationId,
+        status: 'CREATED' as const,
+        amount: { currencyCode: 'USD', value: '100.00' },
+        sellerProtection: { status: 'ELIGIBLE' as const },
+        expirationTime: new Date(Date.now() + 3 * 24 * 3600 * 1000).toISOString(),
+        links: [
+          { href: `${this.getBaseUrl()}/v2/payments/authorizations/${authorizationId}`, rel: 'self', method: 'GET' },
+          { href: `${this.getBaseUrl()}/v2/payments/authorizations/${authorizationId}/capture`, rel: 'capture', method: 'POST' },
+          { href: `${this.getBaseUrl()}/v2/payments/authorizations/${authorizationId}/void`, rel: 'void', method: 'POST' },
+        ],
+      } as any;
+    }
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.paymentsController.getAuthorizedPayment({
+          authorizationId,
+          paypalMockResponse: mockResponse,
+        })
+      );
+      return response.result;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || authorizationId.startsWith('MOCK_')) {
+        return {
+          id: authorizationId,
+          status: 'CREATED' as const,
+          amount: { currencyCode: 'USD', value: '100.00' },
+        } as any;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Get captured payment details (GET /v2/payments/captures/{id})
    */
   async getCapturedPayment(captureId: string) {
@@ -989,6 +1224,38 @@ export class PayPalApimaticClient {
           status: 'COMPLETED',
           amount: resolvedAmount || { currency_code: 'USD', value: '10.00' },
         };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Payments v2: Get Refund details (GET /v2/payments/refunds/{id})
+   */
+  async getRefund(refundId: string, mockResponse?: string) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || refundId.startsWith('MOCK_') || refundId.startsWith('REF-')) {
+      return {
+        id: refundId,
+        status: 'COMPLETED' as const,
+        amount: { currencyCode: 'USD', value: '10.00' },
+      } as any;
+    }
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.paymentsController.getRefund({
+          refundId,
+          paypalMockResponse: mockResponse,
+        })
+      );
+      return response.result;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || refundId.startsWith('MOCK_')) {
+        return {
+          id: refundId,
+          status: 'COMPLETED' as const,
+          amount: { currencyCode: 'USD', value: '10.00' },
+        } as any;
       }
       throw err;
     }
@@ -1130,6 +1397,69 @@ export class PayPalApimaticClient {
     } catch (err: any) {
       if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
         return true;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Vault v3: Get Setup Token details (GET /v3/vault/setup-tokens/{id})
+   * Satisfies Table 1b.1 Unknown Outcomes re-read contract.
+   */
+  async getSetupToken(setupTokenId: string) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || setupTokenId.startsWith('vault_setup_') || setupTokenId.startsWith('vlt_st_') || setupTokenId.startsWith('mock_')) {
+      return {
+        id: setupTokenId,
+        status: 'CREATED',
+        payment_source: {
+          paypal: {
+            usage_type: 'PLATFORM',
+          },
+        },
+      };
+    }
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.vaultController.getSetupToken(setupTokenId)
+      );
+      return response.result;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || setupTokenId.startsWith('vault_setup_') || setupTokenId.startsWith('vlt_st_') || setupTokenId.startsWith('mock_')) {
+        return {
+          id: setupTokenId,
+          status: 'CREATED',
+        };
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Vault v3: Get Payment Token details (GET /v3/vault/payment-tokens/{id})
+   */
+  async getPaymentToken(paymentTokenId: string) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || paymentTokenId.startsWith('pm_tok_') || paymentTokenId.startsWith('vault_tok_') || paymentTokenId.startsWith('mock_')) {
+      return {
+        id: paymentTokenId,
+        customer: { id: 'cust_default' },
+        links: [
+          { href: `${this.getBaseUrl()}/v3/vault/payment-tokens/${paymentTokenId}`, rel: 'self', method: 'GET' },
+        ],
+      } as any;
+    }
+
+    try {
+      const response = await this.executeWithRetry(() =>
+        this.vaultController.getPaymentToken(paymentTokenId)
+      );
+      return response.result;
+    } catch (err: any) {
+      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || paymentTokenId.startsWith('pm_tok_') || paymentTokenId.startsWith('vault_tok_') || paymentTokenId.startsWith('mock_')) {
+        return {
+          id: paymentTokenId,
+          customer: { id: 'cust_default' },
+        } as any;
       }
       throw err;
     }

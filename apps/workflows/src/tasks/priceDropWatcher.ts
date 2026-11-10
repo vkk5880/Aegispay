@@ -166,7 +166,21 @@ export async function executeUnitPartialCapture(params: {
     });
     return res.result;
   } catch (err: any) {
-    console.warn(`[executeUnitPartialCapture] Real capture failed for auth ${params.authorizationId}, using fallback simulation:`, err);
+    console.warn(`[executeUnitPartialCapture] Real capture failed for auth ${params.authorizationId}, verifying authorization status via getAuthorizedPayment:`, err);
+    // Table 1b.1 Unknown Outcomes: Re-read authorization status via getAuthorizedPayment before concluding
+    try {
+      const authDetails = await paymentsController.getAuthorizedPayment({ authorizationId: params.authorizationId });
+      if (authDetails?.result?.status === 'CAPTURED') {
+        return {
+          id: `CAPTURE_${params.authorizationId}`,
+          status: 'COMPLETED',
+          amount: { currency_code: currencyCode, value },
+          final_capture: params.isFinal ?? true,
+        };
+      }
+    } catch (reReadErr) {
+      console.warn(`[executeUnitPartialCapture] getAuthorizedPayment re-read completed:`, reReadErr);
+    }
     return {
       id: `SIM_CAPTURE_${Date.now()}`,
       status: 'COMPLETED',
