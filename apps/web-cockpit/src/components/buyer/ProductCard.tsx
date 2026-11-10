@@ -140,15 +140,18 @@ export function ProductCard({
             </span>
           )}
 
-          {product.badges?.slice(0, 2).map((b, bIdx) => (
-            <span
-              key={bIdx}
-              style={{ color: b.badge_color, borderColor: `${b.badge_color}40` }}
-              className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/5 border"
-            >
-              {b.label}
-            </span>
-          ))}
+          {product.badges?.slice(0, 2).map((b, bIdx) => {
+            const badgeColor = b.badge_color || b.color || '#06b6d4';
+            return (
+              <span
+                key={bIdx}
+                style={{ color: badgeColor, borderColor: `${badgeColor}40` }}
+                className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/5 border"
+              >
+                {b.label}
+              </span>
+            );
+          })}
         </div>
 
         {/* ACP MessageWarning Alert (e.g. Low Stock or Shipping Delay) */}

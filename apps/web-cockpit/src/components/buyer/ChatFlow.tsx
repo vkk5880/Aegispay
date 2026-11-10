@@ -10,7 +10,7 @@ export interface RecoveryPill {
 }
 
 export interface ChatFlowProps {
-  onSearch: (query: string) => void;
+  onSearch?: (query: string) => void;
   disabled?: boolean;
   initialQuery?: string;
   placeholder?: string;
@@ -118,7 +118,7 @@ export function ChatFlow({
       onSelectRecoveryPill(pill);
     }
     setQuery(pill.prompt);
-    onSearch(pill.prompt);
+    onSearch?.(pill.prompt);
   };
 
   useEffect(() => {
@@ -137,7 +137,7 @@ export function ChatFlow({
       const clean = sanitizeChatInput(q);
       setEnrichedQuery(clean);
       setFlowState('SEARCHING');
-      onSearch(clean);
+      onSearch?.(clean);
     },
     [onSearch]
   );

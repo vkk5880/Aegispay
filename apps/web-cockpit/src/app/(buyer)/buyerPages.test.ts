@@ -4,10 +4,14 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AppRouterContext } from 'next/dist/shared/lib/app-router-context.shared-runtime.js';
 
-import HistoryPage, { HistoryContent } from './history/page.js';
-import SearchPage, { SearchContent } from './search/page.js';
-import SharePage, { ShareContent } from './share/page.js';
-import WatchlistPage, { WatchlistContent } from './watchlist/page.js';
+import HistoryPage from './history/page.js';
+import { HistoryContent } from './history/HistoryContent.js';
+import SearchPage from './search/page.js';
+import { SearchContent } from './search/SearchContent.js';
+import SharePage from './share/page.js';
+import { ShareContent } from './share/ShareContent.js';
+import WatchlistPage from './watchlist/page.js';
+import { WatchlistContent } from './watchlist/WatchlistContent.js';
 
 const mockAppRouter = {
   back: () => {},

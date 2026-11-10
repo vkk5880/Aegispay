@@ -229,7 +229,7 @@ export function createScoreAndRankTool(scoringEngine: MurthyroshanScoringEngine 
         title: p.title,
         description: p.description,
         category_id: p.category_id,
-        images: [{ url: p.image_url, cleaned_url: p.cleaned_image_url }],
+        images: [{ url: p.image_url || p.cleaned_url || '', cleaned_url: p.cleaned_image_url || p.cleaned_url || '' }],
         offers: [{
           id: `offer_${p.product_id}`,
           product_id: p.product_id,

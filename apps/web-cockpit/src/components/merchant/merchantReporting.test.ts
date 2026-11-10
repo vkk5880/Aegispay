@@ -23,50 +23,50 @@ test('formatMoney: correctly formats valid numbers and currencies', () => {
   const params1 = {
     value: 1250.5,
     data: { currency: 'USD' },
-  } as ValueFormatterParams<Row>;
+  } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(params1), '$1,250.50');
 
   const params2 = {
     value: 99,
     data: { currency: 'EUR' },
-  } as ValueFormatterParams<Row>;
+  } as unknown as ValueFormatterParams<Row>;
   assert.ok(formatMoney(params2).includes('99.00'));
 
   const params3 = {
     value: 0,
     data: { currency: 'USD' },
-  } as ValueFormatterParams<Row>;
+  } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(params3), '$0.00');
 
   const params4 = {
     value: -45.2,
     data: { currency: 'USD' },
-  } as ValueFormatterParams<Row>;
+  } as unknown as ValueFormatterParams<Row>;
   assert.ok(formatMoney(params4).includes('45.20'));
 });
 
 test('formatMoney: gracefully handles null, undefined, NaN, and invalid currencies', () => {
-  const nullVal = { value: null, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  const nullVal = { value: null, data: { currency: 'USD' } } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(nullVal), '—');
 
-  const undefinedVal = { value: undefined, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  const undefinedVal = { value: undefined, data: { currency: 'USD' } } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(undefinedVal), '—');
 
-  const emptyVal = { value: '', data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  const emptyVal = { value: '', data: { currency: 'USD' } } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(emptyVal), '—');
 
-  const nanVal = { value: NaN, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  const nanVal = { value: NaN, data: { currency: 'USD' } } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(nanVal), '—');
 
-  const infVal = { value: Infinity, data: { currency: 'USD' } } as ValueFormatterParams<Row>;
+  const infVal = { value: Infinity, data: { currency: 'USD' } } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(infVal), '—');
 
   // Missing or non-string currency falls back to USD
-  const missingCurrency = { value: 25.5, data: {} } as ValueFormatterParams<Row>;
+  const missingCurrency = { value: 25.5, data: {} } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(missingCurrency), '$25.50');
 
   // Invalid currency format (e.g. symbols, lowercase or non-3-letter) sanitized to USD
-  const invalidCurrency = { value: 10, data: { currency: 'INVALID_123' } } as ValueFormatterParams<Row>;
+  const invalidCurrency = { value: 10, data: { currency: 'INVALID_123' } } as unknown as ValueFormatterParams<Row>;
   assert.equal(formatMoney(invalidCurrency), '$10.00');
 });
 

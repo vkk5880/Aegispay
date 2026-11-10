@@ -167,7 +167,7 @@ test('6. DuckDbServerSideDatasource: Paginates and calls params.success with row
       filterModel: {},
       sortModel: [],
     },
-    success: (p) => {
+    success: (p: any) => {
       successParams = p;
     },
     fail: () => {},

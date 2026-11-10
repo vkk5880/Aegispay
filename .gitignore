@@ -22,3 +22,4 @@ development-task/
 .development/
 scripts/
 .jules/
+*.tar.gz
