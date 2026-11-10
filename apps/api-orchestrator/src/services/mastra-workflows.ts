@@ -17,6 +17,8 @@ import {
   ProductCardDataSchema,
   ExplainableCartPayloadSchema,
   ProductCardData,
+  createLogger,
+  sanitizeForLogging,
 } from '@aegispay/shared-types';
 import {
   Channel3Client,
@@ -45,6 +47,8 @@ import {
   CommercePipelineInput,
   CommercePipelineOutput,
 } from './shopping-assistant.js';
+
+const logger = createLogger('API:Services:AIWorkflows').child('MastraWorkflows');
 
 export const StepExecutionTimeoutSchema = z.object({
   discoverTimeoutMs: z.number().int().positive().default(10000),
@@ -83,11 +87,13 @@ export async function withStepTimeout<T>(
   fn: () => Promise<T>
 ): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
+  logger.debug(`[withStepTimeout] Initializing timeout guard for step '${stepId}' (${timeoutMs}ms)`);
   try {
-    return await Promise.race([
+    const result = await Promise.race([
       fn(),
       new Promise<T>((_, reject) => {
         timer = setTimeout(() => {
+          logger.warn(`[withStepTimeout] Step '${stepId}' exceeded execution timeout limit (${timeoutMs}ms)`);
           reject(new WorkflowStepTimeoutError(stepId, timeoutMs));
         }, timeoutMs);
         if (timer.unref) {
@@ -95,6 +101,17 @@ export async function withStepTimeout<T>(
         }
       }),
     ]);
+    logger.debug(`[withStepTimeout] Step '${stepId}' completed within timeout limit (${timeoutMs}ms)`);
+    return result;
+  } catch (error: any) {
+    logger.error(`[withStepTimeout] Step '${stepId}' execution failed or timed out`, {
+      stepId,
+      timeoutMs,
+      error: sanitizeForLogging(error),
+      errorMessage: error?.message,
+      stack: error?.stack,
+    });
+    throw error;
   } finally {
     if (timer) {
       clearTimeout(timer);
@@ -126,6 +143,13 @@ export class MastraWorkflows {
     this.cartSolver = options?.cartSolver || defaultCartSolver;
     this.stockReservationEngine = options?.stockReservationEngine || defaultStockReservationEngine;
     this.timeouts = { ...DEFAULT_STEP_TIMEOUTS, ...(options?.timeouts || {}) };
+    logger.info('[MastraWorkflows:init] Engine initialized with timeouts', {
+      timeouts: this.timeouts,
+      hasCustomChannel3: Boolean(options?.channel3Client),
+      hasCustomScoring: Boolean(options?.scoringEngine),
+      hasCustomCartSolver: Boolean(options?.cartSolver),
+      hasCustomStockReservation: Boolean(options?.stockReservationEngine),
+    });
   }
 
   /**
@@ -134,14 +158,40 @@ export class MastraWorkflows {
    * this safely rolls back the held inventory to prevent orphaned locks.
    */
   public rollbackHeldStock(reservationId: string, reason: string = 'DOWNSTREAM_DAG_STEP_FAILED'): boolean {
+    logger.info(`[MastraWorkflows:rollbackHeldStock] Initiating 2PC compensating rollback for reservation: ${reservationId}`, {
+      reservationId,
+      reason,
+    });
     try {
       const existing = this.stockReservationEngine.getReservation(reservationId);
-      if (existing && existing.state === 'PREPARED') {
-        this.stockReservationEngine.abort(reservationId, reason);
-        return true;
+      if (existing) {
+        logger.debug(`[MastraWorkflows:rollbackHeldStock] Found existing reservation record in state: ${existing.state}`, {
+          reservationId,
+          state: existing.state,
+          itemCount: existing.items?.length,
+        });
+        if (existing.state === 'PREPARED') {
+          this.stockReservationEngine.abort(reservationId, reason);
+          logger.info(`[MastraWorkflows:rollbackHeldStock] Successfully rolled back PREPARED reservation: ${reservationId}`);
+          return true;
+        } else {
+          logger.warn(`[MastraWorkflows:rollbackHeldStock] Cannot rollback reservation in non-PREPARED state: ${existing.state}`, {
+            reservationId,
+            state: existing.state,
+          });
+          return false;
+        }
+      } else {
+        logger.warn(`[MastraWorkflows:rollbackHeldStock] Reservation ${reservationId} not found in registry`);
+        return false;
       }
-      return false;
-    } catch {
+    } catch (err: any) {
+      logger.error(`[MastraWorkflows:rollbackHeldStock] Failed to execute compensating rollback for reservation ${reservationId}`, {
+        reservationId,
+        reason,
+        error: sanitizeForLogging(err),
+        stack: err?.stack,
+      });
       return false;
     }
   }
@@ -150,6 +200,8 @@ export class MastraWorkflows {
    * Constructs the modular Mastra DAG workflow.
    */
   public buildDAG() {
+    logger.debug('[MastraWorkflows:buildDAG] Constructing modular commerce DAG');
+
     // Step 1: discover_products
     const discoverStep = createStep({
       id: 'discover_products',
@@ -164,6 +216,13 @@ export class MastraWorkflows {
         thought_trace: z.array(z.string()),
       }),
       execute: async ({ inputData }: { inputData: CommercePipelineInput }) => {
+        logger.info('[Mastra DAG:discover_products] Commencing Step 1 execution', {
+          query: inputData.query,
+          message: inputData.message,
+          productIdsCount: inputData.product_ids?.length ?? 0,
+          budgetCapCents: inputData.budget_cap_cents,
+          zipCode: inputData.zip_code,
+        });
         return await withStepTimeout('discover_products', this.timeouts.discoverTimeoutMs, async () => {
           const trace = [...(inputData.thought_trace || [])];
           const query = inputData.query || inputData.message || '';
@@ -171,19 +230,24 @@ export class MastraWorkflows {
 
           let products: ProductCardData[] = [];
           if (inputData.product_ids && inputData.product_ids.length > 0) {
+            logger.debug(`[Mastra DAG:discover_products] Looking up explicit product IDs: ${inputData.product_ids.join(', ')}`);
             const details = await this.channel3Client.lookup(inputData.product_ids);
             products = details.map((p: Channel3ProductDetail) => transformToProductCard(p));
+            logger.info(`[Mastra DAG:discover_products] Channel3 lookup returned ${products.length} product details`);
           } else {
+            const limit = inputData.limit || 10;
+            logger.debug(`[Mastra DAG:discover_products] Executing Channel3 vector search for query: "${query}" (limit: ${limit})`);
             const res = await this.channel3Client.search({
               query: query || undefined,
-              limit: inputData.limit || 10,
+              limit,
             });
             products = res.products.map((p: Channel3ProductDetail) => transformToProductCard(p));
+            logger.info(`[Mastra DAG:discover_products] Channel3 search returned ${products.length} matching products`);
           }
 
           trace.push(`[Mastra DAG: discover_products] Discovered ${products.length} products`);
 
-          return {
+          const output = {
             query,
             products,
             total_found: products.length,
@@ -192,6 +256,11 @@ export class MastraWorkflows {
             product_ids: inputData.product_ids,
             thought_trace: trace,
           };
+          logger.info('[Mastra DAG:discover_products] Step 1 completed successfully', {
+            totalFound: output.total_found,
+            hasBudgetCap: Boolean(output.budget_cap_cents),
+          });
+          return output;
         });
       },
     });
@@ -219,6 +288,11 @@ export class MastraWorkflows {
         thought_trace: z.array(z.string()),
       }),
       execute: async ({ inputData }: any) => {
+        logger.info('[Mastra DAG:score_and_rank] Commencing Step 2 execution', {
+          itemCount: inputData.products?.length ?? 0,
+          budgetCapCents: inputData.budget_cap_cents,
+          query: inputData.query,
+        });
         return await withStepTimeout('score_and_rank', this.timeouts.scoreTimeoutMs, async () => {
           const trace = [...inputData.thought_trace];
           trace.push(`[Mastra DAG: score_and_rank] Deterministically scoring ${inputData.products.length} items`);
@@ -242,11 +316,13 @@ export class MastraWorkflows {
             }],
           }));
 
+          logger.debug(`[Mastra DAG:score_and_rank] Scoring ${details.length} details against target budget ${inputData.budget_cap_cents ?? 'unbounded'}`);
           const rankedItems = this.scoringEngine.rankProducts(details, {
             query: inputData.query,
             target_price_cents: inputData.budget_cap_cents,
           });
 
+          logger.debug(`[Mastra DAG:score_and_rank] Assigning badges to ${rankedItems.length} ranked items`);
           assignProductBadges(rankedItems);
 
           const rankedMap = new Map<string, ProductCardData>(inputData.products.map((p: ProductCardData) => [p.product_id, p]));
@@ -260,6 +336,11 @@ export class MastraWorkflows {
 
           const topWinnerId = rankedCards[0]?.product_id;
           trace.push(`[Mastra DAG: score_and_rank] Winner: ${topWinnerId}`);
+
+          logger.info('[Mastra DAG:score_and_rank] Step 2 completed successfully', {
+            rankedCardsCount: rankedCards.length,
+            topWinnerId,
+          });
 
           return {
             query: inputData.query,
@@ -300,6 +381,12 @@ export class MastraWorkflows {
         thought_trace: z.array(z.string()),
       }),
       execute: async ({ inputData }: any) => {
+        logger.info('[Mastra DAG:solve_knapsack_cart] Commencing Step 3 execution', {
+          topWinnerId: inputData.top_winner_id,
+          productIdsProvided: inputData.product_ids?.length ?? 0,
+          budgetCapCents: inputData.budget_cap_cents,
+          zipCode: inputData.zip_code,
+        });
         return await withStepTimeout('solve_knapsack_cart', this.timeouts.cartTimeoutMs, async () => {
           const trace = [...inputData.thought_trace];
           trace.push(`[Mastra DAG: solve_knapsack_cart] Solving knapsack cart bundling`);
@@ -307,13 +394,20 @@ export class MastraWorkflows {
           let targetIds: string[] = inputData.product_ids || [];
           if (targetIds.length === 0) {
             if (inputData.top_winner_id) {
+              logger.debug(`[Mastra DAG:solve_knapsack_cart] Using top winner ID as target product: ${inputData.top_winner_id}`);
               targetIds = [inputData.top_winner_id];
             } else if (inputData.ranked_products.length > 0) {
+              logger.debug(`[Mastra DAG:solve_knapsack_cart] Using first ranked product as target: ${inputData.ranked_products[0].product_id}`);
               targetIds = [inputData.ranked_products[0].product_id];
+            } else {
+              logger.warn('[Mastra DAG:solve_knapsack_cart] No products available to target for knapsack solver');
             }
           }
 
+          logger.debug(`[Mastra DAG:solve_knapsack_cart] Target product IDs: ${targetIds.join(', ')}`);
           const catalog = await this.channel3Client.lookup(targetIds);
+          logger.info(`[Mastra DAG:solve_knapsack_cart] Lookup yielded ${catalog.length} catalog items for optimization`);
+
           const knapsack = this.cartSolver.solve(
             catalog,
             targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 })),
@@ -324,6 +418,12 @@ export class MastraWorkflows {
           );
 
           const validatedCart = ExplainableCartPayloadSchema.parse(knapsack);
+          logger.info('[Mastra DAG:solve_knapsack_cart] Step 3 solved knapsack cart successfully', {
+            targetIdsCount: targetIds.length,
+            assignedMerchantsCount: validatedCart.assigned_merchants?.length ?? 0,
+            netExpenditureCents: validatedCart.net_buyer_expenditure_cents,
+            isWithinBudget: validatedCart.is_within_budget,
+          });
 
           return {
             query: inputData.query,
@@ -356,30 +456,54 @@ export class MastraWorkflows {
       }),
       outputSchema: CommercePipelineOutputSchema,
       execute: async ({ inputData }: any) => {
+        logger.info('[Mastra DAG:execute_escrow_hold] Commencing Step 4 execution', {
+          targetProductIds: inputData.target_product_ids,
+          budgetCapCents: inputData.budget_cap_cents,
+          zipCode: inputData.zip_code,
+        });
         return await withStepTimeout('execute_escrow_hold', this.timeouts.escrowTimeoutMs, async () => {
           const trace = [...inputData.thought_trace];
           trace.push(`[Mastra DAG: execute_escrow_hold] Executing 2PC stock verification`);
 
           const holdItems = inputData.target_product_ids.map((pid: string) => ({ product_id: pid, quantity: 1 }));
+          logger.debug(`[Mastra DAG:execute_escrow_hold] Verifying and holding stock for ${holdItems.length} items`);
           const stockRes = await this.channel3Client.verifyAndHoldStock(holdItems, {
             zipCode: inputData.zip_code,
             budgetCapCents: inputData.budget_cap_cents,
           });
 
+          logger.info(`[Mastra DAG:execute_escrow_hold] Channel3 verifyAndHoldStock returned reservation: ${stockRes.reservation_id}`, {
+            allHeld: stockRes.all_held,
+            reservationId: stockRes.reservation_id,
+          });
+
           // Register hold with StockReservationEngine to support 2PC rollback compensation
           if (stockRes.all_held) {
             try {
+              logger.debug(`[Mastra DAG:execute_escrow_hold] Registering 2PC prepare hold for reservation: ${stockRes.reservation_id}`);
               this.stockReservationEngine.prepare(
                 holdItems.map((i: any) => ({ productId: i.product_id, quantity: i.quantity })),
                 { ttlMs: 15 * 60 * 1000 },
                 stockRes.reservation_id
               );
-            } catch {
-              // Engine registration fallback
+              logger.info(`[Mastra DAG:execute_escrow_hold] StockReservationEngine prepared hold ${stockRes.reservation_id} with 15m TTL`);
+            } catch (err: any) {
+              logger.error(`[Mastra DAG:execute_escrow_hold] Error preparing stock reservation record for ${stockRes.reservation_id}`, {
+                error: sanitizeForLogging(err),
+                errorMessage: err?.message,
+                stack: err?.stack,
+              });
             }
+          } else {
+            logger.warn(`[Mastra DAG:execute_escrow_hold] Not all stock could be held for reservation ${stockRes.reservation_id}`);
           }
 
           trace.push(`[Mastra DAG: execute_escrow_hold] 2PC hold: ${stockRes.reservation_id}`);
+
+          logger.info('[Mastra DAG:execute_escrow_hold] Step 4 completed successfully', {
+            success: stockRes.all_held,
+            reservationId: stockRes.reservation_id,
+          });
 
           return {
             action: 'BUY' as const,
@@ -399,6 +523,7 @@ export class MastraWorkflows {
       },
     });
 
+    logger.debug('[MastraWorkflows:buildDAG] Committing 4-stage pipeline DAG');
     return createWorkflow({
       id: 'mastra-commerce-workflow-dag',
       inputSchema: CommercePipelineInputSchema,
@@ -415,24 +540,49 @@ export class MastraWorkflows {
    * Executes the full pipeline with automatic 2PC compensating rollback.
    */
   public async executeWorkflow(input: CommercePipelineInput): Promise<CommercePipelineOutput> {
+    logger.info('[MastraWorkflows:executeWorkflow] Starting workflow execution run', {
+      query: input.query,
+      message: input.message,
+      budgetCapCents: input.budget_cap_cents,
+      zipCode: input.zip_code,
+    });
     const wf = this.buildDAG();
     const run = await wf.createRun();
     let reservationIdToRollback: string | undefined;
 
     try {
       const runResult = await run.start({ inputData: input });
+      logger.info(`[MastraWorkflows:executeWorkflow] Workflow run settled with status: ${runResult.status}`);
       if (runResult.status !== 'success' || !runResult.result) {
         // Check if escrow step ran and holds stock before subsequent failure
         const escrowStepResult = runResult.steps ? (runResult.steps as any).execute_escrow_hold : undefined;
         if (escrowStepResult && escrowStepResult.output?.reservation_id) {
           reservationIdToRollback = escrowStepResult.output.reservation_id;
+          logger.warn(`[MastraWorkflows:executeWorkflow] Escrow step held reservation ${reservationIdToRollback} prior to DAG failure`, {
+            reservationIdToRollback,
+          });
         }
-        throw (runResult as any).error || new Error(`Mastra DAG run failed with status: ${runResult.status}`);
+        const error = (runResult as any).error || new Error(`Mastra DAG run failed with status: ${runResult.status}`);
+        logger.error('[MastraWorkflows:executeWorkflow] DAG run status was not success', {
+          status: runResult.status,
+          error: sanitizeForLogging(error),
+        });
+        throw error;
       }
+      logger.info('[MastraWorkflows:executeWorkflow] Workflow completed successfully with output action: BUY');
       return runResult.result as CommercePipelineOutput;
     } catch (err: any) {
+      logger.error('[MastraWorkflows:executeWorkflow] Caught exception during workflow DAG run', {
+        error: sanitizeForLogging(err),
+        errorMessage: err?.message,
+        stack: err?.stack,
+        reservationIdToRollback,
+      });
       if (reservationIdToRollback) {
+        logger.info(`[MastraWorkflows:executeWorkflow] Executing compensating rollback for held stock: ${reservationIdToRollback}`);
         this.rollbackHeldStock(reservationIdToRollback, `DAG execution failed: ${err.message}`);
+      } else {
+        logger.debug('[MastraWorkflows:executeWorkflow] No active reservation ID required compensating rollback');
       }
       throw err;
     }
