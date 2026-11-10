@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import type {
   ProductCardData,
   ComparisonMatrix,
@@ -104,12 +105,19 @@ export function ConversationalAgentChat({
   };
 
   useEffect(() => {
+    logger.debug('[BuyerChat:Render] Message state updated, scrolling to bottom', {
+      messageCount: messages.length,
+      isLoading,
+    });
     scrollToBottom();
   }, [messages, isLoading]);
 
   const handleSendMessage = async (textToSend?: string, actionOverride?: ShoppingActionType, productIds?: string[]) => {
     const text = (textToSend || inputMessage).trim();
-    if (!text && !actionOverride) return;
+    if (!text && !actionOverride) {
+      logger.debug('[BuyerChat:Send] Aborted send due to empty text and no action override');
+      return;
+    }
 
     const userMsgId = `msg-${Date.now()}`;
     const userMsg: ChatMessage = {
@@ -119,6 +127,15 @@ export function ConversationalAgentChat({
       timestamp: new Date(),
     };
 
+    logger.info('[BuyerChat:Send] User chat submission initiated', {
+      userMsgId,
+      contentLength: text.length,
+      actionOverride,
+      productIds,
+      developerModeEnabled,
+      selectedModel,
+    });
+
     setMessages((prev) => [...prev, userMsg]);
     if (!textToSend) setInputMessage('');
     setIsLoading(true);
@@ -127,6 +144,7 @@ export function ConversationalAgentChat({
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (developerModeEnabled && userApiKey && userApiKey.trim().length > 0) {
         headers['x-user-llm-api-key'] = userApiKey.trim();
+        logger.debug('[BuyerChat:Auth] Injected user-scoped LLM API key header');
       }
 
       const payload: Record<string, any> = {
@@ -144,13 +162,37 @@ export function ConversationalAgentChat({
         }
       }
 
+      logger.debug('[BuyerChat:Fetch] Dispatching POST /api/buyer/chat', {
+        action: payload.action,
+        budgetCapCents: payload.budget_cap_cents,
+        zipCode: payload.zip_code,
+        hasModelOverride: !!payload.model,
+      });
+
       const res = await fetch('/api/buyer/chat', {
         method: 'POST',
         headers,
         body: JSON.stringify(payload),
       });
 
+      if (!res.ok) {
+        logger.warn('[BuyerChat:Fetch] HTTP error response from /api/buyer/chat', {
+          status: res.status,
+          statusText: res.statusText,
+        });
+      }
+
       const data: ChatResponsePayload = await res.json();
+
+      logger.info('[BuyerChat:Response] Received response from /api/buyer/chat', {
+        action: data.action,
+        productCount: data.products?.length || 0,
+        hasComparison: !!data.comparison,
+        hasCart: !!data.cart,
+        hasStockReservation: !!data.stock_reservation,
+        thoughtTraceSteps: data.thought_trace?.length || 0,
+        followUpCount: data.follow_up_suggestions?.length || 0,
+      });
 
       const assistantMsg: ChatMessage = {
         id: `assistant-${Date.now()}`,
@@ -168,7 +210,13 @@ export function ConversationalAgentChat({
       };
 
       setMessages((prev) => [...prev, assistantMsg]);
-    } catch {
+    } catch (err: any) {
+      logger.error('[BuyerChat:Error] Exception occurred during chat submission', {
+        error: err?.message || String(err),
+        stack: err?.stack,
+        text,
+        actionOverride,
+      });
       setMessages((prev) => [
         ...prev,
         {
@@ -184,6 +232,14 @@ export function ConversationalAgentChat({
   };
 
   const handleActionClick = (action: ShoppingActionType, product: ProductCardData) => {
+    logger.info('[BuyerChat:ActionClick] Product card action clicked', {
+      action,
+      productId: product.product_id,
+      title: product.title,
+      priceCents: product.price_cents,
+      merchantDomain: product.merchant_domain,
+    });
+
     if (action === 'DETAILS') {
       if (onSelectProductForDetails) {
         onSelectProductForDetails(product);
@@ -289,9 +345,14 @@ export function ConversationalAgentChat({
                   <div className="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800/80">
                     <button
                       type="button"
-                      onClick={() =>
-                        setExpandedTraceId(expandedTraceId === msg.id ? null : msg.id)
-                      }
+                      onClick={() => {
+                        const nextId = expandedTraceId === msg.id ? null : msg.id;
+                        logger.debug('[BuyerChat:ThoughtTrace] Toggled thought trace accordion', {
+                          messageId: msg.id,
+                          expanded: nextId !== null,
+                        });
+                        setExpandedTraceId(nextId);
+                      }}
                       className="flex items-center gap-1.5 text-[11px] font-mono text-cyan-700 dark:text-cyan-400 hover:underline cursor-pointer"
                     >
                       <Sparkles className="w-3 h-3" />
@@ -352,21 +413,23 @@ export function ConversationalAgentChat({
                     zipCode={zipCode}
                     onViewFullCart={onOpenCart}
                     onConfirmPurchase={(result) => {
+                      logger.info('[BuyerChat:PurchaseConfirmed] PurchaseConfirmationCard authorized order', {
+                        orderId: result.orderId,
+                        authorizedCents: result.authorizedCents,
+                      });
                       if (onPurchaseConfirmed) {
                         onPurchaseConfirmed({
                           orderId: result.orderId,
                           authorizedCents: result.authorizedCents,
                         });
                       }
-                      setMessages((prev) => [
-                        ...prev,
-                        {
-                          id: `conf-${Date.now()}`,
-                          role: 'assistant',
-                          content: `🎉 **Purchase Successfully Confirmed!**\n\nYour order \`${result.orderId}\` has been authorized via your vaulted PayPal payment token. AegisPay is actively monitoring prices for the next 72 hours under automated escrow protection.`,
-                          timestamp: new Date(),
-                        },
-                      ]);
+                      const confMsg: ChatMessage = {
+                        id: `conf-${Date.now()}`,
+                        role: 'assistant',
+                        content: `🎉 **Purchase Successfully Confirmed!**\n\nYour order \`${result.orderId}\` has been authorized via your vaulted PayPal payment token. AegisPay is actively monitoring prices for the next 72 hours under automated escrow protection.`,
+                        timestamp: new Date(),
+                      };
+                      setMessages((prev) => [...prev, confMsg]);
                     }}
                   />
                 </div>
@@ -379,7 +442,10 @@ export function ConversationalAgentChat({
                     <button
                       key={idx}
                       type="button"
-                      onClick={() => handleSendMessage(suggestion)}
+                      onClick={() => {
+                        logger.info('[BuyerChat:FollowUp] Follow-up suggestion chip selected', { suggestion, idx });
+                        handleSendMessage(suggestion);
+                      }}
                       className="text-xs px-2.5 py-1 rounded-full bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/25 transition-all text-left flex items-center gap-1 hover:scale-102"
                     >
                       <Tag className="w-2.5 h-2.5 text-cyan-500" />

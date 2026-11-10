@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import { GenerativeIntentBar, ParsedSearchIntent } from '@/components/buyer/GenerativeIntentBar';
 import { ThoughtStreamVisualizer, ThoughtStep } from '@/components/buyer/ThoughtStreamVisualizer';
 import { CryptographicMandateSigner } from '@/components/buyer/CryptographicMandateSigner';
@@ -41,6 +42,46 @@ export default function BuyerPortalPage() {
   // User Settings State & Drawer
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+
+  // Deep Observability Lifecycle Mount Logging
+  useEffect(() => {
+    logger.info('[BuyerPage:Mount] Buyer portal mounted', {
+      showTechnicalDetails,
+      initialBudgetCents: externalBudgetCents,
+      initialSpentCents: spentCents,
+      cartItemCount: optimizationData.assigned_merchants.reduce(
+        (acc, m) => acc + m.items.reduce((iAcc, item) => iAcc + item.quantity, 0),
+        0
+      ),
+      hasActiveMandate: !!activeMandate,
+    });
+
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlQuery = searchParams.get('q');
+      const urlBudget = searchParams.get('budget');
+      const urlModel = searchParams.get('model');
+      logger.debug('[BuyerPage:Params] Parsed URL search parameters', {
+        urlQuery,
+        urlBudget,
+        urlModel,
+        rawSearch: window.location.search,
+      });
+
+      if (urlBudget) {
+        const parsedBudget = Number(urlBudget);
+        if (!isNaN(parsedBudget) && parsedBudget > 0) {
+          logger.info('[BuyerPage:Params] Overriding external budget from URL parameter', {
+            previousBudget: externalBudgetCents,
+            newBudget: parsedBudget,
+          });
+          setExternalBudgetCents(parsedBudget);
+        } else {
+          logger.warn('[BuyerPage:Params] Invalid URL budget param encountered', { urlBudget });
+        }
+      }
+    }
+  }, []);
 
   // Knapsack state
   const [optimizationData, setOptimizationData] = useState<KnapsackOptimizationData>({
@@ -110,49 +151,90 @@ export default function BuyerPortalPage() {
   });
 
   const showNotification = (msg: string) => {
+    logger.debug('[BuyerPage:Notification] Displaying notification toast', { message: msg });
     setNotification(msg);
-    setTimeout(() => setNotification(null), 3500);
+    setTimeout(() => {
+      logger.debug('[BuyerPage:Notification] Dismissing notification toast', { message: msg });
+      setNotification(null);
+    }, 3500);
   };
 
   const handleMandateGenerated = (mandate: SessionMandate) => {
+    logger.info('[BuyerPage:Mandate] Received newly signed Ed25519 session mandate', {
+      mandateId: mandate.mandate_id,
+      buyerId: mandate.buyer_id,
+      maxTotalSpendCents: mandate.max_total_spend_cents,
+      maxSingleMerchantCents: mandate.max_single_merchant_cents,
+      allowedCategories: mandate.allowed_category_ids,
+      expiresAt: mandate.expires_at,
+    });
     setActiveMandate(mandate);
     showNotification(`New Ed25519 Mandate signed: ${mandate.mandate_id}`);
-    setOptimizationData((prev) => ({
-      ...prev,
-      budget_cap_cents: mandate.max_total_spend_cents,
-      is_within_budget: prev.net_buyer_expenditure_cents <= mandate.max_total_spend_cents,
-      overage_percentage:
-        prev.net_buyer_expenditure_cents > mandate.max_total_spend_cents
-          ? Number(
-              (
-                ((prev.net_buyer_expenditure_cents - mandate.max_total_spend_cents) /
-                  mandate.max_total_spend_cents) *
-                100
-              ).toFixed(2)
-            )
-          : undefined,
-    }));
+    setOptimizationData((prev) => {
+      const isWithinBudget = prev.net_buyer_expenditure_cents <= mandate.max_total_spend_cents;
+      const overagePercentage = !isWithinBudget
+        ? Number(
+            (
+              ((prev.net_buyer_expenditure_cents - mandate.max_total_spend_cents) /
+                mandate.max_total_spend_cents) *
+              100
+            ).toFixed(2)
+          )
+        : undefined;
+
+      logger.debug('[BuyerPage:OptimizationUpdate] Re-evaluating knapsack budget envelope with mandate', {
+        mandateBudgetCap: mandate.max_total_spend_cents,
+        netBuyerExpenditure: prev.net_buyer_expenditure_cents,
+        isWithinBudget,
+        overagePercentage,
+      });
+
+      return {
+        ...prev,
+        budget_cap_cents: mandate.max_total_spend_cents,
+        is_within_budget: isWithinBudget,
+        overage_percentage: overagePercentage,
+      };
+    });
   };
 
   const handleIntentSearch = (intent: ParsedSearchIntent) => {
+    logger.info('[BuyerPage:IntentSearch] Executing intent search', {
+      rawQuery: intent.rawQuery,
+      maxBudgetCents: intent.maxBudgetCents,
+      targetCategory: intent.targetCategory,
+      qualityTier: intent.qualityTier,
+    });
     setIsSolvingIntent(true);
     setShouldRunTrace(true);
     setExternalBudgetCents(intent.maxBudgetCents);
     showNotification(`Parsing query: "${intent.rawQuery.slice(0, 42)}..." with budget ${formatCents(intent.maxBudgetCents)}`);
 
     setTimeout(() => {
+      logger.info('[BuyerPage:IntentSearch] Knapsack solver completed simulation', {
+        maxBudgetCents: intent.maxBudgetCents,
+        projectedExpenditure: 42595,
+      });
       setIsSolvingIntent(false);
       setShouldRunTrace(false);
 
       // Dynamically tune knapsack cart based on intent
       const isOverBudget = 42595 > intent.maxBudgetCents;
+      const overagePercentage = isOverBudget
+        ? Number((((42595 - intent.maxBudgetCents) / intent.maxBudgetCents) * 100).toFixed(2))
+        : undefined;
+
+      logger.debug('[BuyerPage:KnapsackResult] Knapsack dynamic update evaluated', {
+        isOverBudget,
+        overagePercentage,
+        maxBudgetCents: intent.maxBudgetCents,
+      });
+
       setOptimizationData((prev) => ({
         ...prev,
         budget_cap_cents: intent.maxBudgetCents,
         is_within_budget: !isOverBudget,
-        overage_percentage: isOverBudget
-          ? Number((((42595 - intent.maxBudgetCents) / intent.maxBudgetCents) * 100).toFixed(2))
-          : undefined,
+        overage_percentage: overagePercentage,
       }));
 
       showNotification(`Channel3 search matched 14 offers across 3 merchants. Knapsack solved!`);
@@ -160,8 +242,25 @@ export default function BuyerPortalPage() {
   };
 
   const handleSelectProductForBuy = (product: ProductCardData) => {
+    const netPrice = product.price_cents - (product.commission_rebate_cents || 0);
+    logger.info('[BuyerPage:Buy] Product selected for purchase', {
+      productId: product.product_id,
+      title: product.title,
+      priceCents: product.price_cents,
+      commissionRebateCents: product.commission_rebate_cents,
+      netPriceCents: netPrice,
+      merchantDomain: product.merchant_domain,
+    });
     showNotification(`Pre-purchase reservation hold initiated for ${product.title}`);
-    setSpentCents((prev) => prev + (product.price_cents - product.commission_rebate_cents));
+    setSpentCents((prev) => {
+      const nextSpent = prev + netPrice;
+      logger.debug('[BuyerPage:SpentUpdate] Spend allowance updated after selection', {
+        previousSpent: prev,
+        addedCents: netPrice,
+        newSpent: nextSpent,
+      });
+      return nextSpent;
+    });
     setIsCartOpen(true);
   };
 
@@ -190,7 +289,10 @@ export default function BuyerPortalPage() {
 
           <div className="flex items-center gap-3 font-mono text-xs">
             <button
-              onClick={() => setIsCartOpen(true)}
+              onClick={() => {
+                logger.info('[BuyerPage:CartDrawer] Opening multi-vendor cart drawer from top bar', { cartItemCount });
+                setIsCartOpen(true);
+              }}
               className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 font-bold hover:bg-cyan-500/25 transition-all cursor-pointer"
             >
               <ShoppingBag className="w-3.5 h-3.5 text-cyan-500" />
@@ -221,9 +323,16 @@ export default function BuyerPortalPage() {
           spentCents={spentCents}
           isConfigured={!!activeMandate}
           cartItemCount={cartItemCount}
-          onOpenSettings={() => setIsSettingsOpen(true)}
-          onOpenCart={() => setIsCartOpen(true)}
+          onOpenSettings={() => {
+            logger.info('[BuyerPage:SettingsDrawer] Opening user settings drawer from spend header');
+            setIsSettingsOpen(true);
+          }}
+          onOpenCart={() => {
+            logger.info('[BuyerPage:CartDrawer] Opening cart drawer from spend header');
+            setIsCartOpen(true);
+          }}
           onConnectPayPal={() => {
+            logger.info('[BuyerPage:PayPal] Connect PayPal Vault v3 pre-authorization clicked');
             showNotification('Connecting to Vault v3 pre-authorization...');
           }}
         />
@@ -236,16 +345,31 @@ export default function BuyerPortalPage() {
             developerModeEnabled={userSettings.developerModeEnabled}
             selectedModel={userSettings.aiModel}
             userApiKey={userSettings.userApiKey}
-            onOpenCart={() => setIsCartOpen(true)}
+            onOpenCart={() => {
+              logger.info('[BuyerPage:CartDrawer] Opening cart drawer from chat recommendation');
+              setIsCartOpen(true);
+            }}
             onPurchaseConfirmed={(result) => {
+              logger.info('[BuyerPage:Purchase] Purchase confirmed from chat flow', {
+                orderId: result.orderId,
+                authorizedCents: result.authorizedCents,
+              });
               setSpentCents((prev) => prev + result.authorizedCents);
               showNotification(`1-Click Vaulted Order ${result.orderId} Authorized!`);
             }}
             onSelectProductForBuy={handleSelectProductForBuy}
             onSelectProductForDetails={(p) => {
+              logger.debug('[BuyerPage:Details] Product details inspected from chat', {
+                productId: p.product_id,
+                title: p.title,
+              });
               showNotification(`Loaded technical specifications for ${p.title}`);
             }}
             onSelectProductForCompare={(p) => {
+              logger.debug('[BuyerPage:Compare] Comparison matrix viewed from chat', {
+                productId: p.product_id,
+                title: p.title,
+              });
               showNotification(`Generated side-by-side comparison matrix for ${p.title}`);
             }}
           />
@@ -282,10 +406,23 @@ export default function BuyerPortalPage() {
       {/* User Settings Drawer */}
       <UserSettingsDrawer
         isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        onClose={() => {
+          logger.info('[BuyerPage:SettingsDrawer] Closing user settings drawer');
+          setIsSettingsOpen(false);
+        }}
         settings={userSettings}
         maxBudgetCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
         onSave={(newSettings) => {
+          logger.info('[BuyerPage:SettingsDrawer] User settings saved', {
+            city: newSettings.city,
+            state: newSettings.state,
+            zipCode: newSettings.zipCode,
+            fulfillmentMode: newSettings.fulfillmentMode,
+            purchaseRule: newSettings.purchaseRule,
+            autoBuyThresholdCents: newSettings.autoBuyThresholdCents,
+            aiModel: newSettings.aiModel,
+            developerModeEnabled: newSettings.developerModeEnabled,
+          });
           setUserSettings(newSettings);
           showNotification(`Settings updated: Shipping to ${newSettings.city}, ${newSettings.state} (${newSettings.zipCode})`);
         }}
@@ -294,10 +431,17 @@ export default function BuyerPortalPage() {
       {/* Multi-Store Cart Drawer */}
       <UnifiedCartDrawer
         isOpen={isCartOpen}
-        onClose={() => setIsCartOpen(false)}
+        onClose={() => {
+          logger.info('[BuyerPage:CartDrawer] Closing multi-vendor cart drawer');
+          setIsCartOpen(false);
+        }}
         cart={optimizationData}
         zipCode={userSettings.zipCode}
         onProceedToCheckout={() => {
+          logger.info('[BuyerPage:Checkout] Proceed to checkout triggered from UnifiedCartDrawer', {
+            netBuyerExpenditureCents: optimizationData.net_buyer_expenditure_cents,
+            merchantCount: optimizationData.assigned_merchants.length,
+          });
           setIsCartOpen(false);
           showNotification('1-Click PayPal Authorization initialized!');
         }}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
 
 export interface ScoredProduct {
@@ -70,13 +71,19 @@ export function useAgentStream(query: string | null) {
   const reconnectAttemptsRef = useRef<number>(0);
 
   useEffect(() => {
-    if (!query) return;
+    if (!query) {
+      logger.debug('[useAgentStream:Query] No query provided, idle state');
+      return;
+    }
     let isActive = true;
     let usedFallback = false;
     reconnectAttemptsRef.current = 0;
 
+    logger.info('[useAgentStream:Init] Initializing SSE search stream for query', { query });
+
     const cleanupActiveConnection = () => {
       if (esRef.current) {
+        logger.debug('[useAgentStream:Cleanup] Closing EventSource connection');
         esRef.current.close();
         esRef.current = null;
       }
@@ -100,23 +107,35 @@ export function useAgentStream(query: string | null) {
     const apiUrl = getApiBaseUrl();
 
     const runFallbackSearch = async (reason: string) => {
-      if (usedFallback || !isActive) return;
+      if (usedFallback || !isActive) {
+        logger.debug('[useAgentStream:Fallback] Fallback already executed or hook inactive');
+        return;
+      }
       usedFallback = true;
       cleanupActiveConnection();
+      logger.warn('[useAgentStream:Fallback] Initiating fallback HTTP search endpoint', { reason, query });
       setStatus('Live stream interrupted. Retrying via HTTP endpoint...');
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 25000);
-        const res = await fetch(`${apiUrl}/api/search?user_id=demo`, {
+        const endpointUrl = `${apiUrl}/api/search?user_id=demo`;
+        logger.debug('[useAgentStream:Fallback] POST request to search fallback', { endpointUrl });
+        const res = await fetch(endpointUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query }),
           signal: controller.signal,
         });
         clearTimeout(timeout);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
         const data = await res.json();
         if (!isActive) return;
+        logger.info('[useAgentStream:Fallback] Fallback HTTP search completed successfully', {
+          productCount: data.scored_products?.length || 0,
+          hasRecommendation: !!data.recommendation,
+        });
         setResult({
           type: 'result',
           query: data.query ?? query,
@@ -129,8 +148,12 @@ export function useAgentStream(query: string | null) {
         });
         setStreamError(reason);
         setLoading(false);
-      } catch {
+      } catch (err: any) {
         if (!isActive) return;
+        logger.error('[useAgentStream:FallbackError] Fallback HTTP request failed', {
+          error: err?.message || String(err),
+          stack: err?.stack,
+        });
         setStreamError('Connection to agent server failed. Is the API running?');
         setLoading(false);
       }
@@ -139,6 +162,7 @@ export function useAgentStream(query: string | null) {
     const armTimeout = () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
+        logger.warn('[useAgentStream:Timeout] Stream read inactivity timeout reached (30s)');
         runFallbackSearch('Live stream timed out. Loaded fallback response.');
       }, 30000);
     };
@@ -147,6 +171,7 @@ export function useAgentStream(query: string | null) {
       if (!isActive || usedFallback) return;
 
       const url = `${apiUrl}/api/search/stream?query=${encodeURIComponent(query)}`;
+      logger.info('[useAgentStream:Connect] Opening SSE EventSource connection', { url });
       const es = new EventSource(url);
       esRef.current = es;
 
@@ -155,29 +180,43 @@ export function useAgentStream(query: string | null) {
       es.onmessage = (e: MessageEvent) => {
         try {
           const data = JSON.parse(e.data);
+          logger.debug('[useAgentStream:Chunk] Message chunk received', { type: data.type });
           armTimeout();
           // Reset reconnect count on active message received
           reconnectAttemptsRef.current = 0;
 
           if (data.type === 'result') {
+            logger.info('[useAgentStream:Result] Result received from stream, closing connection', {
+              scoredCount: data.scored_products?.length || 0,
+            });
             setResult(data as StreamResult);
             setLoading(false);
             cleanupActiveConnection();
           } else if (data.type === 'error') {
+            logger.warn('[useAgentStream:ErrorChunk] Error received from stream', { message: data.message });
             setStreamError(data.message);
             setStatus(data.message);
             setLoading(false);
             cleanupActiveConnection();
           } else if (data.type === 'status') {
+            logger.debug('[useAgentStream:StatusChunk] Status update received', { message: data.message });
             setStatus(data.message);
           }
-        } catch {
-          // non-JSON frame — ignore
+        } catch (parseErr: any) {
+          logger.warn('[useAgentStream:ParseWarning] Non-JSON stream message received or parse error', {
+            error: parseErr?.message || String(parseErr),
+            rawChunkLength: e.data?.length,
+          });
         }
       };
 
-      es.onerror = () => {
+      es.onerror = (err) => {
         if (!isActive || usedFallback) return;
+
+        logger.warn('[useAgentStream:Error] EventSource error encountered', {
+          readyState: es.readyState,
+          reconnectAttempts: reconnectAttemptsRef.current,
+        });
 
         if (esRef.current) {
           esRef.current.close();
@@ -191,6 +230,11 @@ export function useAgentStream(query: string | null) {
             BASE_RECONNECT_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 300,
             MAX_RECONNECT_DELAY_MS
           );
+          logger.info('[useAgentStream:Reconnect] Scheduling stream reconnection', {
+            attempt,
+            maxAttempts: MAX_STREAM_RECONNECT_ATTEMPTS,
+            backoffMs: backoff,
+          });
           setStatus(`Reconnecting stream (attempt ${attempt}/${MAX_STREAM_RECONNECT_ATTEMPTS})...`);
 
           if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
@@ -200,6 +244,7 @@ export function useAgentStream(query: string | null) {
             }
           }, backoff);
         } else {
+          logger.warn('[useAgentStream:Exhausted] Max stream reconnect attempts exceeded, falling back to HTTP');
           runFallbackSearch('Live stream disconnected after retries. Loaded fallback response.');
         }
       };
@@ -208,6 +253,7 @@ export function useAgentStream(query: string | null) {
     connectStream();
 
     return () => {
+      logger.debug('[useAgentStream:Teardown] Tearing down useAgentStream hook effect', { query });
       isActive = false;
       cleanupActiveConnection();
     };

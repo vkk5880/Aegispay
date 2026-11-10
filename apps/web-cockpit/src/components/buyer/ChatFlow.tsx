@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import { Search, Sparkles, ArrowRight, CornerDownLeft, RotateCcw, AlertTriangle, Zap } from 'lucide-react';
 
 export interface RecoveryPill {
@@ -114,6 +115,11 @@ export function ChatFlow({
       : inferRecoveryPillsFromWarning(messageWarning);
 
   const handlePillClick = (pill: RecoveryPill) => {
+    logger.info('[ChatFlow:RecoveryPill] Proactive recovery pill clicked', {
+      label: pill.label,
+      prompt: pill.prompt,
+      type: pill.type,
+    });
     if (onSelectRecoveryPill) {
       onSelectRecoveryPill(pill);
     }
@@ -125,6 +131,10 @@ export function ChatFlow({
     if (flowState === 'CLARIFYING' && questions.length > 0) {
       if (revealedIdx < questions.length - 1) {
         const timer = setTimeout(() => {
+          logger.debug('[ChatFlow:Clarifying] Revealing next clarification question', {
+            revealedIdx: revealedIdx + 1,
+            totalQuestions: questions.length,
+          });
           setRevealedIdx((prev) => prev + 1);
         }, 250);
         return () => clearTimeout(timer);
@@ -135,6 +145,10 @@ export function ChatFlow({
   const triggerFinalSearch = useCallback(
     (q: string) => {
       const clean = sanitizeChatInput(q);
+      logger.info('[ChatFlow:Transition] Transitioning to SEARCHING state', {
+        rawQuery: q,
+        cleanQuery: clean,
+      });
       setEnrichedQuery(clean);
       setFlowState('SEARCHING');
       onSearch?.(clean);
@@ -145,13 +159,26 @@ export function ChatFlow({
   const triggerClarify = useCallback(
     async (q: string) => {
       const qClean = sanitizeChatInput(q);
-      if (!qClean || disabled) return;
+      if (!qClean) {
+        logger.debug('[ChatFlow:Clarify] Aborted triggerClarify due to empty query');
+        return;
+      }
+      if (disabled) {
+        logger.debug('[ChatFlow:Clarify] Aborted triggerClarify because ChatFlow is disabled');
+        return;
+      }
 
       if (VS_PATTERN.test(qClean)) {
+        logger.info('[ChatFlow:Clarify] VS comparison pattern detected in query, bypassing clarification', {
+          query: qClean,
+        });
         triggerFinalSearch(qClean);
         return;
       }
 
+      logger.info('[ChatFlow:Clarify] Dispatching clarification check to /api/buyer/clarify', {
+        query: qClean,
+      });
       setIsClarifyingLoading(true);
       setQuestions([]);
       setAnswers({});
@@ -164,13 +191,27 @@ export function ChatFlow({
           body: JSON.stringify({ query: qClean }),
         });
 
+        logger.debug('[ChatFlow:Clarify] Received response from /api/buyer/clarify', {
+          needsClarification: data.needs_clarification,
+          questionCount: data.questions?.length || 0,
+        });
+
         if (data.needs_clarification && data.questions && data.questions.length > 0) {
+          logger.info('[ChatFlow:Transition] Transitioning to CLARIFYING state', {
+            questions: data.questions,
+          });
           setQuestions(data.questions.map((item: string) => sanitizeChatInput(item)));
           setFlowState('CLARIFYING');
         } else {
+          logger.info('[ChatFlow:Clarify] No clarification needed, proceeding directly to search');
           triggerFinalSearch(qClean);
         }
-      } catch {
+      } catch (err: any) {
+        logger.error('[ChatFlow:Clarify] Clarification fetch failed, gracefully falling back to direct search', {
+          error: err?.message || String(err),
+          stack: err?.stack,
+          query: qClean,
+        });
         triggerFinalSearch(qClean);
       } finally {
         setIsClarifyingLoading(false);
@@ -189,14 +230,21 @@ export function ChatFlow({
   async function handleInitialSearch(e: React.FormEvent) {
     e.preventDefault();
     const clean = sanitizeChatInput(query);
-    if (!clean) return;
+    logger.info('[ChatFlow:Submit] Initial search form submitted', { rawQuery: query, cleanQuery: clean });
+    if (!clean) {
+      logger.debug('[ChatFlow:Submit] Search cancelled due to empty sanitized query');
+      return;
+    }
     setQuery(clean);
     triggerClarify(clean);
   }
 
   async function handleEnrichSearch(e: React.FormEvent) {
     e.preventDefault();
-    if (isEnriching) return;
+    if (isEnriching) {
+      logger.debug('[ChatFlow:Enrich] Aborted enrichment because already enriching');
+      return;
+    }
     setIsEnriching(true);
 
     const cleanQuery = sanitizeChatInput(query);
@@ -205,6 +253,11 @@ export function ChatFlow({
       sanitizedAnswers[k] = sanitizeChatInput(v);
     }
 
+    logger.info('[ChatFlow:Enrich] Dispatching clarification answers to /api/buyer/enrich', {
+      query: cleanQuery,
+      answersCount: Object.keys(sanitizedAnswers).length,
+    });
+
     try {
       const data = await fetchWithTimeout('/api/buyer/enrich', {
         method: 'POST',
@@ -212,8 +265,17 @@ export function ChatFlow({
         body: JSON.stringify({ query: cleanQuery, answers: sanitizedAnswers }),
       });
       const finalQ = sanitizeChatInput(data.enriched_query || cleanQuery);
+      logger.info('[ChatFlow:Enrich] Enriched query received from server', {
+        originalQuery: cleanQuery,
+        enrichedQuery: finalQ,
+      });
       triggerFinalSearch(finalQ || cleanQuery);
-    } catch {
+    } catch (err: any) {
+      logger.error('[ChatFlow:Enrich] Query enrichment fetch failed, falling back to original query', {
+        error: err?.message || String(err),
+        stack: err?.stack,
+        query: cleanQuery,
+      });
       triggerFinalSearch(cleanQuery);
     } finally {
       setIsEnriching(false);
@@ -221,6 +283,7 @@ export function ChatFlow({
   }
 
   function handleReset() {
+    logger.info('[ChatFlow:Reset] Resetting ChatFlow to IDLE state');
     setFlowState('IDLE');
     setQuery('');
     setEnrichedQuery('');

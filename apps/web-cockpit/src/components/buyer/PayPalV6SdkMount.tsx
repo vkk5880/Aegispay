@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import { CreditCard, ShieldCheck, CheckCircle2, Clock, AlertCircle, RefreshCw, ExternalLink, Zap, UserCheck } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransmuter';
@@ -64,20 +65,32 @@ export function PayPalV6SdkMount({
   useEffect(() => {
     isMountedRef.current = true;
 
+    logger.info('[PayPalV6Sdk:Mount] Initializing 15-minute token session timer and lifecycle', {
+      orderAmountCents,
+      orderIntent,
+      currency,
+      hasClientToken: !!clientToken,
+    });
+
     sessionTimerRef.current = setInterval(() => {
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
+          logger.warn('[PayPalV6Sdk:Timer] 15-minute client token session window expired');
           if (sessionTimerRef.current) {
             clearInterval(sessionTimerRef.current);
             sessionTimerRef.current = null;
           }
           return 0;
         }
+        if (prev === 120) {
+          logger.warn('[PayPalV6Sdk:Timer] 2 minutes remaining before PayPal session expires');
+        }
         return prev - 1;
       });
     }, 1000);
 
     return () => {
+      logger.debug('[PayPalV6Sdk:Unmount] Cleaning up timers and unmounting PayPal SDK component');
       isMountedRef.current = false;
       if (sessionTimerRef.current) {
         clearInterval(sessionTimerRef.current);
@@ -100,6 +113,11 @@ export function PayPalV6SdkMount({
   const checkEligibility = useCallback(async () => {
     if (typeof window === 'undefined') return;
 
+    logger.info('[PayPalV6Sdk:Eligibility] Checking funding eligibility via PayPal JS SDK v6', {
+      orderAmountCents,
+      currency,
+      hasClientId: !!clientId,
+    });
     setErrorMessage(null);
     setSdkStatus('LOADING_SDK');
 
@@ -108,6 +126,7 @@ export function PayPalV6SdkMount({
 
       if (!paypalGlobal) {
         // In browser environment without window.paypal injected, fallback to simulation mode gracefully
+        logger.debug('[PayPalV6Sdk:Eligibility] window.paypal not detected on global, entering IDLE simulation mode');
         setSdkStatus('IDLE');
         return;
       }
@@ -116,6 +135,7 @@ export function PayPalV6SdkMount({
         throw new Error('PayPal JS SDK v6 window.paypal.createInstance method unavailable');
       }
 
+      logger.debug('[PayPalV6Sdk:Eligibility] Calling window.paypal.createInstance()');
       const sdkInstance = await paypalGlobal.createInstance({
         clientId: clientId || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'sb',
         clientToken: clientToken,
@@ -130,13 +150,18 @@ export function PayPalV6SdkMount({
       // Fastlane by PayPal Initialization
       try {
         if (typeof sdkInstance.Fastlane === 'function') {
+          logger.debug('[PayPalV6Sdk:Fastlane] Initializing Fastlane SDK component');
           const fl = await sdkInstance.Fastlane();
           if (isMountedRef.current) {
             setFastlaneInstance(fl);
+            logger.info('[PayPalV6Sdk:Fastlane] Fastlane SDK component initialized');
           }
         }
-      } catch (flErr) {
-        console.warn('Fastlane component initialization fallback to simulation:', flErr);
+      } catch (flErr: any) {
+        logger.warn('[PayPalV6Sdk:Fastlane] Fastlane component initialization fallback to simulation', {
+          error: flErr?.message || String(flErr),
+          stack: flErr?.stack,
+        });
       }
 
       const methods = await sdkInstance.findEligibleMethods({
@@ -145,16 +170,21 @@ export function PayPalV6SdkMount({
       });
 
       if (isMountedRef.current) {
-        setEligibleMethods({
+        const eligible = {
           paypal: typeof methods?.isEligible === 'function' ? methods.isEligible('paypal') : true,
           venmo: typeof methods?.isEligible === 'function' ? methods.isEligible('venmo') : false,
           paylater: typeof methods?.isEligible === 'function' ? methods.isEligible('paylater') : false,
-        });
+        };
+        logger.info('[PayPalV6Sdk:Eligibility] Funding eligibility resolved', eligible);
+        setEligibleMethods(eligible);
         setSdkStatus('MOUNTED');
       }
     } catch (err: any) {
       if (isMountedRef.current) {
-        console.error('PayPal JS SDK v6 initialization error:', err);
+        logger.error('[PayPalV6Sdk:Error] PayPal JS SDK v6 initialization failed', {
+          error: err?.message || String(err),
+          stack: err?.stack,
+        });
         const errMsg = err?.message || 'Failed to initialize PayPal JS SDK v6 component';
         setErrorMessage(errMsg);
         setSdkStatus('ERROR');
@@ -171,6 +201,12 @@ export function PayPalV6SdkMount({
     funding: 'paypal' | 'venmo' | 'paylater' = 'paypal',
     options?: { simulate3DS?: boolean; simulateLiabilityShiftNo?: boolean }
   ) => {
+    logger.info('[PayPalV6Sdk:Authorize] Triggering payment authorization', {
+      funding,
+      orderAmountCents,
+      orderIntent,
+      options,
+    });
     setActiveFundingSource(funding);
     setSdkStatus('AUTHORIZING');
     setErrorMessage(null);
@@ -184,13 +220,20 @@ export function PayPalV6SdkMount({
         }, 800);
       });
 
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) {
+        logger.debug('[PayPalV6Sdk:Authorize] Aborted authorization handling after unmount');
+        return;
+      }
 
       const simulatedOrderId = `PP-ORD-V6-${Date.now()}`;
 
       // Simulate 3DS challenge interception if requested or flagged
       if (options?.simulate3DS) {
         const challengeUrl = `https://www.sandbox.paypal.com/checkoutnow/payer-action?orderId=${simulatedOrderId}`;
+        logger.warn('[PayPalV6Sdk:3DS] 3D Secure / PSD2 SCA challenge intercepted', {
+          orderId: simulatedOrderId,
+          challengeUrl,
+        });
         setAuthorizedOrderId(simulatedOrderId);
         setActiveChallengeUrl(challengeUrl);
         setSdkStatus('3DS_CHALLENGE');
@@ -200,6 +243,9 @@ export function PayPalV6SdkMount({
 
       // Simulate liability_shift === 'NO' enforcement
       if (options?.simulateLiabilityShiftNo) {
+        logger.error('[PayPalV6Sdk:LiabilityShift] Card issuer denied 3DS liability shift (liability_shift === NO)', {
+          orderId: simulatedOrderId,
+        });
         setAuthorizedOrderId(simulatedOrderId);
         setSdkStatus('LIABILITY_SHIFT_FAILED');
         const errNotice = `LIABILITY_SHIFT_NO: Card issuer did not grant liability shift for order ${simulatedOrderId}. Merchant protection declined; order blocked.`;
@@ -209,6 +255,12 @@ export function PayPalV6SdkMount({
         return;
       }
 
+      logger.info('[PayPalV6Sdk:Success] Order authorized successfully with liability shift guaranteed', {
+        orderId: simulatedOrderId,
+        funding,
+        amountCents: orderAmountCents,
+      });
+
       setAuthorizedOrderId(simulatedOrderId);
       setSdkStatus('SUCCESS');
 
@@ -217,6 +269,10 @@ export function PayPalV6SdkMount({
       }
     } catch (err: any) {
       if (isMountedRef.current) {
+        logger.error('[PayPalV6Sdk:Error] Exception during authorization attempt', {
+          error: err?.message || String(err),
+          stack: err?.stack,
+        });
         const msg = err?.message || 'Authorization attempt failed';
         setErrorMessage(msg);
         setSdkStatus('ERROR');
@@ -226,28 +282,46 @@ export function PayPalV6SdkMount({
   };
 
   const handleComplete3DSChallenge = () => {
-    if (!authorizedOrderId) return;
+    if (!authorizedOrderId) {
+      logger.warn('[PayPalV6Sdk:3DS] Complete 3DS clicked without active authorizedOrderId');
+      return;
+    }
+    logger.info('[PayPalV6Sdk:3DS] Completing 3DS authentication challenge', { orderId: authorizedOrderId });
     setSdkStatus('AUTHORIZING');
     setTimeout(() => {
       if (!isMountedRef.current) return;
+      logger.info('[PayPalV6Sdk:3DS] 3DS authentication completed successfully, order authorized', {
+        orderId: authorizedOrderId,
+      });
       setSdkStatus('SUCCESS');
       onAuthorizeSuccess?.(authorizedOrderId);
     }, 600);
   };
 
   const handleFastlaneLookup = async () => {
-    if (!fastlaneEmail) return;
+    if (!fastlaneEmail) {
+      logger.debug('[PayPalV6Sdk:Fastlane] Lookup aborted due to empty email');
+      return;
+    }
+    logger.info('[PayPalV6Sdk:Fastlane] Initiating Fastlane profile lookup', { email: fastlaneEmail });
     setFastlaneLookingUp(true);
     try {
       if (fastlaneInstance?.identity?.lookupCustomerByEmail) {
         const res = await fastlaneInstance.identity.lookupCustomerByEmail(fastlaneEmail);
-        setFastlaneProfileFound(!!res?.customerContextId);
+        const found = !!res?.customerContextId;
+        logger.info('[PayPalV6Sdk:Fastlane] Fastlane SDK customer lookup result', { found, customerContextId: res?.customerContextId });
+        setFastlaneProfileFound(found);
       } else {
         // High-fidelity sandbox accelerated guest simulation
         await new Promise((r) => setTimeout(r, 600));
+        logger.info('[PayPalV6Sdk:Fastlane] Fastlane simulated sandbox lookup matched profile');
         setFastlaneProfileFound(true);
       }
-    } catch {
+    } catch (err: any) {
+      logger.error('[PayPalV6Sdk:Fastlane] Fastlane customer lookup encountered error, falling back to match', {
+        error: err?.message || String(err),
+        stack: err?.stack,
+      });
       setFastlaneProfileFound(true);
     } finally {
       if (isMountedRef.current) {

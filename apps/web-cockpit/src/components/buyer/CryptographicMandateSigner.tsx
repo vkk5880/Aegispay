@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import type { SessionMandate } from '@aegispay/shared-types';
 import { ShieldCheck, RefreshCw, Key, Copy, CheckCircle2, ChevronDown, Lock } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
@@ -32,9 +33,18 @@ export function CryptographicMandateSigner({
   // Sync when externalBudgetCents updates from GenerativeIntentBar
   useEffect(() => {
     if (externalBudgetCents && externalBudgetCents !== totalBudgetCents) {
+      logger.info('[MandateSigner:Sync] Synchronizing budget from external search intent', {
+        externalBudgetCents,
+        previousTotal: totalBudgetCents,
+      });
       setTotalBudgetCents(externalBudgetCents);
       if (singleMerchantCapCents > externalBudgetCents) {
-        setSingleMerchantCapCents(Math.round(externalBudgetCents * 0.6));
+        const adjustedCap = Math.round(externalBudgetCents * 0.6);
+        logger.debug('[MandateSigner:Sync] Clamping single merchant cap to 60% of new budget', {
+          oldCap: singleMerchantCapCents,
+          newCap: adjustedCap,
+        });
+        setSingleMerchantCapCents(adjustedCap);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -57,6 +67,12 @@ export function CryptographicMandateSigner({
 
   const generateAndSignMandate = async () => {
     setIsGenerating(true);
+    logger.info('[MandateSigner:Generate] Starting WebCrypto Ed25519 keypair generation and signing', {
+      totalBudgetCents,
+      singleMerchantCapCents,
+      allowedCategories,
+      validityMinutes,
+    });
     try {
       // 1. Generate in-browser WebCrypto Ed25519 keypair
       const keyPair = await window.crypto.subtle.generateKey(
@@ -100,24 +116,48 @@ export function CryptographicMandateSigner({
         created_at: new Date(),
       };
 
+      logger.info('[MandateSigner:Success] Ed25519 session mandate successfully signed', {
+        mandateId: mandate.mandate_id,
+        publicKeyLength: publicKeyHex.length,
+        signatureLength: signatureHex.length,
+        expiresAt: mandate.expires_at.toISOString(),
+      });
+
       setGeneratedMandate(mandate);
       if (onMandateGenerated) {
+        logger.debug('[MandateSigner:Callback] Emitting onMandateGenerated callback');
         onMandateGenerated(mandate);
       }
-    } catch (err) {
-      console.error('Failed to generate Ed25519 keypair or sign mandate:', err);
+    } catch (err: any) {
+      logger.error('[MandateSigner:Error] Failed to generate Ed25519 keypair or sign mandate', {
+        error: err?.message || String(err),
+        stack: err?.stack,
+        totalBudgetCents,
+        singleMerchantCapCents,
+      });
     } finally {
       setIsGenerating(false);
     }
   };
 
   useEffect(() => {
+    logger.debug('[MandateSigner:Effect] Parameters changed, triggering mandate generation', {
+      totalBudgetCents,
+      singleMerchantCapCents,
+      validityMinutes,
+    });
     generateAndSignMandate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalBudgetCents, singleMerchantCapCents, validityMinutes]);
 
   const copyMandateJson = () => {
-    if (!generatedMandate) return;
+    if (!generatedMandate) {
+      logger.warn('[MandateSigner:Copy] Cannot copy mandate JSON because no mandate has been generated');
+      return;
+    }
+    logger.info('[MandateSigner:Copy] Copying signed mandate JSON to clipboard', {
+      mandateId: generatedMandate.mandate_id,
+    });
     navigator.clipboard.writeText(JSON.stringify(generatedMandate, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -180,8 +220,10 @@ export function CryptographicMandateSigner({
               value={totalBudgetCents}
               onChange={(e) => {
                 const val = Number(e.target.value);
+                logger.debug('[MandateSigner:Slider] Total budget slider adjusted', { newTotalBudgetCents: val });
                 setTotalBudgetCents(val);
                 if (singleMerchantCapCents > val) {
+                  logger.debug('[MandateSigner:Slider] Clamping single merchant cap to match total budget', { val });
                   setSingleMerchantCapCents(val);
                 }
               }}
@@ -208,7 +250,11 @@ export function CryptographicMandateSigner({
               max={totalBudgetCents}
               step="2500"
               value={singleMerchantCapCents}
-              onChange={(e) => setSingleMerchantCapCents(Number(e.target.value))}
+              onChange={(e) => {
+                const val = Number(e.target.value);
+                logger.debug('[MandateSigner:Slider] Single merchant cap slider adjusted', { newCapCents: val });
+                setSingleMerchantCapCents(val);
+              }}
               className="w-full h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-cyan-500"
             />
             <div className="flex justify-between text-[10px] text-slate-500 font-mono">
@@ -241,9 +287,13 @@ export function CryptographicMandateSigner({
                     checked={allowedCategories.includes(cat.id)}
                     onChange={(e) => {
                       if (e.target.checked) {
-                        setAllowedCategories([...allowedCategories, cat.id]);
+                        const next = [...allowedCategories, cat.id];
+                        logger.info('[MandateSigner:Category] Authorized category added', { category: cat.id, next });
+                        setAllowedCategories(next);
                       } else {
-                        setAllowedCategories(allowedCategories.filter((c) => c !== cat.id));
+                        const next = allowedCategories.filter((c) => c !== cat.id);
+                        logger.info('[MandateSigner:Category] Authorized category removed', { category: cat.id, next });
+                        setAllowedCategories(next);
                       }
                     }}
                     className="rounded text-emerald-500 focus:ring-emerald-400"
@@ -261,7 +311,10 @@ export function CryptographicMandateSigner({
               {[15, 30, 60, 120].map((mins) => (
                 <button
                   key={mins}
-                  onClick={() => setValidityMinutes(mins)}
+                  onClick={() => {
+                    logger.info('[MandateSigner:TTL] Validity duration selected', { mins });
+                    setValidityMinutes(mins);
+                  }}
                   className={`px-2.5 py-1 text-xs rounded-md border font-mono transition-colors ${
                     validityMinutes === mins
                       ? 'bg-emerald-600 text-white font-bold border-emerald-700 dark:border-emerald-500'

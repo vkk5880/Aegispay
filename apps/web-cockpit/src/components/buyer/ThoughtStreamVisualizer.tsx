@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import { Cpu, CheckCircle2, Clock, Sparkles, ChevronRight, Play, RotateCcw } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
 
@@ -111,6 +112,10 @@ export function ThoughtStreamVisualizer({
   useEffect(() => {
     if (!customSteps) {
       const milestones = showTechnicalDetails ? DEFAULT_MILESTONES : USER_FRIENDLY_MILESTONES;
+      logger.debug('[ThoughtStream:Milestones] Updating active milestones based on UI mode', {
+        showTechnicalDetails,
+        stepCount: milestones.length,
+      });
       setSteps(
         milestones.map((step, idx) => ({
           ...step,
@@ -121,6 +126,10 @@ export function ThoughtStreamVisualizer({
   }, [showTechnicalDetails, customSteps]);
 
   const runSimulation = () => {
+    logger.info('[ThoughtStream:Simulation] Starting reasoning chain simulation', {
+      showTechnicalDetails,
+      totalSteps: (customSteps || activeMilestones).length,
+    });
     setIsExecuting(true);
     setActiveStepIndex(0);
 
@@ -134,6 +143,13 @@ export function ThoughtStreamVisualizer({
 
     stepDelays.forEach((delay, index) => {
       setTimeout(() => {
+        logger.debug('[ThoughtStream:StepTransition] DAG node transition executed', {
+          stepIndex: index,
+          delayMs: delay,
+          activeStepId: (customSteps || activeMilestones)[index]?.id,
+          activeStepTitle: (customSteps || activeMilestones)[index]?.title,
+        });
+
         setSteps((prev) =>
           prev.map((step, idx) => {
             if (idx < index) return { ...step, status: 'COMPLETED' };
@@ -145,9 +161,15 @@ export function ThoughtStreamVisualizer({
 
         if (index === stepDelays.length - 1) {
           setTimeout(() => {
+            logger.info('[ThoughtStream:Complete] All thought stream reasoning steps completed', {
+              totalCompleted: stepDelays.length,
+            });
             setSteps((prev) => prev.map((s) => ({ ...s, status: 'COMPLETED' })));
             setIsExecuting(false);
-            if (onComplete) onComplete();
+            if (onComplete) {
+              logger.debug('[ThoughtStream:Callback] Invoking onComplete callback');
+              onComplete();
+            }
           }, 600);
         }
       }, delay);
@@ -156,6 +178,7 @@ export function ThoughtStreamVisualizer({
 
   useEffect(() => {
     if (isRunning) {
+      logger.info('[ThoughtStream:Trigger] isRunning prop triggered reasoning trace simulation');
       runSimulation();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

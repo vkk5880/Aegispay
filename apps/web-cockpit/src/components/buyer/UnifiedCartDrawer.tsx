@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
+import { webLogger as logger } from '@/lib/logger';
 import {
   X,
   ShoppingBag,
@@ -90,7 +91,22 @@ export function UnifiedCartDrawer({
   onProceedToCheckout,
 }: UnifiedCartDrawerProps) {
   const { showTechnicalDetails } = useUiMode();
-  if (!isOpen) return null;
+
+  // Log drawer visibility transitions
+  useEffect(() => {
+    if (isOpen) {
+      logger.info('[UnifiedCartDrawer:Open] Cart drawer opened', {
+        zipCode,
+        showTechnicalDetails,
+        hasCustomCart: !!cart,
+        assignedMerchantsCount: (cart || {}).assigned_merchants?.length || 2,
+      });
+    }
+  }, [isOpen, zipCode, showTechnicalDetails, cart]);
+
+  if (!isOpen) {
+    return null;
+  }
 
   // Fallback default sample cart if none passed
   const activeCart: KnapsackOptimizationData = cart || {
@@ -174,6 +190,17 @@ export function UnifiedCartDrawer({
   const shippingSavedCents = activeCart.total_shipping_saved_cents;
   const netTotalCents = grossSubtotalCents - platformSubsidyCents + shippingFeeCents + estimatedTaxCents;
 
+  logger.debug('[UnifiedCartDrawer:Render] Rendering knapsack settlement summary', {
+    totalItemsCount,
+    grossSubtotalCents,
+    platformSubsidyCents,
+    estimatedTaxCents,
+    shippingFeeCents,
+    shippingSavedCents,
+    netTotalCents,
+    explanation,
+  });
+
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-black/60 backdrop-blur-xs flex justify-end animate-fade-in">
       <div className="relative w-full max-w-xl bg-white dark:bg-[#080e1c] border-l border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col h-full overflow-hidden">
@@ -202,7 +229,10 @@ export function UnifiedCartDrawer({
 
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => {
+              logger.info('[UnifiedCartDrawer:Close] Close button clicked');
+              onClose();
+            }}
             className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -382,6 +412,13 @@ export function UnifiedCartDrawer({
           <button
             type="button"
             onClick={() => {
+              logger.info('[UnifiedCartDrawer:Checkout] Checkout initiated from cart drawer', {
+                netTotalCents,
+                totalItemsCount,
+                merchantCount: activeCart.assigned_merchants.length,
+                grossSubtotalCents,
+                platformSubsidyCents,
+              });
               if (onProceedToCheckout) {
                 onProceedToCheckout();
               }
