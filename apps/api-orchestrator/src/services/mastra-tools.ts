@@ -7,6 +7,8 @@ import {
   ProductCardData,
   ComparisonMatrix,
   ComparisonMatrixRow,
+  createLogger,
+  sanitizeForLogging,
 } from '@aegispay/shared-types';
 import {
   Channel3Client,
@@ -28,21 +30,33 @@ import {
   defaultPayPalClient,
 } from './paypal-apimatic.js';
 
+const logger = createLogger('API:Services:MastraTools');
+
 export function transformToProductCard(p: Channel3ProductDetail): ProductCardData {
+  logger.debug(`transformToProductCard: processing product ${p.product_id} ("${p.title}")`);
   const inStockOffers = p.offers.filter(o => o.stock_status !== 'OUT_OF_STOCK');
-  const bestOffer: Channel3Offer = inStockOffers.length > 0
-    ? inStockOffers.reduce((min, cur) => cur.price < min.price ? cur : min, inStockOffers[0])
-    : p.offers[0] || {
-        id: 'mock_offer',
-        product_id: p.product_id,
-        domain: 'partner-merchant.com',
-        price: 9900,
-        compare_at_price: 12000,
-        max_commission_rate: 0.1,
-        shipping_fee_cents: 0,
-        merchant_anomaly_score: 0.05,
-        stock_status: 'IN_STOCK',
-      };
+  let bestOffer: Channel3Offer;
+
+  if (inStockOffers.length > 0) {
+    bestOffer = inStockOffers.reduce((min, cur) => cur.price < min.price ? cur : min, inStockOffers[0]);
+    logger.debug(`transformToProductCard: selected best in-stock offer ${bestOffer.id} ($${(bestOffer.price / 100).toFixed(2)}) from ${bestOffer.domain}`);
+  } else if (p.offers.length > 0) {
+    bestOffer = p.offers[0];
+    logger.debug(`transformToProductCard: no in-stock offers, fell back to first offer ${bestOffer.id} ($${(bestOffer.price / 100).toFixed(2)})`);
+  } else {
+    bestOffer = {
+      id: 'mock_offer',
+      product_id: p.product_id,
+      domain: 'partner-merchant.com',
+      price: 9900,
+      compare_at_price: 12000,
+      max_commission_rate: 0.1,
+      shipping_fee_cents: 0,
+      merchant_anomaly_score: 0.05,
+      stock_status: 'IN_STOCK',
+    };
+    logger.debug(`transformToProductCard: offers array empty, using mock fallback offer for ${p.product_id}`);
+  }
 
   const priceCents = bestOffer.price;
   const compareAtCents = bestOffer.compare_at_price || priceCents;
@@ -63,6 +77,8 @@ export function transformToProductCard(p: Channel3ProductDetail): ProductCardDat
     Condition: 'Brand New (Factory Sealed)',
     Warranty: '1-Year Manufacturer Warranty',
   };
+
+  logger.debug(`transformToProductCard: product ${p.product_id} transformed: price=$${(priceCents / 100).toFixed(2)}, rebate=$${(rebateCents / 100).toFixed(2)}, credibility=${credibility}%`);
 
   return {
     product_id: p.product_id,
@@ -89,6 +105,7 @@ export function transformToProductCard(p: Channel3ProductDetail): ProductCardDat
 }
 
 export function buildComparisonMatrix(products: ProductCardData[]): ComparisonMatrix {
+  logger.info(`buildComparisonMatrix: generating matrix for ${products.length} products`);
   const productIds = products.map(p => p.product_id);
 
   let minNet = Infinity;
@@ -96,11 +113,14 @@ export function buildComparisonMatrix(products: ProductCardData[]): ComparisonMa
 
   products.forEach(p => {
     const net = p.price_cents - p.commission_rebate_cents;
+    logger.debug(`buildComparisonMatrix candidate ${p.product_id}: net=$${(net / 100).toFixed(2)} (price=$${(p.price_cents / 100).toFixed(2)}, rebate=$${(p.commission_rebate_cents / 100).toFixed(2)})`);
     if (net < minNet) {
       minNet = net;
       winnerId = p.product_id;
     }
   });
+
+  logger.info(`buildComparisonMatrix: identified winner=${winnerId} with min net cost=$${(minNet / 100).toFixed(2)}`);
 
   const rows: ComparisonMatrixRow[] = [
     {
@@ -181,19 +201,35 @@ export function createDiscoverProductsTool(channel3Client: Channel3Client = defa
       total_found: z.number(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:discover_products');
       const args = input?.context || input;
       const { query, limit = 10, category_id } = args;
-      const res = await channel3Client.search({
-        query: query || undefined,
-        limit,
-        category_ids: category_id ? [category_id] : undefined,
-      });
+      logger.info('Executing Mastra tool: discover_products', sanitizeForLogging({ query, limit, category_id }));
 
-      const cards = res.products.map(p => transformToProductCard(p));
-      return {
-        products: cards,
-        total_found: cards.length,
-      };
+      try {
+        const res = await channel3Client.search({
+          query: query || undefined,
+          limit,
+          category_ids: category_id ? [category_id] : undefined,
+        });
+        logger.debug(`Channel3 search returned ${res.products?.length ?? 0} raw products`);
+
+        const cards = res.products.map(p => transformToProductCard(p));
+        stopTimer(`found ${cards.length} product cards`);
+        logger.info(`discover_products completed: total_found=${cards.length}`);
+        return {
+          products: cards,
+          total_found: cards.length,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error('Error during discover_products execution', {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -216,50 +252,73 @@ export function createScoreAndRankTool(scoringEngine: MurthyroshanScoringEngine 
       top_winner_id: z.string().optional(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:score_and_rank');
       const args = input?.context || input;
       const { query, products, target_price_cents } = args;
       const productList: ProductCardData[] = products || [];
-      if (productList.length === 0) {
-        return { ranked_products: [], top_winner_id: undefined };
-      }
-
-      // Convert ProductCardData into Channel3ProductDetail format for scoring engine
-      const details: Channel3ProductDetail[] = productList.map((p: ProductCardData) => ({
-        product_id: p.product_id,
-        title: p.title,
-        description: p.description,
-        category_id: p.category_id,
-        images: [{ url: p.image_url || p.cleaned_url || '', cleaned_url: p.cleaned_image_url || p.cleaned_url || '' }],
-        offers: [{
-          id: `offer_${p.product_id}`,
-          product_id: p.product_id,
-          domain: p.merchant_domain,
-          price: p.price_cents,
-          compare_at_price: p.compare_at_price_cents,
-          max_commission_rate: p.commission_rate,
-          shipping_fee_cents: p.shipping_fee_cents,
-          merchant_anomaly_score: Math.max(0, (100 - p.merchant_credibility_score) / 100),
-          stock_status: p.stock_status,
-        }],
-      }));
-
-      const ranked = scoringEngine.rankProducts(details, {
+      logger.info(`Executing Mastra tool: score_and_rank with ${productList.length} products`, {
         query,
         target_price_cents,
       });
 
-      // Map back to ProductCardData preserving rank order
-      const rankedMap = new Map<string, ProductCardData>(productList.map((p: ProductCardData) => [p.product_id, p]));
-      const sortedCards: ProductCardData[] = [];
-      for (const r of ranked) {
-        const found = rankedMap.get(r.product_id);
-        if (found) sortedCards.push(found);
+      if (productList.length === 0) {
+        logger.debug('score_and_rank: empty product list provided, returning empty ranking');
+        stopTimer('zero products');
+        return { ranked_products: [], top_winner_id: undefined };
       }
 
-      return {
-        ranked_products: sortedCards.length > 0 ? sortedCards : productList,
-        top_winner_id: sortedCards[0]?.product_id,
-      };
+      try {
+        // Convert ProductCardData into Channel3ProductDetail format for scoring engine
+        const details: Channel3ProductDetail[] = productList.map((p: ProductCardData) => ({
+          product_id: p.product_id,
+          title: p.title,
+          description: p.description,
+          category_id: p.category_id,
+          images: [{ url: p.image_url || p.cleaned_url || '', cleaned_url: p.cleaned_image_url || p.cleaned_url || '' }],
+          offers: [{
+            id: `offer_${p.product_id}`,
+            product_id: p.product_id,
+            domain: p.merchant_domain,
+            price: p.price_cents,
+            compare_at_price: p.compare_at_price_cents,
+            max_commission_rate: p.commission_rate,
+            shipping_fee_cents: p.shipping_fee_cents,
+            merchant_anomaly_score: Math.max(0, (100 - p.merchant_credibility_score) / 100),
+            stock_status: p.stock_status,
+          }],
+        }));
+
+        logger.debug(`Invoking MurthyroshanScoringEngine.rankProducts for ${details.length} items`);
+        const ranked = scoringEngine.rankProducts(details, {
+          query,
+          target_price_cents,
+        });
+
+        // Map back to ProductCardData preserving rank order
+        const rankedMap = new Map<string, ProductCardData>(productList.map((p: ProductCardData) => [p.product_id, p]));
+        const sortedCards: ProductCardData[] = [];
+        for (const r of ranked) {
+          const found = rankedMap.get(r.product_id);
+          if (found) sortedCards.push(found);
+        }
+
+        const winnerId = sortedCards[0]?.product_id;
+        stopTimer(`ranked ${sortedCards.length} products, winner=${winnerId || 'none'}`);
+        logger.info(`score_and_rank completed: winner=${winnerId || 'none'}, count=${sortedCards.length}`);
+
+        return {
+          ranked_products: sortedCards.length > 0 ? sortedCards : productList,
+          top_winner_id: winnerId,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error('Error during score_and_rank execution', {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -284,24 +343,46 @@ export function createSolveKnapsackCartTool(
       cart: ExplainableCartPayloadSchema,
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:solve_knapsack_cart');
       const args = input?.context || input;
       const { product_ids, budget_cap_cents, zip_code } = args;
       const targetIds: string[] = product_ids || [];
-      const catalog = await channel3Client.lookup(targetIds);
-      const items = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
+      logger.info('Executing Mastra tool: solve_knapsack_cart', {
+        item_count: targetIds.length,
+        budget_cap_cents,
+        zip_code,
+      });
 
-      const knapsackResult: KnapsackOptimizationResult = cartSolver.solve(
-        catalog,
-        items,
-        {
-          budgetCapCents: budget_cap_cents,
-          zipCode: zip_code,
-        }
-      );
+      try {
+        logger.debug(`Looking up ${targetIds.length} products via Channel3Client`);
+        const catalog = await channel3Client.lookup(targetIds);
+        const items = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
 
-      return {
-        cart: knapsackResult,
-      };
+        logger.debug('Invoking CartSolver.solve with catalog data');
+        const knapsackResult: KnapsackOptimizationResult = cartSolver.solve(
+          catalog,
+          items,
+          {
+            budgetCapCents: budget_cap_cents,
+            zipCode: zip_code,
+          }
+        );
+
+        stopTimer(`solved with ${knapsackResult.assigned_merchants.length} merchant groups`);
+        logger.info(`solve_knapsack_cart completed: net_total=$${(knapsackResult.net_buyer_expenditure_cents / 100).toFixed(2)}, is_within_budget=${knapsackResult.is_within_budget}`);
+
+        return {
+          cart: knapsackResult,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error('Error during solve_knapsack_cart execution', {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -326,21 +407,43 @@ export function createVerifyAndCheckoutTool(channel3Client: Channel3Client = def
       expires_at: z.string().optional(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:verify_and_checkout');
       const args = input?.context || input;
       const { product_ids, budget_cap_cents, zip_code } = args;
       const targetIds: string[] = product_ids || [];
-      const stockItems = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
-      const stockRes = await channel3Client.verifyAndHoldStock(stockItems, {
-        zipCode: zip_code,
-        budgetCapCents: budget_cap_cents,
+      logger.info('Executing Mastra tool: verify_and_checkout', {
+        item_count: targetIds.length,
+        budget_cap_cents,
+        zip_code,
       });
 
-      return {
-        all_held: stockRes.all_held,
-        reservation_id: stockRes.reservation_id,
-        failed_items: stockRes.failed_items,
-        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      };
+      try {
+        const stockItems = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
+        logger.debug(`Calling Channel3Client.verifyAndHoldStock for ${stockItems.length} items`);
+        const stockRes = await channel3Client.verifyAndHoldStock(stockItems, {
+          zipCode: zip_code,
+          budgetCapCents: budget_cap_cents,
+        });
+
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        stopTimer(`all_held=${stockRes.all_held}, reservation_id=${stockRes.reservation_id}`);
+        logger.info(`verify_and_checkout completed: all_held=${stockRes.all_held}, failed_items=${stockRes.failed_items.length}`);
+
+        return {
+          all_held: stockRes.all_held,
+          reservation_id: stockRes.reservation_id,
+          failed_items: stockRes.failed_items,
+          expires_at: expiresAt,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error('Error during verify_and_checkout execution', {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -365,21 +468,43 @@ export function createExecuteEscrowHoldTool(channel3Client: Channel3Client = def
       expires_at: z.string().optional(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:execute_escrow_hold');
       const args = input?.context || input;
       const { product_ids, budget_cap_cents, zip_code } = args;
       const targetIds: string[] = product_ids || [];
-      const stockItems = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
-      const stockRes = await channel3Client.verifyAndHoldStock(stockItems, {
-        zipCode: zip_code,
-        budgetCapCents: budget_cap_cents,
+      logger.info('Executing Mastra tool: execute_escrow_hold', {
+        item_count: targetIds.length,
+        budget_cap_cents,
+        zip_code,
       });
 
-      return {
-        all_held: stockRes.all_held,
-        reservation_id: stockRes.reservation_id,
-        failed_items: stockRes.failed_items,
-        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      };
+      try {
+        const stockItems = targetIds.map((pid: string) => ({ product_id: pid, quantity: 1 }));
+        logger.debug(`Calling Channel3Client.verifyAndHoldStock for ${stockItems.length} items`);
+        const stockRes = await channel3Client.verifyAndHoldStock(stockItems, {
+          zipCode: zip_code,
+          budgetCapCents: budget_cap_cents,
+        });
+
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+        stopTimer(`all_held=${stockRes.all_held}, reservation_id=${stockRes.reservation_id}`);
+        logger.info(`execute_escrow_hold completed: all_held=${stockRes.all_held}, failed_items=${stockRes.failed_items.length}`);
+
+        return {
+          all_held: stockRes.all_held,
+          reservation_id: stockRes.reservation_id,
+          failed_items: stockRes.failed_items,
+          expires_at: expiresAt,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error('Error during execute_escrow_hold execution', {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -417,54 +542,76 @@ export function createCreateInvoiceTool(paypalClient: PayPalApimaticClient = def
       payer_view_url: z.string().optional(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:paypal_create_invoice');
       const args = input?.context || input;
-      const totalCents = args.items.reduce((acc: number, it: any) => {
-        const q = typeof it.quantity === 'number' ? it.quantity : parseInt(it.quantity || '1', 10);
-        return acc + it.unit_amount_cents * q;
-      }, 0);
+      logger.info('Executing Mastra tool: paypal_create_invoice', sanitizeForLogging({
+        recipient_email: args.recipient_email,
+        recipient_name: args.recipient_name,
+        business_name: args.business_name,
+        items_count: args.items?.length,
+        payment_term: args.payment_term,
+      }));
 
-      const invoiceRes = await paypalClient.createInvoice({
-        detail: {
-          currency_code: args.currency_code || 'USD',
-          note: args.note,
-          payment_term: { term_type: args.payment_term || 'NET_30' },
-        },
-        primary_recipients: [
-          {
-            billing_info: {
-              email_address: args.recipient_email,
-              business_name: args.business_name,
-              name: args.recipient_name ? { full_name: args.recipient_name } : undefined,
-            },
-          },
-        ],
-        items: args.items.map((it: any) => ({
-          name: it.name,
-          quantity: it.quantity.toString(),
-          unit_amount: {
+      try {
+        const totalCents = args.items.reduce((acc: number, it: any) => {
+          const q = typeof it.quantity === 'number' ? it.quantity : parseInt(it.quantity || '1', 10);
+          return acc + it.unit_amount_cents * q;
+        }, 0);
+        logger.debug(`Calculated total invoice cents: ${totalCents} ($${(totalCents / 100).toFixed(2)})`);
+
+        const invoiceRes = await paypalClient.createInvoice({
+          detail: {
             currency_code: args.currency_code || 'USD',
-            value: (it.unit_amount_cents / 100).toFixed(2),
+            note: args.note,
+            payment_term: { term_type: args.payment_term || 'NET_30' },
           },
-          description: it.description,
-        })),
-        amount: {
-          currency_code: args.currency_code || 'USD',
-          value: (totalCents / 100).toFixed(2),
-        },
-      });
+          primary_recipients: [
+            {
+              billing_info: {
+                email_address: args.recipient_email,
+                business_name: args.business_name,
+                name: args.recipient_name ? { full_name: args.recipient_name } : undefined,
+              },
+            },
+          ],
+          items: args.items.map((it: any) => ({
+            name: it.name,
+            quantity: it.quantity.toString(),
+            unit_amount: {
+              currency_code: args.currency_code || 'USD',
+              value: (it.unit_amount_cents / 100).toFixed(2),
+            },
+            description: it.description,
+          })),
+          amount: {
+            currency_code: args.currency_code || 'USD',
+            value: (totalCents / 100).toFixed(2),
+          },
+        });
 
-      const payerViewLink = (invoiceRes as any).links?.find((l: any) => l.rel === 'payer-view')?.href;
+        const payerViewLink = (invoiceRes as any).links?.find((l: any) => l.rel === 'payer-view')?.href;
+        stopTimer(`created invoice id=${invoiceRes.id}`);
+        logger.info(`paypal_create_invoice completed: invoice_id=${invoiceRes.id}, status=${invoiceRes.status}`);
 
-      return {
-        invoice_id: invoiceRes.id,
-        status: invoiceRes.status,
-        invoice_number: invoiceRes.detail.invoice_number,
-        amount: {
-          currency_code: invoiceRes.amount?.currency_code || 'USD',
-          value: invoiceRes.amount?.value || (totalCents / 100).toFixed(2),
-        },
-        payer_view_url: payerViewLink,
-      };
+        return {
+          invoice_id: invoiceRes.id,
+          status: invoiceRes.status,
+          invoice_number: invoiceRes.detail.invoice_number,
+          amount: {
+            currency_code: invoiceRes.amount?.currency_code || 'USD',
+            value: invoiceRes.amount?.value || (totalCents / 100).toFixed(2),
+          },
+          payer_view_url: payerViewLink,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error('Error during paypal_create_invoice execution', {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -486,13 +633,28 @@ export function createSendInvoiceTool(paypalClient: PayPalApimaticClient = defau
       success: z.boolean(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:paypal_send_invoice');
       const args = input?.context || input;
-      const success = await paypalClient.sendInvoice(args.invoice_id);
-      return {
-        invoice_id: args.invoice_id,
-        status: 'SENT',
-        success,
-      };
+      logger.info(`Executing Mastra tool: paypal_send_invoice for invoice_id=${args.invoice_id}`);
+
+      try {
+        const success = await paypalClient.sendInvoice(args.invoice_id);
+        stopTimer(`sent invoice, success=${success}`);
+        logger.info(`paypal_send_invoice completed: invoice_id=${args.invoice_id}, success=${success}`);
+        return {
+          invoice_id: args.invoice_id,
+          status: 'SENT',
+          success,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error(`Error during paypal_send_invoice for invoice_id=${args.invoice_id}`, {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -513,12 +675,27 @@ export function createGenerateInvoiceQrCodeTool(paypalClient: PayPalApimaticClie
       qr_code: z.string(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:paypal_generate_invoice_qr');
       const args = input?.context || input;
-      const qrCode = await paypalClient.generateInvoiceQrCode(args.invoice_id);
-      return {
-        invoice_id: args.invoice_id,
-        qr_code: qrCode,
-      };
+      logger.info(`Executing Mastra tool: paypal_generate_invoice_qr for invoice_id=${args.invoice_id}`);
+
+      try {
+        const qrCode = await paypalClient.generateInvoiceQrCode(args.invoice_id);
+        stopTimer('generated QR code');
+        logger.info(`paypal_generate_invoice_qr completed: invoice_id=${args.invoice_id}`);
+        return {
+          invoice_id: args.invoice_id,
+          qr_code: qrCode,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error(`Error during paypal_generate_invoice_qr for invoice_id=${args.invoice_id}`, {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }
@@ -541,13 +718,30 @@ export function createSendInvoiceReminderTool(paypalClient: PayPalApimaticClient
       success: z.boolean(),
     }),
     execute: async (input: any) => {
+      const stopTimer = logger.time('MastraTool:paypal_send_invoice_reminder');
       const args = input?.context || input;
-      const success = await paypalClient.sendInvoiceReminder(args.invoice_id, args.note);
-      return {
-        invoice_id: args.invoice_id,
-        status: 'REMINDER_SENT',
-        success,
-      };
+      logger.info(`Executing Mastra tool: paypal_send_invoice_reminder for invoice_id=${args.invoice_id}`, {
+        note: args.note,
+      });
+
+      try {
+        const success = await paypalClient.sendInvoiceReminder(args.invoice_id, args.note);
+        stopTimer(`reminder sent, success=${success}`);
+        logger.info(`paypal_send_invoice_reminder completed: invoice_id=${args.invoice_id}, success=${success}`);
+        return {
+          invoice_id: args.invoice_id,
+          status: 'REMINDER_SENT',
+          success,
+        };
+      } catch (err: any) {
+        stopTimer('failed with error');
+        logger.error(`Error during paypal_send_invoice_reminder for invoice_id=${args.invoice_id}`, {
+          error: err?.message,
+          code: err?.code,
+          stack: err?.stack,
+        });
+        throw err;
+      }
     },
   });
 }

@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
-import { PerceptualHashResult } from '@aegispay/shared-types';
+import { PerceptualHashResult, createLogger } from '@aegispay/shared-types';
+
+const logger = createLogger('API:Services:ImageHasher');
 
 /**
  * Pure TypeScript 64-bit difference hash (dHash) generator and image deduplicator.
@@ -11,7 +13,9 @@ import { PerceptualHashResult } from '@aegispay/shared-types';
  * Computes SHA-256 hash of image buffer.
  */
 export function computeImageSha256(buffer: Buffer | Uint8Array): string {
-  return crypto.createHash('sha256').update(buffer).digest('hex');
+  const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+  logger.debug(`computeImageSha256: payload size=${buffer.length} bytes, sha256=${hash}`);
+  return hash;
 }
 
 /**
@@ -19,8 +23,11 @@ export function computeImageSha256(buffer: Buffer | Uint8Array): string {
  */
 function sampleLuminanceGrid(buffer: Buffer): number[][] {
   const len = buffer.length;
+  logger.debug(`sampleLuminanceGrid: sampling buffer of ${len} bytes`);
+
   // Fallback if buffer is tiny
   if (len < 72) {
+    logger.warn(`sampleLuminanceGrid: Buffer size (${len} bytes) < 72, returning default neutral luminance grid`);
     const defaultGrid: number[][] = [];
     for (let r = 0; r < 8; r++) {
       defaultGrid.push(new Array(9).fill(128));
@@ -33,13 +40,18 @@ function sampleLuminanceGrid(buffer: Buffer): number[][] {
   let startOffset = 0;
   if (buffer[0] === 0xff && buffer[1] === 0xd8) {
     startOffset = Math.min(len - 100, 128);
+    logger.debug(`sampleLuminanceGrid: detected JPEG magic bytes (0xFFD8), startOffset=${startOffset}`);
   } else if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
     // PNG: skip 8-byte signature + IHDR chunk
     startOffset = Math.min(len - 100, 33);
+    logger.debug(`sampleLuminanceGrid: detected PNG magic bytes (0x89504E47), startOffset=${startOffset}`);
+  } else {
+    logger.debug(`sampleLuminanceGrid: generic/unrecognized image format header, startOffset=0`);
   }
 
   const payloadLength = Math.max(72, len - startOffset - 2);
   const step = Math.floor(payloadLength / 72);
+  logger.debug(`sampleLuminanceGrid: payloadLength=${payloadLength}, step=${step}`);
 
   const grid: number[][] = [];
   let sampleIndex = 0;
@@ -60,6 +72,7 @@ function sampleLuminanceGrid(buffer: Buffer): number[][] {
     grid.push(row);
   }
 
+  logger.debug(`sampleLuminanceGrid: sampled 8x9 grid successfully (${sampleIndex} points)`);
   return grid;
 }
 
@@ -69,6 +82,7 @@ function sampleLuminanceGrid(buffer: Buffer): number[][] {
  */
 export function computeDHash(buffer: Buffer | Uint8Array): string {
   const nodeBuf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  logger.debug(`computeDHash: starting dHash calculation for ${nodeBuf.length} bytes`);
   const grid = sampleLuminanceGrid(nodeBuf);
 
   let hexResult = '';
@@ -82,7 +96,9 @@ export function computeDHash(buffer: Buffer | Uint8Array): string {
     hexResult += rowByte.toString(16).padStart(2, '0');
   }
 
-  return hexResult.toLowerCase();
+  const dHash = hexResult.toLowerCase();
+  logger.info(`computeDHash: generated 64-bit dHash=${dHash}`);
+  return dHash;
 }
 
 /**
@@ -90,6 +106,7 @@ export function computeDHash(buffer: Buffer | Uint8Array): string {
  */
 export function computeHammingDistance(hashA: string, hashB: string): number {
   if (hashA.length !== 16 || hashB.length !== 16) {
+    logger.error(`computeHammingDistance error: invalid length (hashA=${hashA.length}, hashB=${hashB.length})`);
     throw new Error('dHash strings must be exactly 16 hexadecimal characters (64 bits)');
   }
 
@@ -105,6 +122,7 @@ export function computeHammingDistance(hashA: string, hashB: string): number {
     }
   }
 
+  logger.debug(`computeHammingDistance: hashA=${hashA}, hashB=${hashB}, distance=${distance}`);
   return distance;
 }
 
@@ -124,12 +142,18 @@ export function evaluatePerceptualDuplicate(
   hammingThreshold: number = 10
 ): PerceptualHashResult {
   const nodeBuf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  logger.info(`evaluatePerceptualDuplicate: evaluating ${nodeBuf.length} bytes against ${knownEvidence.length} known records with threshold=${hammingThreshold}`);
+
   const sha256 = computeImageSha256(nodeBuf);
   const dHash = computeDHash(nodeBuf);
 
-  for (const record of knownEvidence) {
+  for (let idx = 0; idx < knownEvidence.length; idx++) {
+    const record = knownEvidence[idx];
+    logger.debug(`Checking record [${idx}] claim_id=${record.claim_id}: sha256=${record.sha256}, dHash=${record.dHash}`);
+
     // Exact hash match
     if (record.sha256 === sha256) {
+      logger.warn(`Exact SHA-256 collision detected with claim ${record.claim_id}`);
       return {
         sha256,
         dHash,
@@ -137,12 +161,16 @@ export function evaluatePerceptualDuplicate(
         hamming_distance: 0,
         matched_claim_id: record.claim_id,
       };
+    } else {
+      logger.debug(`Record [${idx}] SHA-256 did not match incoming image`);
     }
 
     // Perceptual dHash match
     try {
       const distance = computeHammingDistance(dHash, record.dHash);
+      logger.debug(`Record [${idx}] perceptual Hamming distance: ${distance} (threshold: ${hammingThreshold})`);
       if (distance <= hammingThreshold) {
+        logger.warn(`Perceptual dHash duplicate match detected with claim ${record.claim_id}: distance=${distance} <= ${hammingThreshold}`);
         return {
           sha256,
           dHash,
@@ -150,12 +178,19 @@ export function evaluatePerceptualDuplicate(
           hamming_distance: distance,
           matched_claim_id: record.claim_id,
         };
+      } else {
+        logger.debug(`Record [${idx}] Hamming distance ${distance} exceeds threshold ${hammingThreshold}`);
       }
-    } catch {
-      // Ignore invalid record hash
+    } catch (err: any) {
+      logger.error(`Error computing Hamming distance for record [${idx}] claim ${record.claim_id}`, {
+        error: err?.message,
+        code: err?.code,
+        stack: err?.stack,
+      });
     }
   }
 
+  logger.info(`evaluatePerceptualDuplicate: zero matches found across ${knownEvidence.length} records. Image confirmed unique.`);
   return {
     sha256,
     dHash,

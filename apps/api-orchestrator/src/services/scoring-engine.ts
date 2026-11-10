@@ -12,6 +12,9 @@
  */
 
 import { Channel3ProductDetail, Channel3Offer } from './channel3.client.js';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('API:Services:ScoringEngine');
 
 export interface ScoringWeights {
   w1_cosine: number;       // default 0.35
@@ -165,14 +168,18 @@ export const STORE_TRUST_TIERS = {
 export function classifyStoreTier(source: string): 'tier1' | 'tier2_high' | 'tier2_low' | 'tier3' {
   const s = (source || '').toLowerCase();
   if (OFFICIAL_STORE_KEYWORDS.some(kw => s.includes(kw))) {
+    logger.debug(`classifyStoreTier: "${source}" classified as tier1 (Official Store keyword match)`);
     return 'tier1';
   }
   if (HIGH_TRUST_RETAILERS.some(kw => s.includes(kw))) {
+    logger.debug(`classifyStoreTier: "${source}" classified as tier2_high (High Trust Retailer match)`);
     return 'tier2_high';
   }
   if (TRUSTED_RETAILER_KEYWORDS.some(kw => s.includes(kw))) {
+    logger.debug(`classifyStoreTier: "${source}" classified as tier2_low (Trusted Retailer keyword match)`);
     return 'tier2_low';
   }
+  logger.debug(`classifyStoreTier: "${source}" classified as tier3 (Unverified Seller)`);
   return 'tier3';
 }
 
@@ -190,7 +197,10 @@ export function buildPrimaryBadge(product: {
   const eliminated = Boolean(product.eliminated);
   const suspicious = Boolean(product.price_suspicious);
 
+  logger.debug(`buildPrimaryBadge: evaluating badge for source="${source}", eliminated=${eliminated}, suspicious=${suspicious}`);
+
   if (eliminated) {
+    logger.debug(`buildPrimaryBadge: product eliminated ("${product.elimination_reason || 'Unknown reason'}"), assigning Eliminated badge`);
     return {
       tier: 'eliminated',
       label: 'Eliminated',
@@ -205,6 +215,7 @@ export function buildPrimaryBadge(product: {
   const storeTier = classifyStoreTier(source);
 
   if (suspicious) {
+    logger.warn(`buildPrimaryBadge: product marked suspicious (${product.anomaly_deviation_pct?.toFixed(1) || '35.0'}% deviation), assigning tier4 Suspicious Listing badge`);
     return {
       tier: 'tier4',
       label: 'Suspicious Listing',
@@ -218,6 +229,7 @@ export function buildPrimaryBadge(product: {
   }
 
   if (storeTier === 'tier1') {
+    logger.debug(`buildPrimaryBadge: assigning tier1 Official Store badge`);
     return {
       tier: 'tier1',
       label: 'Official Store',
@@ -230,6 +242,7 @@ export function buildPrimaryBadge(product: {
   }
 
   if (storeTier === 'tier2_high' || storeTier === 'tier2_low') {
+    logger.debug(`buildPrimaryBadge: assigning tier2 Trusted Retailer badge`);
     return {
       tier: 'tier2',
       label: 'Trusted Retailer',
@@ -241,6 +254,7 @@ export function buildPrimaryBadge(product: {
     };
   }
 
+  logger.debug(`buildPrimaryBadge: assigning tier3 Unverified Seller badge`);
   return {
     tier: 'tier3',
     label: 'Unverified Seller',
@@ -259,16 +273,22 @@ export function computeConfidenceAdjustedRating(
   rating: number,
   reviewCount: number
 ): { adjusted_rating: number; rating_verified: boolean } {
+  logger.debug(`computeConfidenceAdjustedRating: input rating=${rating}, reviewCount=${reviewCount}`);
   if (rating <= 0.0) {
+    logger.debug(`computeConfidenceAdjustedRating: non-positive rating <= 0.0, fallback to NEUTRAL_RATING=${NEUTRAL_RATING}`);
     return { adjusted_rating: NEUTRAL_RATING, rating_verified: false };
   }
   const confidence = Math.min(Math.max(0, reviewCount), CONFIDENCE_FLOOR) / CONFIDENCE_FLOOR;
   const adjusted = Math.round((confidence * rating + (1 - confidence) * NEUTRAL_RATING) * 10000) / 10000;
+  logger.debug(`computeConfidenceAdjustedRating: confidence=${confidence.toFixed(4)}, adjusted_rating=${adjusted}`);
   return { adjusted_rating: adjusted, rating_verified: true };
 }
 
 export function logNormalize(values: number[]): number[] {
-  if (!values || values.length === 0) return [];
+  if (!values || values.length === 0) {
+    logger.debug('logNormalize: empty values array received');
+    return [];
+  }
   const logged = values.map(v => {
     const safeV = Number.isFinite(v) ? Math.max(0, v) : 0;
     return Math.log1p(safeV);
@@ -276,6 +296,7 @@ export function logNormalize(values: number[]): number[] {
   const min = Math.min(...logged);
   const max = Math.max(...logged);
   if (!Number.isFinite(min) || !Number.isFinite(max) || min === max || max - min <= 0) {
+    logger.debug(`logNormalize: min === max or non-finite spread (min=${min}, max=${max}), returning array of 1.0`);
     return values.map(() => 1.0);
   }
   const spread = max - min;
@@ -295,11 +316,14 @@ const VERDICT_THRESHOLDS: Array<{ min_score: number; text: string; colour: strin
 ];
 
 export function computeDealVerdict(score: number): DealVerdict {
+  logger.debug(`computeDealVerdict: evaluating deal verdict for score=${score}`);
   for (const row of VERDICT_THRESHOLDS) {
     if (score >= row.min_score) {
+      logger.debug(`computeDealVerdict: score=${score} matched min_score=${row.min_score} -> "${row.text}"`);
       return { verdict_text: row.text, verdict_colour: row.colour };
     }
   }
+  logger.debug(`computeDealVerdict: score=${score} fell through to fallback "Overpriced."`);
   return { verdict_text: 'Overpriced.', verdict_colour: '#f87171' };
 }
 
@@ -331,6 +355,7 @@ export function computeCosineSimilarity(query: string, document: string): number
   const tfDoc = tokenizeToTermFrequency(document);
 
   if (tfQuery.size === 0 || tfDoc.size === 0) {
+    logger.debug(`computeCosineSimilarity: empty term frequency map (tfQuery=${tfQuery.size}, tfDoc=${tfDoc.size}), returning 0.0`);
     return 0.0;
   }
 
@@ -354,11 +379,14 @@ export function computeCosineSimilarity(query: string, document: string): number
   }
 
   if (queryNormSq === 0 || docNormSq === 0) {
+    logger.debug('computeCosineSimilarity: zero norm encountered, returning 0.0');
     return 0.0;
   }
 
   const similarity = dotProduct / (Math.sqrt(queryNormSq) * Math.sqrt(docNormSq));
-  return Math.max(0.0, Math.min(1.0, similarity));
+  const boundedSim = Math.max(0.0, Math.min(1.0, similarity));
+  logger.debug(`computeCosineSimilarity: query="${query.slice(0, 30)}...", doc="${document.slice(0, 30)}..." -> similarity=${boundedSim.toFixed(4)}`);
+  return boundedSim;
 }
 
 /**
@@ -373,16 +401,20 @@ export function computePriceAffinity(priceCents: number, targetPriceCents?: numb
     !Number.isFinite(targetPriceCents) ||
     targetPriceCents <= 0
   ) {
+    logger.debug(`computePriceAffinity: target price unconfigured or <= 0 (target=${targetPriceCents}), defaulting to 1.0`);
     return 1.0;
   }
   const safePrice = Number.isFinite(priceCents) && priceCents >= 0 ? priceCents : 0;
   const deviation = Math.abs(safePrice - targetPriceCents);
   const ratio = deviation / targetPriceCents;
   if (!Number.isFinite(ratio)) {
+    logger.debug('computePriceAffinity: non-finite ratio, returning 0.0');
     return 0.0;
   }
   const affinity = Math.max(0.0, 1.0 - ratio);
-  return Math.min(1.0, affinity);
+  const finalAffinity = Math.min(1.0, affinity);
+  logger.debug(`computePriceAffinity: price=${priceCents}, target=${targetPriceCents}, deviation=${deviation}, affinity=${finalAffinity.toFixed(4)}`);
+  return finalAffinity;
 }
 
 export const priceAffinityScore = computePriceAffinity;
@@ -428,6 +460,8 @@ export function computeMerchantReputation(
   // Blend base tier reputation with anomaly check
   const finalRep = Math.min(1.0, Math.max(0.0, (baseRep * 0.5) + (anomalyAdjustedReputation * 0.5)));
 
+  logger.debug(`computeMerchantReputation: domain="${domain}", tier=${tier}, multiplier=${multiplier}, baseRep=${baseRep}, anomalyScore=${anomalyScore}, finalRep=${finalRep.toFixed(4)}`);
+
   return {
     reputation: finalRep,
     tier,
@@ -452,10 +486,15 @@ export function merchantReputationWeight(
  * Converts delivery days or estimated latency into a normalized penalty [0.0, 1.0].
  */
 export function computeShippingPenalty(shippingDays: number, maxShippingDays: number = 7): number {
-  if (!Number.isFinite(shippingDays) || shippingDays <= 0) return 0.0;
+  if (!Number.isFinite(shippingDays) || shippingDays <= 0) {
+    logger.debug(`computeShippingPenalty: non-positive shippingDays (${shippingDays}), penalty=0.0`);
+    return 0.0;
+  }
   const safeMax = Number.isFinite(maxShippingDays) && maxShippingDays > 0 ? maxShippingDays : 7;
   const normalized = Math.min(1.0, Math.max(0.0, shippingDays / safeMax));
-  return Number.isFinite(normalized) ? normalized : 0.0;
+  const penalty = Number.isFinite(normalized) ? normalized : 0.0;
+  logger.debug(`computeShippingPenalty: days=${shippingDays}, max=${safeMax}, penalty=${penalty.toFixed(4)}`);
+  return penalty;
 }
 
 /**
@@ -470,17 +509,22 @@ export function detectPriceAnomaly(
   const safePrice = Number.isFinite(priceCents) && priceCents >= 0 ? priceCents : 0;
   const validPrices = (allPricesCents || []).filter(p => Number.isFinite(p) && p > 0);
 
+  logger.debug(`detectPriceAnomaly: price=${safePrice}, validBatchCount=${validPrices.length}, compareAt=${compareAtCents}`);
+
   if (validPrices.length < 3) {
     if (compareAtCents && Number.isFinite(compareAtCents) && compareAtCents > 0) {
       const markdownRatio = (compareAtCents - safePrice) / compareAtCents;
       if (Number.isFinite(markdownRatio) && markdownRatio >= 0.50) {
+        const devPct = Math.round(markdownRatio * 1000) / 10;
+        logger.warn(`detectPriceAnomaly: batch size < 3, but price $${(safePrice / 100).toFixed(2)} is ${devPct}% below compare_at $${(compareAtCents / 100).toFixed(2)} -> SUSPICIOUS`);
         return {
           is_suspicious: true,
-          deviation_pct: Math.round(markdownRatio * 1000) / 10,
+          deviation_pct: devPct,
           median_price_cents: compareAtCents,
         };
       }
     }
+    logger.debug(`detectPriceAnomaly: batch size < 3 and compare_at check passed -> not suspicious`);
     return { is_suspicious: false, deviation_pct: 0, median_price_cents: safePrice };
   }
 
@@ -489,12 +533,19 @@ export function detectPriceAnomaly(
   const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 
   if (!Number.isFinite(median) || median <= 0) {
+    logger.debug(`detectPriceAnomaly: invalid median calculated (${median}), returning non-suspicious`);
     return { is_suspicious: false, deviation_pct: 0, median_price_cents: 0 };
   }
 
   const deviation = (median - safePrice) / median;
   const isSuspicious = Number.isFinite(deviation) && deviation > 0.35; // 35% below batch median
   const devPct = Number.isFinite(deviation) ? Math.round(deviation * 1000) / 10 : 0;
+
+  if (isSuspicious) {
+    logger.warn(`detectPriceAnomaly: price $${(safePrice / 100).toFixed(2)} is ${devPct}% below batch median $${(median / 100).toFixed(2)} -> SUSPICIOUS`);
+  } else {
+    logger.debug(`detectPriceAnomaly: price $${(safePrice / 100).toFixed(2)} vs batch median $${(median / 100).toFixed(2)} (dev=${devPct}%) -> normal`);
+  }
 
   return {
     is_suspicious: isSuspicious,
@@ -557,7 +608,10 @@ export function computeScore(
     (w.w3_reputation * r) -
     (w.w4_shipping * s);
 
-  return Math.max(0.0, Math.min(1.0, Math.round(rawScore * 10000) / 10000));
+  const boundedScore = Math.max(0.0, Math.min(1.0, Math.round(rawScore * 10000) / 10000));
+  logger.debug(`computeScore: c=${c}, p=${p}, r=${r}, s=${s}, rawScore=${rawScore.toFixed(4)}, bounded=${boundedScore}`);
+
+  return boundedScore;
 }
 
 /**
@@ -580,6 +634,7 @@ export function assignProductBadges(
   allScored?: RankedProductItem[]
 ): RankedProductItem[] | RankedProductItem {
   if (Array.isArray(input)) {
+    logger.debug(`assignProductBadges: evaluating badges for batch of ${input.length} products`);
     const activeCandidates = input.filter(item => !item.eliminated);
     for (const item of input) {
       item.badges = item.badges || [];
@@ -598,17 +653,21 @@ export function assignProductBadges(
     // Eliminated items must receive ZERO secondary positive badges
     for (const item of input) {
       if (item.eliminated) {
+        logger.debug(`assignProductBadges: clearing secondary badges for eliminated product ${item.product_id}`);
         item.badges = [];
         item.secondary_badges = [];
       }
     }
 
     if (activeCandidates.length > 0) {
+      logger.debug(`assignProductBadges: awarding comparative badges among ${activeCandidates.length} active candidates`);
+
       // Helper to push unique badge
       const pushBadge = (target: RankedProductItem, badge: ProductBadge) => {
         target.badges = target.badges || [];
         if (!target.badges.some(b => b.label === badge.label)) {
           target.badges.push(badge);
+          logger.debug(`assignProductBadges: awarded badge "${badge.label}" to product ${target.product_id}`);
         }
       };
 
@@ -722,7 +781,6 @@ export function assignProductBadges(
   }
 }
 
-
 /**
  * Normalizes factor weights so they sum exactly to 1.0.
  */
@@ -737,6 +795,7 @@ export function normalizeWeights(
 
   const total = w1 + w2 + w3 + w4;
   if (!Number.isFinite(total) || total <= 0) {
+    logger.debug('normalizeWeights: total <= 0, returning default weights');
     return { ...DEFAULT_SCORING_WEIGHTS };
   }
 
@@ -745,6 +804,7 @@ export function normalizeWeights(
   const nw3 = Math.round((w3 / total) * 10000) / 10000;
   const nw4 = Math.round((1.0 - (nw1 + nw2 + nw3)) * 10000) / 10000;
 
+  logger.debug(`normalizeWeights: w1=${nw1}, w2=${nw2}, w3=${nw3}, w4=${nw4}`);
   return {
     w1_cosine: nw1,
     w2_price: nw2,
@@ -781,7 +841,9 @@ export function generateLosingReason(
   loser: any,
   winner: any
 ): LosingReasonDiagnostic {
+  logger.debug(`generateLosingReason: comparing loser (${loser?.product_id}) against winner (${winner?.product_id})`);
   if (loser?.eliminated && loser?.elimination_reason) {
+    logger.debug(`generateLosingReason: loser was eliminated: ${loser.elimination_reason}`);
     return {
       primary: loser.elimination_reason,
       stats: ['Eliminated by policy constraint'],
@@ -834,6 +896,7 @@ export function generateLosingReason(
     );
   }
 
+  logger.debug(`generateLosingReason: primary="${primary}", stats=${stats.join('; ')}`);
   return { primary, stats };
 }
 
@@ -867,7 +930,16 @@ export class MurthyroshanScoringEngine {
     products: Channel3ProductDetail[],
     context: ScoringQueryContext
   ): RankedProductItem[] {
+    logger.info(`rankProducts: starting ranking for ${products?.length ?? 0} products with query="${context.query}"`, sanitizeForLogging({
+      target_price_cents: context.target_price_cents,
+      max_price_cents: context.max_price_cents,
+      preset: context.preset,
+      preferred_brands: context.preferred_brands,
+      avoided_brands: context.avoided_brands,
+    }));
+
     if (!products || products.length === 0) {
+      logger.debug('rankProducts: zero products provided, returning empty array');
       return [];
     }
 
@@ -881,6 +953,7 @@ export class MurthyroshanScoringEngine {
       w3_reputation: context.weights?.w3_reputation ?? baseWeights.w3_reputation,
       w4_shipping: context.weights?.w4_shipping ?? baseWeights.w4_shipping,
     };
+    logger.debug('rankProducts: applied weights', weights);
 
     const maxShippingDays = context.max_shipping_days || 7;
     const preferredBrands = (context.preferred_brands || []).map(b => b.toLowerCase().trim()).filter(Boolean);
@@ -906,6 +979,7 @@ export class MurthyroshanScoringEngine {
     });
 
     const allPricesCents = candidates.map(c => c.selectedOffer.price);
+    logger.debug(`rankProducts: evaluated candidate offers, prices: [${allPricesCents.map(p => `$${(p / 100).toFixed(2)}`).join(', ')}]`);
 
     const scoredItems: RankedProductItem[] = [];
 
@@ -922,12 +996,15 @@ export class MurthyroshanScoringEngine {
       if (hitAvoided) {
         eliminated = true;
         eliminationReason = `Avoided brand: "${hitAvoided}"`;
+        logger.info(`rankProducts: product ${product.product_id} eliminated - matches avoided brand "${hitAvoided}"`);
       } else if (selectedOffer.price <= 0) {
         eliminated = true;
         eliminationReason = 'Invalid non-positive price';
+        logger.warn(`rankProducts: product ${product.product_id} eliminated - non-positive price (${selectedOffer.price})`);
       } else if (context.max_price_cents && selectedOffer.price > context.max_price_cents) {
         eliminated = true;
         eliminationReason = `Exceeds max price $${(context.max_price_cents / 100).toFixed(2)}`;
+        logger.info(`rankProducts: product ${product.product_id} eliminated - price $${(selectedOffer.price / 100).toFixed(2)} exceeds cap $${(context.max_price_cents / 100).toFixed(2)}`);
       }
 
       // Step 2: Cosine Semantic Relevance
@@ -963,6 +1040,7 @@ export class MurthyroshanScoringEngine {
       if (anomaly.is_suspicious) {
         anomalyMultiplier = 0.5; // 50% discount dampener for suspicious listings
         rawScore *= anomalyMultiplier;
+        logger.warn(`rankProducts: product ${product.product_id} damped 50% due to price anomaly`);
       }
 
       // Step 8: Multiplicative Trust and Preference Boosts
@@ -971,15 +1049,18 @@ export class MurthyroshanScoringEngine {
 
       if (preferredBrands.some(b => titleLower.includes(b))) {
         brandBoost = 1.08;
+        logger.debug(`rankProducts: product ${product.product_id} received 1.08x preferred brand boost`);
       }
       if (preferredSources.some(s => domainLower.includes(s))) {
         sourceBoost = 1.04;
+        logger.debug(`rankProducts: product ${product.product_id} received 1.04x preferred source boost`);
       }
 
       let finalScore = rawScore * trustMultiplier * brandBoost * sourceBoost;
 
       if (eliminated) {
         finalScore = 0.0;
+        logger.debug(`rankProducts: product ${product.product_id} score zeroed out due to elimination`);
       }
 
       // Clamp score to [0.0000, 1.0000] and round to 4 decimal places
@@ -987,6 +1068,8 @@ export class MurthyroshanScoringEngine {
       const verdict = computeDealVerdict(boundedScore);
 
       const ratingConf = computeConfidenceAdjustedRating((product as any).rating ?? 4.8, (product as any).review_count ?? 120);
+
+      logger.debug(`rankProducts: product ${product.product_id} scored: final=${boundedScore}, verdict="${verdict.verdict_text}"`);
 
       scoredItems.push({
         product_id: product.product_id,
@@ -1022,10 +1105,13 @@ export class MurthyroshanScoringEngine {
       return a.selected_offer.price - b.selected_offer.price;
     });
 
+    logger.debug(`rankProducts: sorted ${scoredItems.length} products, top winner=${scoredItems[0]?.product_id} ($${(scoredItems[0]?.selected_offer.price / 100).toFixed(2)})`);
+
     // Badge Engine: Award badges across non-eliminated candidates
     // Badges: Best Value, Fastest Delivery, Top Rated Merchant, Price Leader
     assignProductBadges(scoredItems);
 
+    logger.info(`rankProducts completed: top score=${scoredItems[0]?.score ?? 0}, winner_id=${scoredItems[0]?.product_id || 'none'}`);
     return scoredItems;
   }
 }
