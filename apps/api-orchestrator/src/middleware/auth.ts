@@ -1,5 +1,8 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import crypto from 'crypto';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('API:Middleware:Auth');
 
 export interface AuthUser {
   id: string;
@@ -56,6 +59,15 @@ export function createSessionToken(params: {
     exp,
   };
 
+  logger.debug('Creating JWT session token', {
+    userId: payload.id,
+    tenantId: payload.tenantId,
+    role: payload.role,
+    isAnonymous: payload.isAnonymous,
+    iat: payload.iat,
+    exp: payload.exp,
+  });
+
   const encodedHeader = base64UrlEncode(JSON.stringify(header));
   const encodedPayload = base64UrlEncode(JSON.stringify(payload));
   const signatureInput = `${encodedHeader}.${encodedPayload}`;
@@ -65,7 +77,14 @@ export function createSessionToken(params: {
     .update(signatureInput)
     .digest();
 
-  return `${signatureInput}.${base64UrlEncode(signature)}`;
+  const token = `${signatureInput}.${base64UrlEncode(signature)}`;
+  logger.info('Created JWT session token successfully', {
+    userId: payload.id,
+    tenantId: payload.tenantId,
+    role: payload.role,
+    tokenPreview: `${token.slice(0, 16)}...`,
+  });
+  return token;
 }
 
 /**
@@ -73,11 +92,18 @@ export function createSessionToken(params: {
  */
 export function verifySessionToken(token: string): AuthUser | null {
   if (!token || typeof token !== 'string') {
+    logger.debug('verifySessionToken rejected: missing or non-string token', {
+      hasToken: Boolean(token),
+      typeofToken: typeof token,
+    });
     return null;
   }
 
   const parts = token.trim().split('.');
   if (parts.length !== 3) {
+    logger.warn('verifySessionToken rejected: token format invalid (expected 3 parts)', {
+      partsCount: parts.length,
+    });
     return null;
   }
 
@@ -93,10 +119,15 @@ export function verifySessionToken(token: string): AuthUser | null {
     const providedSignature = Buffer.from(encodedSignature, 'base64url');
 
     if (expectedSignature.length !== providedSignature.length) {
+      logger.warn('verifySessionToken rejected: signature length mismatch', {
+        expectedLength: expectedSignature.length,
+        providedLength: providedSignature.length,
+      });
       return null;
     }
 
     if (!crypto.timingSafeEqual(expectedSignature, providedSignature)) {
+      logger.warn('verifySessionToken rejected: timingSafeEqual signature comparison failed');
       return null;
     }
 
@@ -104,11 +135,28 @@ export function verifySessionToken(token: string): AuthUser | null {
     const now = Math.floor(Date.now() / 1000);
 
     if (payload.exp && payload.exp < now) {
+      logger.warn('verifySessionToken rejected: token expired', {
+        exp: payload.exp,
+        currentTimestamp: now,
+        expiredSecondsAgo: now - payload.exp,
+        userId: payload.id,
+      });
       return null; // Expired
     }
 
+    logger.debug('verifySessionToken verified JWT token successfully', {
+      userId: payload.id,
+      tenantId: payload.tenantId,
+      role: payload.role,
+      isAnonymous: payload.isAnonymous,
+    });
     return payload;
-  } catch {
+  } catch (error: any) {
+    logger.error('Failed to verify session token: exception during decode or parse', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
     return null;
   }
 }
@@ -122,27 +170,74 @@ export function verifySessionToken(token: string): AuthUser | null {
  * judges never encounter an unexpected 401 wall.
  */
 export async function authenticateUser(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  const url = typeof request.url === 'string' ? request.url : '';
+  const path = url.split('?')[0];
   const authHeader = request.headers.authorization;
   const sessionTokenHeader = request.headers['x-session-token'] as string | undefined;
+
+  logger.debug('authenticateUser preHandler invoked', {
+    path,
+    method: request.method,
+    hasAuthHeader: Boolean(authHeader),
+    hasSessionTokenHeader: Boolean(sessionTokenHeader),
+  });
+
+  // Check SIWX bypass
+  const siwxHeader = request.headers['sign-in-with-x'] || request.headers['SIGN-IN-WITH-X'];
+  if (typeof siwxHeader === 'string' && siwxHeader.trim().length > 0) {
+    logger.info('Sign-In-With-X (SIWX) wallet proof detected in auth middleware; bypassing user auth', {
+      path,
+      siwxPreview: `${siwxHeader.trim().slice(0, 16)}...`,
+    });
+    const siwxUser: AuthUser = {
+      id: 'siwx-wallet-user',
+      tenantId: 'tenant-siwx-wallet',
+      role: 'buyer',
+      isAnonymous: false,
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 86400,
+    };
+    request.user = siwxUser;
+    return;
+  }
 
   let rawToken: string | undefined;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     rawToken = authHeader.substring(7).trim();
+    logger.debug('Extracted Bearer token from Authorization header');
   } else if (sessionTokenHeader) {
     rawToken = sessionTokenHeader.trim();
+    logger.debug('Extracted token from x-session-token header');
+  } else {
+    logger.debug('No Bearer or x-session-token header present');
   }
 
   if (rawToken) {
     const user = verifySessionToken(rawToken);
     if (user) {
+      logger.info('Authenticated user session via valid token', {
+        userId: user.id,
+        tenantId: user.tenantId,
+        role: user.role,
+        path,
+      });
       request.user = user;
       return;
     }
+    logger.warn('Presented session token was invalid or expired', { path });
   }
 
   const isTestOrDev = process.env.NODE_ENV === 'test' || process.env.NODE_ENV !== 'production';
   const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
-  const isGuestAllowed = isTestOrDev || isDemoMode || request.headers['x-guest-session'] === 'true';
+  const isGuestHeader = request.headers['x-guest-session'] === 'true';
+  const isGuestAllowed = isTestOrDev || isDemoMode || isGuestHeader;
+
+  logger.debug('Evaluating guest authorization permissions', {
+    isTestOrDev,
+    isDemoMode,
+    isGuestHeader,
+    isGuestAllowed,
+  });
 
   if (isGuestAllowed) {
     const fallbackUserId =
@@ -160,6 +255,14 @@ export async function authenticateUser(request: FastifyRequest, reply: FastifyRe
       exp: Math.floor(Date.now() / 1000) + 86400,
     };
 
+    logger.info('Provisioning anonymous guest user session', {
+      userId: guestUser.id,
+      tenantId: guestUser.tenantId,
+      role: guestUser.role,
+      reason: isTestOrDev ? 'test_or_dev_environment' : isDemoMode ? 'demo_mode' : 'x_guest_session_header',
+      path,
+    });
+
     request.user = guestUser;
 
     // Issue transparent session token header for judge client inspection
@@ -174,6 +277,11 @@ export async function authenticateUser(request: FastifyRequest, reply: FastifyRe
   }
 
   // Strict production requirement: Reject unauthenticated callers
+  logger.warn('Rejecting unauthenticated caller: valid Bearer session token required', {
+    path,
+    method: request.method,
+    ip: request.ip,
+  });
   return reply.status(401).send({
     error: 'UNAUTHORIZED',
     message: 'Valid Bearer session token required.',

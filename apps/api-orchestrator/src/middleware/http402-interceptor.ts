@@ -2,6 +2,9 @@ import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import crypto from 'node:crypto';
 import { z } from 'zod';
+import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+
+const logger = createLogger('API:Middleware:HTTP402');
 
 /**
  * Standardized HTTP 402 & x402 Protocol Headers
@@ -29,14 +32,18 @@ export const X402_EXTENSION_URI = X402_EXTENSION_URI_V2;
  */
 export function generateL402Challenge(contractId: string, invoice?: string): string {
   const inv = invoice || `inv_${contractId}`;
-  return `L402 token="${contractId}", invoice="${inv}"`;
+  const headerValue = `L402 token="${contractId}", invoice="${inv}"`;
+  logger.debug('Generated L402 challenge header value', { contractId, invoice: inv, headerValue });
+  return headerValue;
 }
 
 /**
  * Creates A2A extension declaration for AgentCard
  */
 export function getA2AExtensionDeclaration(description = 'Supports x402 payments', required = true) {
-  return { uri: X402_EXTENSION_URI, description, required };
+  const declaration = { uri: X402_EXTENSION_URI, description, required };
+  logger.debug('Created A2A extension declaration for AgentCard', declaration);
+  return declaration;
 }
 
 /**
@@ -44,7 +51,9 @@ export function getA2AExtensionDeclaration(description = 'Supports x402 payments
  */
 export function checkA2AExtensionActivation(requestHeaders: Record<string, any>): boolean {
   const extensions = (requestHeaders['x-a2a-extensions'] || requestHeaders['X-A2A-Extensions'] || '') as string;
-  return typeof extensions === 'string' && (extensions.includes(X402_EXTENSION_URI_V1) || extensions.includes(X402_EXTENSION_URI_V2));
+  const isActivated = typeof extensions === 'string' && (extensions.includes(X402_EXTENSION_URI_V1) || extensions.includes(X402_EXTENSION_URI_V2));
+  logger.debug('Checking A2A extension activation from headers', { extensions, isActivated });
+  return isActivated;
 }
 
 /**
@@ -52,6 +61,7 @@ export function checkA2AExtensionActivation(requestHeaders: Record<string, any>)
  */
 export function addA2AExtensionActivationHeader(responseHeaders: Record<string, any>): Record<string, any> {
   responseHeaders['X-A2A-Extensions'] = X402_EXTENSION_URI;
+  logger.debug('Added X-A2A-Extensions header to response headers', { uri: X402_EXTENSION_URI });
   return responseHeaders;
 }
 
@@ -117,14 +127,18 @@ const DEFAULT_SECRET = process.env.AEGIS_HMAC_SECRET || 'aegispay_test_secret_ke
  */
 export function timingSafeEqualString(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') {
+    logger.debug('timingSafeEqualString rejected: non-string argument encountered', { typeofA: typeof a, typeofB: typeof b });
     return false;
   }
   const bufA = Buffer.from(a, 'utf8');
   const bufB = Buffer.from(b, 'utf8');
   if (bufA.length !== bufB.length) {
+    logger.debug('timingSafeEqualString rejected: length mismatch', { lenA: bufA.length, lenB: bufB.length });
     return false;
   }
-  return crypto.timingSafeEqual(bufA, bufB);
+  const isEqual = crypto.timingSafeEqual(bufA, bufB);
+  logger.debug('timingSafeEqualString evaluated', { isEqual });
+  return isEqual;
 }
 
 /**
@@ -132,19 +146,24 @@ export function timingSafeEqualString(a: string, b: string): boolean {
  */
 export function timingSafeEqualHex(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') {
+    logger.debug('timingSafeEqualHex rejected: non-string argument encountered', { typeofA: typeof a, typeofB: typeof b });
     return false;
   }
   const cleanA = a.trim().toLowerCase();
   const cleanB = b.trim().toLowerCase();
   if (!/^[0-9a-f]+$/.test(cleanA) || !/^[0-9a-f]+$/.test(cleanB)) {
+    logger.debug('timingSafeEqualHex rejected: invalid hexadecimal format', { cleanAValid: /^[0-9a-f]+$/.test(cleanA), cleanBValid: /^[0-9a-f]+$/.test(cleanB) });
     return false;
   }
   const bufA = Buffer.from(cleanA, 'hex');
   const bufB = Buffer.from(cleanB, 'hex');
   if (bufA.length !== bufB.length) {
+    logger.debug('timingSafeEqualHex rejected: buffer length mismatch', { lenA: bufA.length, lenB: bufB.length });
     return false;
   }
-  return crypto.timingSafeEqual(bufA, bufB);
+  const isEqual = crypto.timingSafeEqual(bufA, bufB);
+  logger.debug('timingSafeEqualHex evaluated', { isEqual });
+  return isEqual;
 }
 
 export interface PaymentReceiptData {
@@ -179,7 +198,17 @@ export function generatePaymentReceipt(
     digest,
     hmac,
   });
-  return `rcpt_${Buffer.from(JSON.stringify(receiptData)).toString('base64')}`;
+  const encodedReceipt = `rcpt_${Buffer.from(JSON.stringify(receiptData)).toString('base64')}`;
+  logger.info('Generated RFC/x402 cryptographically signed payment receipt', {
+    contractId,
+    amountCents,
+    currency,
+    timestamp,
+    digest,
+    hmacPreview: `${hmac.slice(0, 8)}...`,
+    receiptPreview: `${encodedReceipt.slice(0, 16)}...`,
+  });
+  return encodedReceipt;
 }
 
 /**
@@ -187,13 +216,21 @@ export function generatePaymentReceipt(
  */
 export function parsePaymentReceipt(receipt: string): PaymentReceiptData | null {
   if (!receipt || typeof receipt !== 'string' || !receipt.startsWith('rcpt_')) {
+    logger.debug('parsePaymentReceipt rejected: missing, non-string, or lacks rcpt_ prefix', {
+      hasReceipt: Boolean(receipt),
+      typeofReceipt: typeof receipt,
+      startsWithPrefix: typeof receipt === 'string' ? receipt.startsWith('rcpt_') : false,
+    });
     return null;
   }
   try {
     const raw = Buffer.from(receipt.slice(5), 'base64').toString('utf8');
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return null;
-    return Object.freeze({
+    if (!parsed || typeof parsed !== 'object') {
+      logger.warn('parsePaymentReceipt rejected: decoded payload is not a valid JSON object', { parsedType: typeof parsed });
+      return null;
+    }
+    const receiptData: PaymentReceiptData = Object.freeze({
       contractId: String(parsed.contractId || ''),
       amountCents: Number(parsed.amountCents || 0),
       currency: String(parsed.currency || 'USD'),
@@ -201,7 +238,20 @@ export function parsePaymentReceipt(receipt: string): PaymentReceiptData | null 
       digest: String(parsed.digest || ''),
       hmac: String(parsed.hmac || ''),
     });
-  } catch {
+    logger.debug('Parsed payment receipt successfully', {
+      contractId: receiptData.contractId,
+      amountCents: receiptData.amountCents,
+      currency: receiptData.currency,
+      timestamp: receiptData.timestamp,
+    });
+    return receiptData;
+  } catch (error: any) {
+    logger.error('Failed to parse payment receipt: exception during base64 decode or JSON parse', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+      receiptPreview: typeof receipt === 'string' ? `${receipt.slice(0, 20)}...` : String(receipt),
+    });
     return null;
   }
 }
@@ -213,23 +263,40 @@ export function verifyPaymentReceipt(
   receipt: string,
   secret = DEFAULT_SECRET
 ): boolean {
+  logger.debug('Verifying cryptographic payment receipt authenticity and freshness');
   const parsed = parsePaymentReceipt(receipt);
   if (!parsed) {
+    logger.warn('Payment receipt verification failed: unparseable receipt');
     return false;
   }
 
   const { contractId, amountCents, currency, timestamp, digest, hmac } = parsed;
 
   if (!contractId || !amountCents || !currency || !timestamp || !hmac) {
+    logger.warn('Payment receipt verification failed: missing mandatory fields in parsed receipt', {
+      hasContractId: Boolean(contractId),
+      hasAmountCents: Boolean(amountCents),
+      hasCurrency: Boolean(currency),
+      hasTimestamp: Boolean(timestamp),
+      hasHmac: Boolean(hmac),
+    });
     return false;
   }
 
   // Enforce 24-hour freshness TTL (86,400,000 ms)
   const now = Date.now();
   const ageMs = now - timestamp;
-  if (ageMs > 24 * 60 * 60 * 1000 || ageMs < -60000) {
+  const maxAgeMs = 24 * 60 * 60 * 1000;
+  if (ageMs > maxAgeMs || ageMs < -60000) {
+    logger.warn('Payment receipt verification failed: 24-hour freshness TTL check expired or clock skew', {
+      ageMs,
+      maxAgeMs,
+      receiptTimestamp: timestamp,
+      currentTimestamp: now,
+    });
     return false;
   }
+  logger.debug('Payment receipt 24-hour freshness TTL check passed', { ageMs, maxAgeMs });
 
   const expectedPayload = `${contractId}:${amountCents}:${currency}:${timestamp}`;
 
@@ -237,12 +304,35 @@ export function verifyPaymentReceipt(
   if (digest) {
     const expectedDigest = crypto.createHash('sha256').update(expectedPayload, 'utf8').digest('hex');
     if (!timingSafeEqualHex(expectedDigest, digest)) {
+      logger.warn('Payment receipt verification failed: SHA-256 digest mismatch', {
+        expectedDigest,
+        providedDigest: digest,
+      });
       return false;
     }
+    logger.debug('Payment receipt immutable SHA-256 digest verified successfully');
+  } else {
+    logger.debug('Payment receipt has no attached SHA-256 digest; continuing HMAC validation');
   }
 
   const expectedHmac = crypto.createHmac('sha256', secret).update(expectedPayload).digest('hex');
-  return timingSafeEqualHex(expectedHmac, hmac);
+  const hmacValid = timingSafeEqualHex(expectedHmac, hmac);
+  if (!hmacValid) {
+    logger.warn('Payment receipt verification failed: HMAC signature mismatch', {
+      contractId,
+      amountCents,
+      currency,
+    });
+    return false;
+  }
+
+  logger.info('Cryptographic payment receipt signature and freshness verified successfully', {
+    contractId,
+    amountCents,
+    currency,
+    ageMs,
+  });
+  return true;
 }
 
 export interface ChallengeResponsePayload {
@@ -276,7 +366,14 @@ export function generateChallengeResponse(
     timestamp,
     signature,
   };
-  return Buffer.from(JSON.stringify(payload)).toString('base64');
+  const base64Payload = Buffer.from(JSON.stringify(payload)).toString('base64');
+  logger.debug('Generated replay-protected challenge response', {
+    contractId,
+    hasPreimage: Boolean(preimage),
+    timestamp,
+    signaturePreview: `${signature.slice(0, 8)}...`,
+  });
+  return base64Payload;
 }
 
 /**
@@ -288,6 +385,7 @@ export function verifyChallengeResponse(
   allowedContractId?: string
 ): boolean {
   if (!responseHeader || typeof responseHeader !== 'string') {
+    logger.debug('verifyChallengeResponse rejected: missing or non-string response header');
     return false;
   }
 
@@ -296,12 +394,18 @@ export function verifyChallengeResponse(
     const parsed: ChallengeResponsePayload = JSON.parse(raw);
 
     if (!parsed || typeof parsed !== 'object') {
+      logger.warn('verifyChallengeResponse rejected: decoded payload is not an object');
       return false;
     }
 
     const { contractId, preimage = '', timestamp, signature } = parsed;
 
     if (!contractId || !timestamp || !signature) {
+      logger.warn('verifyChallengeResponse rejected: missing contractId, timestamp, or signature', {
+        hasContractId: Boolean(contractId),
+        hasTimestamp: Boolean(timestamp),
+        hasSignature: Boolean(signature),
+      });
       return false;
     }
 
@@ -309,19 +413,42 @@ export function verifyChallengeResponse(
     const now = Date.now();
     const diffMs = Math.abs(now - timestamp);
     if (diffMs > REPLAY_PROTECTION_WINDOW_MS) {
+      logger.warn('verifyChallengeResponse rejected: replay protection window exceeded (diffMs > ±300s)', {
+        diffMs,
+        maxAllowedMs: REPLAY_PROTECTION_WINDOW_MS,
+        challengeTimestamp: timestamp,
+        currentTimestamp: now,
+      });
       return false;
     }
+    logger.debug('Replay protection timestamp check passed', { diffMs, maxAllowedMs: REPLAY_PROTECTION_WINDOW_MS });
 
     // Contract ID check if specified
     if (allowedContractId && !timingSafeEqualString(allowedContractId, contractId)) {
+      logger.warn('verifyChallengeResponse rejected: contract ID mismatch', {
+        allowedContractId,
+        receivedContractId: contractId,
+      });
       return false;
     }
 
     const expectedPayload = `${contractId}:${preimage}:${timestamp}`;
     const expectedSignature = crypto.createHmac('sha256', secret).update(expectedPayload).digest('hex');
 
-    return timingSafeEqualHex(expectedSignature, signature);
-  } catch {
+    const signatureValid = timingSafeEqualHex(expectedSignature, signature);
+    if (!signatureValid) {
+      logger.warn('verifyChallengeResponse rejected: HMAC signature mismatch', { contractId });
+      return false;
+    }
+
+    logger.info('Challenge response verified successfully', { contractId, diffMs });
+    return true;
+  } catch (error: any) {
+    logger.error('Failed to verify challenge response: exception during decode or parse', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
     return false;
   }
 }
@@ -340,9 +467,16 @@ export async function executeAgentPaymentRetry<T>(
   let attempt = 0;
   let receipt: string | undefined;
 
+  logger.info('Executing autonomous agent payment retry handler', { maxRetries });
+
   while (attempt <= maxRetries) {
+    logger.debug(`Autonomous payment attempt ${attempt + 1}/${maxRetries + 1}`, { hasReceipt: Boolean(receipt) });
     const response = await requestFn(receipt);
     if (response.status !== 402) {
+      logger.info(`Autonomous payment retry resolved with status ${response.status} on attempt ${attempt + 1}`, {
+        status: response.status,
+        retries: attempt,
+      });
       return {
         status: response.status,
         data: response.data,
@@ -353,10 +487,15 @@ export async function executeAgentPaymentRetry<T>(
 
     // 402 Challenge received -> extract contract ID & construct signed receipt
     const contractId = response.headers?.['x-payment-contract-id'] || `ct_402_${crypto.randomUUID().slice(0, 8)}`;
+    logger.info(`Received HTTP 402 challenge on attempt ${attempt + 1}, synthesizing payment receipt`, { contractId });
     receipt = generatePaymentReceipt(contractId, 5000, 'USD', options?.secret);
     attempt++;
   }
 
+  logger.warn('Autonomous payment retry loop exhausted maximum attempts with persistent 402 status', {
+    maxRetries,
+    attemptsMade: attempt,
+  });
   return { status: 402, retries: attempt };
 }
 
@@ -369,47 +508,79 @@ export function verifyAuthorizationHeader(
   secret = DEFAULT_SECRET
 ): boolean {
   if (!authHeader || typeof authHeader !== 'string') {
+    logger.debug('verifyAuthorizationHeader rejected: missing or non-string header', {
+      hasHeader: Boolean(authHeader),
+      typeofHeader: typeof authHeader,
+    });
     return false;
   }
 
   const trimmed = authHeader.trim();
   if (trimmed.length === 0) {
+    logger.debug('verifyAuthorizationHeader rejected: empty header string');
     return false;
   }
+
+  logger.debug('Evaluating Authorization header scheme', { headerPrefix: trimmed.slice(0, 10) });
 
   try {
     // 1. L402 scheme: L402 <token>:<preimage> or L402 <challenge_response_base64>
     if (/^L402\s+/i.test(trimmed)) {
       const token = trimmed.replace(/^L402\s+/i, '').trim();
-      if (!token) return false;
-      if (token.startsWith('rcpt_')) {
-        return verifyPaymentReceipt(token, secret);
+      logger.debug('Parsing L402 scheme header', { tokenPreview: `${token.slice(0, 10)}...` });
+      if (!token) {
+        logger.warn('L402 authorization scheme missing token');
+        return false;
       }
-      return verifyChallengeResponse(token, secret);
+      if (token.startsWith('rcpt_')) {
+        const verified = verifyPaymentReceipt(token, secret);
+        logger.info('L402 payment receipt verification outcome', { verified });
+        return verified;
+      }
+      const verified = verifyChallengeResponse(token, secret);
+      logger.info('L402 challenge response verification outcome', { verified });
+      return verified;
     }
 
     // 2. x402 scheme: x402 <receipt>
     if (/^x402\s+/i.test(trimmed)) {
       const receipt = trimmed.replace(/^x402\s+/i, '').trim();
-      return verifyPaymentReceipt(receipt, secret);
+      logger.debug('Parsing x402 scheme header', { receiptPreview: `${receipt.slice(0, 10)}...` });
+      const verified = verifyPaymentReceipt(receipt, secret);
+      logger.info('x402 payment receipt verification outcome', { verified });
+      return verified;
     }
 
     // 3. Bearer scheme: Bearer <receipt>
     if (/^Bearer\s+/i.test(trimmed)) {
       const token = trimmed.replace(/^Bearer\s+/i, '').trim();
+      logger.debug('Parsing Bearer scheme header in 402 verifier', { tokenPreview: `${token.slice(0, 10)}...` });
       if (token.startsWith('rcpt_')) {
-        return verifyPaymentReceipt(token, secret);
+        const verified = verifyPaymentReceipt(token, secret);
+        logger.info('Bearer payment receipt verification outcome', { verified });
+        return verified;
       }
-      return verifyChallengeResponse(token, secret);
+      const verified = verifyChallengeResponse(token, secret);
+      logger.info('Bearer challenge response verification outcome', { verified });
+      return verified;
     }
 
     // 4. Raw receipt format
     if (trimmed.startsWith('rcpt_')) {
-      return verifyPaymentReceipt(trimmed, secret);
+      logger.debug('Parsing raw receipt token format');
+      const verified = verifyPaymentReceipt(trimmed, secret);
+      logger.info('Raw payment receipt verification outcome', { verified });
+      return verified;
     }
 
+    logger.warn('Authorization header did not match any supported 402 scheme (L402, x402, Bearer, rcpt_)');
     return false;
-  } catch {
+  } catch (error: any) {
+    logger.error('Failed to verify authorization header: unexpected exception', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
     return false;
   }
 }
@@ -426,11 +597,15 @@ export const http402Interceptor = async (
   const url = typeof request.url === 'string' ? request.url : '';
   const path = url.split('?')[0];
 
+  logger.debug('HTTP 402 interceptor preHandler invoked', { path, method: request.method, url });
+
   const isProtected = protectedPrefixes.some(prefix => path === prefix || path.startsWith(prefix));
   if (!isProtected) {
+    logger.debug('Request path is not protected by HTTP 402 paywall; allowing bypass', { path });
     return;
   }
 
+  logger.info('Request matched protected paywall route; evaluating payment credentials and proofs', { path });
   const hmacSecret = options?.hmacSecret || DEFAULT_SECRET;
 
   // Check 0: Payment-Identifier Idempotency Check with defensive error boundary
@@ -438,58 +613,100 @@ export const http402Interceptor = async (
     const rawPaymentId = request.headers['payment-identifier'] || request.headers['PAYMENT-IDENTIFIER'];
     const paymentId = typeof rawPaymentId === 'string' ? rawPaymentId.trim() : undefined;
     if (paymentId) {
+      logger.debug('Evaluating Payment-Identifier idempotency header', { paymentId });
       const fingerprint = computeRequestFingerprint(path, request.body);
       const idResult = processPaymentIdentifier(paymentId, fingerprint, () => ({ success: true, orderId: 'ord_12345' }));
       if (idResult.action === 'conflict') {
+        logger.warn('Payment-Identifier idempotency conflict detected', { paymentId, error: idResult.error });
         return reply.code(409).send({ error: 'IDEMPOTENCY_CONFLICT', message: idResult.error });
       }
       if (idResult.action === 'return_cached') {
+        logger.info('Payment-Identifier matched cached response; returning cached idempotent result', { paymentId });
         return reply.code(200).send(idResult.cachedResponse);
       }
+      logger.debug('Payment-Identifier accepted for initial processing', { paymentId });
     }
-  } catch {
-    // Malformed idempotency header or body should not crash server; proceed to security evaluation
+  } catch (error: any) {
+    logger.error('Error during payment-identifier idempotency check', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
   }
 
   // Check 0b: Sign-In-With-X (SIWX) wallet proof bypass
   try {
     const rawSiwxHeader = request.headers['sign-in-with-x'] || request.headers['SIGN-IN-WITH-X'];
     if (typeof rawSiwxHeader === 'string' && rawSiwxHeader.trim().length > 0) {
+      logger.info('Sign-In-With-X (SIWX) wallet proof detected; granting paywall bypass', {
+        siwxPreview: `${rawSiwxHeader.trim().slice(0, 16)}...`,
+      });
       return;
     }
-  } catch {
-    // Malformed SIWX header treated as unauthenticated
+  } catch (error: any) {
+    logger.error('Error during Sign-In-With-X (SIWX) header evaluation', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
   }
 
   // Check 1: Standard Authorization header verification (L402, x402, Bearer)
   try {
     const authHeader = request.headers['authorization'] || request.headers['AUTHORIZATION'];
-    if (verifyAuthorizationHeader(authHeader, hmacSecret)) {
-      return;
+    if (authHeader) {
+      logger.debug('Evaluating Authorization header for 402 settlement credentials');
+      if (verifyAuthorizationHeader(authHeader, hmacSecret)) {
+        logger.info('Valid Authorization header presented; granting paywall bypass', { path });
+        return;
+      }
+      logger.warn('Authorization header verification failed or rejected', { path });
     }
-  } catch {
-    // Handled defensively
+  } catch (error: any) {
+    logger.error('Error during Authorization header verification', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
   }
 
   // Check 1b: X-Challenge-Response replay-protected challenge verification
   try {
     const rawChallengeResp = request.headers['x-challenge-response'] || request.headers['X-Challenge-Response'];
-    if (typeof rawChallengeResp === 'string' && verifyChallengeResponse(rawChallengeResp, hmacSecret)) {
-      return;
+    if (typeof rawChallengeResp === 'string') {
+      logger.debug('Evaluating X-Challenge-Response header for replay-protected settlement');
+      if (verifyChallengeResponse(rawChallengeResp, hmacSecret)) {
+        logger.info('Valid X-Challenge-Response presented; granting paywall bypass', { path });
+        return;
+      }
+      logger.warn('X-Challenge-Response verification failed or rejected', { path });
     }
-  } catch {
-    // Handled defensively
+  } catch (error: any) {
+    logger.error('Error during X-Challenge-Response verification', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
   }
 
   // Check 1c: Valid cryptographic payment receipt header (X-Payment-Receipt)
   try {
     const rawPaymentReceipt = request.headers['x-payment-receipt'] || request.headers['X-Payment-Receipt'];
     const paymentReceipt = typeof rawPaymentReceipt === 'string' ? rawPaymentReceipt.trim() : undefined;
-    if (paymentReceipt && verifyPaymentReceipt(paymentReceipt, hmacSecret)) {
-      return;
+    if (paymentReceipt) {
+      logger.debug('Evaluating X-Payment-Receipt header');
+      if (verifyPaymentReceipt(paymentReceipt, hmacSecret)) {
+        logger.info('Valid cryptographic payment receipt verified; granting paywall access', { path });
+        return;
+      }
+      logger.warn('X-Payment-Receipt verification failed or expired', { path });
     }
-  } catch {
-    // Handled defensively
+  } catch (error: any) {
+    logger.error('Error during X-Payment-Receipt verification', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
   }
 
   // Check 2: Active Spend Mandate or Synthetic Voucher
@@ -497,6 +714,11 @@ export const http402Interceptor = async (
   const syntheticVoucherId = request.headers['x-synthetic-voucher-id'] as string | undefined;
 
   if (spendMandateId || syntheticVoucherId) {
+    logger.info('Active Spend Mandate or Synthetic Voucher presented; granting paywall access', {
+      spendMandateId: spendMandateId || null,
+      syntheticVoucherId: syntheticVoucherId || null,
+      path,
+    });
     return;
   }
 
@@ -529,6 +751,15 @@ export const http402Interceptor = async (
 
   const paymentRequiredHeader = Buffer.from(JSON.stringify(challenge)).toString('base64');
   const l402Authenticate = generateL402Challenge(contractId, `inv_${contractId}`);
+
+  logger.warn('Intercepted unauthorized procurement call; emitting RFC-compliant HTTP 402 Payment Required challenge', {
+    path,
+    contractId,
+    payTo,
+    vaultUrl,
+    wwwAuthenticate: l402Authenticate,
+    spendPolicy: challenge.spend_policy,
+  });
 
   reply.status(402);
   reply.header(HEADER_PAY_TO, payTo);
@@ -642,23 +873,40 @@ export function encodePaymentSignatureHeader(paymentPayload: any): string {
  * Decodes a base64 payment signature header into a payment payload.
  */
 export function decodePaymentSignatureHeader(paymentSignatureHeader: string): any {
+  logger.debug('Decoding payment signature header');
   if (!paymentSignatureHeader || typeof paymentSignatureHeader !== "string") {
+    logger.warn('decodePaymentSignatureHeader failed: missing or non-string header');
     throw new Error("Invalid payment signature header");
   }
   const cleanHeader = paymentSignatureHeader.trim();
   if (!BASE64_REGEX.test(cleanHeader)) {
+    logger.warn('decodePaymentSignatureHeader failed: regex test failed on clean header', {
+      headerPreview: cleanHeader.slice(0, 16),
+    });
     throw new Error("Invalid payment signature header");
   }
-  return requireDecodedJsonObject(
-    JSON.parse(safeBase64Decode(cleanHeader)),
-    "Payment signature header",
-  );
+  try {
+    const decoded = requireDecodedJsonObject(
+      JSON.parse(safeBase64Decode(cleanHeader)),
+      "Payment signature header",
+    );
+    logger.debug('Decoded payment signature header successfully');
+    return decoded;
+  } catch (error: any) {
+    logger.error('decodePaymentSignatureHeader failed during parse', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
+    throw error;
+  }
 }
 
 /**
  * Encodes a payment required object as a base64 header value.
  */
 export function encodePaymentRequiredHeader(paymentRequired: any): string {
+  logger.debug('Encoding payment required header');
   return safeBase64Encode(JSON.stringify(paymentRequired));
 }
 
@@ -666,17 +914,33 @@ export function encodePaymentRequiredHeader(paymentRequired: any): string {
  * Decodes a base64 payment required header into a payment required object.
  */
 export function decodePaymentRequiredHeader(paymentRequiredHeader: string): any {
+  logger.debug('Decoding payment required header');
   if (!paymentRequiredHeader || typeof paymentRequiredHeader !== "string") {
+    logger.warn('decodePaymentRequiredHeader failed: missing or non-string header');
     throw new Error("Invalid payment required header");
   }
   const cleanHeader = paymentRequiredHeader.trim();
   if (!BASE64_REGEX.test(cleanHeader)) {
+    logger.warn('decodePaymentRequiredHeader failed: regex test failed on clean header', {
+      headerPreview: cleanHeader.slice(0, 16),
+    });
     throw new Error("Invalid payment required header");
   }
-  return requireDecodedJsonObject(
-    JSON.parse(safeBase64Decode(cleanHeader)),
-    "Payment required header",
-  );
+  try {
+    const decoded = requireDecodedJsonObject(
+      JSON.parse(safeBase64Decode(cleanHeader)),
+      "Payment required header",
+    );
+    logger.debug('Decoded payment required header successfully');
+    return decoded;
+  } catch (error: any) {
+    logger.error('decodePaymentRequiredHeader failed during parse', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
+    throw error;
+  }
 }
 
 /**
@@ -684,6 +948,7 @@ export function decodePaymentRequiredHeader(paymentRequiredHeader: string): any 
  * Strips server-internal extensionResponses for buyer privacy.
  */
 export function encodePaymentResponseHeader(paymentResponse: any): string {
+  logger.debug('Encoding payment response header');
   const buyerFacing = { ...paymentResponse };
   delete buyerFacing.extensionResponses;
   return safeBase64Encode(JSON.stringify(buyerFacing));
@@ -693,17 +958,33 @@ export function encodePaymentResponseHeader(paymentResponse: any): string {
  * Decodes a base64 payment response header into a settle response.
  */
 export function decodePaymentResponseHeader(paymentResponseHeader: string): any {
+  logger.debug('Decoding payment response header');
   if (!paymentResponseHeader || typeof paymentResponseHeader !== "string") {
+    logger.warn('decodePaymentResponseHeader failed: missing or non-string header');
     throw new Error("Invalid payment response header");
   }
   const cleanHeader = paymentResponseHeader.trim();
   if (!BASE64_REGEX.test(cleanHeader)) {
+    logger.warn('decodePaymentResponseHeader failed: regex test failed on clean header', {
+      headerPreview: cleanHeader.slice(0, 16),
+    });
     throw new Error("Invalid payment response header");
   }
-  return requireDecodedJsonObject(
-    JSON.parse(safeBase64Decode(cleanHeader)),
-    "Payment response header",
-  );
+  try {
+    const decoded = requireDecodedJsonObject(
+      JSON.parse(safeBase64Decode(cleanHeader)),
+      "Payment response header",
+    );
+    logger.debug('Decoded payment response header successfully');
+    return decoded;
+  } catch (error: any) {
+    logger.error('decodePaymentResponseHeader failed during parse', {
+      error: error.message,
+      code: error.code,
+      stack: error.stack,
+    });
+    throw error;
+  }
 }
 
 /**
@@ -761,8 +1042,15 @@ export function isFatalStartupInitError(error: unknown): boolean {
 
 export function attachBackgroundInitHandler(initPromise: Promise<void> | null): void {
   void initPromise?.catch(error => {
-    if (!isFatalStartupInitError(error)) return;
-    console.error(error);
+    if (!isFatalStartupInitError(error)) {
+      logger.debug('Non-fatal startup init error ignored', { error: error?.message });
+      return;
+    }
+    logger.error('Fatal startup init error in background handler', {
+      name: error?.name,
+      message: error?.message,
+      stack: error?.stack,
+    });
   });
 }
 
@@ -1555,25 +1843,45 @@ export function processPaymentIdentifier(
   fingerprint: string,
   cachedResponseProvider: () => any
 ): { action: 'proceed' | 'return_cached' | 'conflict'; cachedResponse?: any; error?: string } {
+  logger.debug('Processing payment identifier for idempotency check', {
+    paymentId,
+    fingerprintPreview: `${fingerprint.slice(0, 16)}...`,
+  });
+
   // 1. Format validation: 16-128 chars, alphanumeric, dash, underscore
   if (paymentId.length < 16 || paymentId.length > 128 || !/^[a-zA-Z0-9_-]+$/.test(paymentId)) {
+    logger.warn('Payment identifier format validation failed: length or character set invalid', {
+      paymentId,
+      length: paymentId.length,
+    });
     return { action: 'conflict', error: 'Payment identifier format invalid (must be 16-128 alphanumeric, dash, or underscore chars)' };
   }
 
   // 2. Lookup existing ID
   const existing = paymentIdempotencyStore.get(paymentId);
   if (existing) {
+    logger.debug('Found existing record in payment idempotency store', {
+      paymentId,
+      cachedTimestamp: existing.timestamp,
+    });
     // Timing-safe hexadecimal comparison on SHA-256 fingerprints
     if (!timingSafeEqualHex(existing.fingerprint, fingerprint)) {
+      logger.warn('IDEMPOTENCY_CONFLICT: Payment identifier reused with differing request fingerprint', {
+        paymentId,
+        existingFingerprint: existing.fingerprint,
+        currentFingerprint: fingerprint,
+      });
       return {
         action: 'conflict',
         error: 'IDEMPOTENCY_CONFLICT: Payment identifier reused with different request payload or contract parameters',
       };
     }
+    logger.info('Returning cached idempotent response for payment identifier', { paymentId });
     return { action: 'return_cached', cachedResponse: existing.response };
   }
 
   // 3. Record entry
+  logger.info('Recording new entry in payment idempotency store', { paymentId });
   paymentIdempotencyStore.set(paymentId, {
     fingerprint,
     response: cachedResponseProvider(),
