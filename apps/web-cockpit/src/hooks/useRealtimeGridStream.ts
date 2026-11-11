@@ -19,15 +19,18 @@ export interface GridStreamEvent {
 export interface UseRealtimeGridStreamOptions {
   gridApi: GridApi | null;
   sseEndpoint?: string;
+  autoSimulateIntervalMs?: number; // Optional simulated ticker interval for live demo
 }
 
 export function useRealtimeGridStream({
   gridApi,
   sseEndpoint = '/api/events/stream',
+  autoSimulateIntervalMs,
 }: UseRealtimeGridStreamOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [eventCount, setEventCount] = useState(0);
   const [lastEvent, setLastEvent] = useState<GridStreamEvent | null>(null);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const applyStreamEvent = useCallback(
     (event: GridStreamEvent) => {
@@ -60,6 +63,38 @@ export function useRealtimeGridStream({
     [gridApi]
   );
 
+  // Real-Time Pulse Generator tool for streaming updates & cell flash testing
+  const triggerSimulatedEvent = useCallback(() => {
+    if (!gridApi) return;
+
+    const currencies = ['USD', 'EUR', 'GBP'];
+    const cur = currencies[Math.floor(Math.random() * currencies.length)];
+    const id = `TXN-PULSE-${Date.now().toString(36).toUpperCase()}`;
+    const amount = Math.round((25 + Math.random() * 250) * 100) / 100;
+    const fee = Math.round((amount * 0.029 + 0.3) * 100) / 100;
+
+    const simEvent: GridStreamEvent = {
+      type: 'ORDER_AUTHORIZED',
+      timestamp: new Date().toISOString(),
+      payload: {
+        id,
+        date: new Date().toISOString(),
+        eventCode: 'T0001',
+        status: 'S',
+        amount,
+        gross_amount: amount,
+        fee,
+        paypal_fee: fee,
+        currency: cur,
+        counterparty: `stream_buyer_${Math.floor(Math.random() * 900 + 100)}@sandbox.paypal.com`,
+        subject: 'Live Realtime Stream Settlement',
+        note: 'Streaming Event Pulse Trigger',
+      },
+    };
+
+    applyStreamEvent(simEvent);
+  }, [gridApi, applyStreamEvent]);
+
   useEffect(() => {
     if (typeof window === 'undefined' || !gridApi) return;
 
@@ -81,15 +116,21 @@ export function useRealtimeGridStream({
       // EventSource may not exist or endpoint inactive
     }
 
+    if (autoSimulateIntervalMs && autoSimulateIntervalMs > 0) {
+      intervalRef.current = setInterval(triggerSimulatedEvent, autoSimulateIntervalMs);
+    }
+
     return () => {
       if (es) es.close();
+      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [gridApi, sseEndpoint, applyStreamEvent]);
+  }, [gridApi, sseEndpoint, autoSimulateIntervalMs, applyStreamEvent, triggerSimulatedEvent]);
 
   return {
     isConnected,
     eventCount,
     lastEvent,
+    triggerSimulatedEvent,
   };
 }
 

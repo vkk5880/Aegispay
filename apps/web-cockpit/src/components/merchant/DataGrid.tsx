@@ -185,8 +185,11 @@ export function DataGrid({
 
   const { theme, density, setDensity } = useAgGridTheme();
 
-  // Wire real-time streaming updates from live SSE
-  useRealtimeGridStream({ gridApi });
+  // Wire real-time streaming updates and Pulse Generator tool
+  const { triggerSimulatedEvent } = useRealtimeGridStream({
+    gridApi,
+    autoSimulateIntervalMs: 0,
+  });
 
   useEffect(() => {
     logger.info('[DataGrid] Mounted DataGrid component', {
@@ -640,6 +643,17 @@ export function DataGrid({
             </button>
           )}
 
+
+          {/* Real-Time Pulse Generator */}
+          <button
+            type="button"
+            onClick={triggerSimulatedEvent}
+            className="h-9 px-2.5 text-xs font-bold rounded-xl bg-cyan-50 text-cyan-800 border border-cyan-300 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-500/40 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="Trigger Inbound Transaction Pulse with Green Cell Flash"
+          >
+            <Radio className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 animate-pulse" />
+            Stream Pulse
+          </button>
 
           {/* Excel Export */}
           <button
