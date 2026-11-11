@@ -647,10 +647,10 @@ export function DataGrid({
           <button
             type="button"
             onClick={triggerSimulatedEvent}
-            className="h-9 px-2.5 text-xs font-bold rounded-xl bg-cyan-950/40 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-900/50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            className="h-9 px-2.5 text-xs font-bold rounded-xl bg-cyan-50 text-cyan-800 border border-cyan-300 dark:bg-cyan-950/40 dark:text-cyan-300 dark:border-cyan-500/40 hover:bg-cyan-100 dark:hover:bg-cyan-900/50 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
             title="Simulate Inbound Transaction Pulse with Green Cell Flash"
           >
-            <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+            <Radio className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 animate-pulse" />
             Stream Pulse
           </button>
 
@@ -658,7 +658,7 @@ export function DataGrid({
           <button
             type="button"
             onClick={handleExcelExport}
-            className="h-9 px-3 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
             title="Export Native AG Grid Enterprise Excel (.xlsx)"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -669,7 +669,7 @@ export function DataGrid({
           <button
             type="button"
             onClick={handleCsvExport}
-            className="h-9 px-3 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+            className="h-9 px-3 text-xs font-bold rounded-xl bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
             title="Export Filtered CSV"
           >
             <Download className="w-3.5 h-3.5" />
@@ -736,31 +736,31 @@ export function DataGrid({
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
         >
-          <div className="w-full max-w-lg rounded-2xl bg-[#0c1424] border border-slate-700 shadow-2xl p-6 flex flex-col gap-4 text-slate-100 animate-in fade-in">
-            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
+          <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-[#0c1424] border border-slate-200 dark:border-slate-700 shadow-2xl p-6 flex flex-col gap-4 text-slate-900 dark:text-slate-100 animate-in fade-in">
+            <div className="flex justify-between items-start border-b border-slate-200 dark:border-slate-800 pb-3">
               <div>
-                <h3 className="text-base font-bold text-white">Merchant Custody & Order Controls</h3>
-                <p className="text-xs text-slate-400">Inspect record attributes and trigger immediate escrow actions.</p>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">Merchant Custody & Order Controls</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Inspect record attributes and trigger immediate escrow actions.</p>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedRow(null)}
-                className="text-slate-400 hover:text-white text-xs font-bold px-2 py-1 cursor-pointer"
+                className="text-slate-400 hover:text-slate-700 dark:hover:text-white text-xs font-bold px-2 py-1 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <div className="max-h-60 overflow-y-auto space-y-1.5 font-mono text-xs p-3 rounded-xl bg-slate-950 border border-slate-800">
+            <div className="max-h-60 overflow-y-auto space-y-1.5 font-mono text-xs p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
               {Object.entries(selectedRow).map(([key, val]) => (
-                <div key={key} className="flex justify-between gap-2 border-b border-slate-900/50 pb-1">
-                  <span className="text-slate-400">{key}:</span>
-                  <span className="text-slate-200 font-bold truncate max-w-[260px]">{String(val ?? '—')}</span>
+                <div key={key} className="flex justify-between gap-2 border-b border-slate-200/60 dark:border-slate-900/50 pb-1">
+                  <span className="text-slate-500 dark:text-slate-400">{key}:</span>
+                  <span className="text-slate-900 dark:text-slate-200 font-bold truncate max-w-[260px]">{String(val ?? '—')}</span>
                 </div>
               ))}
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 onClick={() => handleAction('escalate')}

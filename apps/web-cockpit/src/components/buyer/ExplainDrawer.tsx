@@ -151,24 +151,24 @@ export function ExplainDrawer({
       onClick={onClose}
     >
       <div
-        className="relative max-h-[90vh] w-full max-w-4xl mx-auto overflow-y-auto rounded-t-3xl border-t border-cyan-500/30 bg-[#060b14] p-6 sm:p-8 shadow-[0_-10px_40px_rgba(0,0,0,0.8)] animate-fade-in-up"
+        className="relative max-h-[90vh] w-full max-w-4xl mx-auto overflow-y-auto rounded-t-3xl border-t border-slate-200 dark:border-cyan-500/30 bg-white dark:bg-[#060b14] text-slate-900 dark:text-slate-100 p-6 sm:p-8 shadow-[0_-10px_40px_rgba(0,0,0,0.15)] dark:shadow-[0_-10px_40px_rgba(0,0,0,0.8)] animate-fade-in-up"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Drag handle */}
-        <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-slate-700" />
+        <div className="mx-auto mb-5 h-1.5 w-12 rounded-full bg-slate-300 dark:bg-slate-700" />
 
         {/* Header */}
         <div className="mb-5 flex items-center justify-between">
           <h2
             id="explain-drawer-title"
-            className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-wide text-white"
+            className="flex items-center gap-2 text-base sm:text-lg font-bold tracking-wide text-slate-900 dark:text-white"
           >
-            <Sparkles className="w-5 h-5 text-cyan-400" />
+            <Sparkles className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
             <span>Why {product.title.length > 35 ? product.title.slice(0, 35) + '…' : product.title}?</span>
           </h2>
           <button
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
             aria-label="Close scoring explanation"
           >
             <X className="w-4 h-4" />
@@ -177,12 +177,12 @@ export function ExplainDrawer({
 
         {/* Tab Bar */}
         {isWinner && (
-          <div className="mb-6 flex space-x-6 border-b border-slate-800 text-xs font-mono tracking-wider uppercase">
+          <div className="mb-6 flex space-x-6 border-b border-slate-200 dark:border-slate-800 text-xs font-mono tracking-wider uppercase">
             <button
               className={`pb-2.5 font-bold transition-colors ${
                 activeTab === 'overview'
-                  ? 'border-b-2 border-cyan-400 text-cyan-400'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'border-b-2 border-cyan-600 dark:border-cyan-400 text-cyan-700 dark:text-cyan-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
               onClick={() => setActiveTab('overview')}
             >
@@ -191,8 +191,8 @@ export function ExplainDrawer({
             <button
               className={`pb-2.5 font-bold transition-colors ${
                 activeTab === 'competitors'
-                  ? 'border-b-2 border-cyan-400 text-cyan-400'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'border-b-2 border-cyan-600 dark:border-cyan-400 text-cyan-700 dark:text-cyan-400'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
               onClick={() => setActiveTab('competitors')}
             >

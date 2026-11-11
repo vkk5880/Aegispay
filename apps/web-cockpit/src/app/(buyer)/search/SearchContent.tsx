@@ -158,10 +158,10 @@ export function SearchContent({
   };
 
   return (
-    <div className="relative min-h-screen bg-[#060b14] text-slate-100 pt-20 pb-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full">
+    <div className="relative min-h-screen bg-slate-50 dark:bg-[#060b14] text-slate-900 dark:text-slate-100 pt-20 pb-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full transition-colors">
       {/* Header Bar */}
-      <div className="mb-8 text-center flex flex-col items-center">
-        <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-950/40 px-3.5 py-1 text-xs font-semibold text-cyan-400">
+      <div className="mb-6 text-center flex flex-col items-center">
+        <div className="mb-2.5 inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/40 px-3 py-0.5 text-xs font-semibold text-cyan-700 dark:text-cyan-400">
           <Sparkles className="w-3.5 h-3.5" />
           <span>
             {showTechnicalDetails
@@ -169,40 +169,40 @@ export function SearchContent({
               : 'Smart Multi-Store Search & Savings Finder'}
           </span>
         </div>
-        <h1 className="text-3xl sm:text-5xl font-extrabold tracking-tight text-white font-display mb-3">
+        <h1 className="text-2xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white font-display mb-2">
           {showTechnicalDetails
             ? 'Autonomous Product Search & Comparison'
             : 'Product Search & Price Comparison'}
         </h1>
-        <p className="max-w-xl text-sm sm:text-base text-slate-400 font-medium">
+        <p className="max-w-xl text-xs sm:text-sm text-slate-600 dark:text-slate-400 font-medium">
           {showTechnicalDetails
             ? 'Deterministic 0-hallucination multi-merchant product discovery backstopped by PayPal Vault v3 and Ed25519 Spend Mandates.'
             : 'Find the best deals across verified stores with automatic coupon savings and PayPal purchase protection.'}
         </p>
 
         {/* Search Input Bar */}
-        <form onSubmit={handleSearchSubmit} className="mt-6 w-full max-w-2xl relative">
+        <form onSubmit={handleSearchSubmit} className="mt-4 w-full max-w-2xl relative">
           <div className="relative flex items-center">
-            <Search className="w-5 h-5 absolute left-4 text-slate-400" />
+            <Search className="w-4 h-4 absolute left-3.5 text-slate-400" />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="What are you looking to buy today? (e.g. Sony WH-1000XM5 under $350)"
-              className="w-full pl-12 pr-28 py-3.5 bg-slate-900/90 border border-slate-700 rounded-2xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 shadow-xl"
+              className="w-full pl-10 pr-24 py-2.5 bg-white dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-cyan-500 shadow-xs"
             />
             <button
               type="submit"
               disabled={isSearching}
-              className="absolute right-2 px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer"
+              className="absolute right-1.5 px-3.5 py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg transition-all shadow-xs disabled:opacity-50 cursor-pointer"
             >
               {isSearching ? (showTechnicalDetails ? 'Solving...' : 'Searching...') : 'Search'}
             </button>
           </div>
 
           {/* Quick Preset Pills */}
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-            <span className="text-[11px] text-slate-500 font-mono">Suggested:</span>
+          <div className="mt-2.5 flex flex-wrap items-center justify-center gap-1.5">
+            <span className="text-[10px] text-slate-500 font-mono">Suggested:</span>
             {PRESET_QUERIES.map((preset) => (
               <button
                 key={preset}
@@ -212,7 +212,7 @@ export function SearchContent({
                   router.push(`/search?q=${encodeURIComponent(preset)}`);
                   runSearch(preset);
                 }}
-                className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/60 transition-all font-mono cursor-pointer"
+                className="text-[10px] px-2 py-0.5 rounded-md bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700/60 transition-all font-mono cursor-pointer shadow-2xs"
               >
                 {preset}
               </button>
@@ -222,14 +222,14 @@ export function SearchContent({
       </div>
 
       {/* Active Pipeline Status Ticker */}
-      <div className="mb-8 p-4 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-wrap items-center justify-between gap-4 font-mono text-xs">
-        <div className="flex items-center gap-3">
-          <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
-          <span className="text-slate-300">
-            {showTechnicalDetails ? 'Query:' : 'Looking for:'} <strong className="text-white">&ldquo;{activeQuery}&rdquo;</strong>
+      <div className="mb-6 p-3 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 font-mono text-xs shadow-2xs">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+          <span className="text-slate-700 dark:text-slate-300 text-xs">
+            {showTechnicalDetails ? 'Query:' : 'Looking for:'} <strong className="text-slate-900 dark:text-white">&ldquo;{activeQuery}&rdquo;</strong>
           </span>
-          <span className="text-slate-600">|</span>
-          <span className="text-cyan-400">
+          <span className="text-slate-300 dark:text-slate-700">|</span>
+          <span className="text-cyan-700 dark:text-cyan-400 text-xs font-semibold">
             {showTechnicalDetails
               ? `${results.length} Verified Offers Ranked by Deterministic Composite Score`
               : `${results.length} Verified Best Value Offers Found`}
@@ -238,50 +238,50 @@ export function SearchContent({
 
         <button
           onClick={handleCopyShareLink}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold transition-all cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
         >
           {copiedShare ? (
             <>
-              <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-emerald-400 font-bold">
-                {showTechnicalDetails ? 'Share Dossier Copied!' : 'Comparison Link Copied!'}
+              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                {showTechnicalDetails ? 'Share Dossier Copied!' : 'Link Copied!'}
               </span>
             </>
           ) : (
             <>
-              <Share2 className="w-3.5 h-3.5 text-cyan-400" />
+              <Share2 className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
               <span>{showTechnicalDetails ? 'Share Comparison Dossier' : 'Share Comparison'}</span>
             </>
           )}
         </button>
       </div>
 
-      {/* Product Results Grid, Loading Skeleton, or Empty State */}
+      {/* Product Results Grid, Loading Skeleton, or Empty State - 3-4 responsive items */}
       {isSearching ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-pulse">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col justify-between space-y-4">
-              <div className="w-full h-48 rounded-xl bg-slate-800/60" />
-              <div className="space-y-2">
-                <div className="h-4 w-24 bg-slate-800/60 rounded" />
-                <div className="h-5 w-full bg-slate-800/60 rounded" />
-                <div className="h-3 w-3/4 bg-slate-800/40 rounded" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4 animate-pulse">
+          {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+            <div key={i} className="p-3.5 rounded-xl bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 flex flex-col justify-between space-y-3">
+              <div className="w-full h-32 sm:h-36 rounded-lg bg-slate-100 dark:bg-slate-800/60" />
+              <div className="space-y-1.5">
+                <div className="h-3.5 w-16 bg-slate-100 dark:bg-slate-800/60 rounded" />
+                <div className="h-4 w-full bg-slate-100 dark:bg-slate-800/60 rounded" />
+                <div className="h-3 w-3/4 bg-slate-100 dark:bg-slate-800/40 rounded" />
               </div>
-              <div className="pt-4 border-t border-slate-800/60 flex justify-between items-center">
-                <div className="h-6 w-20 bg-slate-800/60 rounded" />
-                <div className="h-8 w-24 bg-slate-800/60 rounded-xl" />
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800/60 flex justify-between items-center">
+                <div className="h-5 w-16 bg-slate-100 dark:bg-slate-800/60 rounded" />
+                <div className="h-7 w-20 bg-slate-100 dark:bg-slate-800/60 rounded-lg" />
               </div>
             </div>
           ))}
         </div>
       ) : results.length === 0 ? (
-        <div className="p-12 text-center rounded-3xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center">
-          <PackageSearch className="w-12 h-12 text-slate-600 mb-3" />
-          <h3 className="text-lg font-bold text-white mb-1">No Matching Offers Found</h3>
-          <p className="text-xs text-slate-400 max-w-md mb-6">
+        <div className="p-8 sm:p-12 text-center rounded-2xl bg-white dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center shadow-xs">
+          <PackageSearch className="w-10 h-10 text-slate-400 dark:text-slate-600 mb-2.5" />
+          <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1">No Matching Offers Found</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mb-4">
             We couldn&apos;t locate active merchant stock matching &ldquo;{activeQuery}&rdquo;. Try another search term or click one of the suggested queries above.
           </p>
-          <div className="flex flex-wrap gap-2 justify-center">
+          <div className="flex flex-wrap gap-1.5 justify-center">
             {PRESET_QUERIES.map((preset) => (
               <button
                 key={preset}
@@ -290,7 +290,7 @@ export function SearchContent({
                   router.push(`/search?q=${encodeURIComponent(preset)}`);
                   runSearch(preset);
                 }}
-                className="text-xs px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all font-mono cursor-pointer"
+                className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-all font-mono cursor-pointer shadow-2xs"
               >
                 {preset}
               </button>
@@ -298,25 +298,25 @@ export function SearchContent({
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
           {results.map((product, idx) => {
             const isWinner = idx === 0;
             return (
               <div
                 key={product.product_id}
-                className={`p-6 rounded-2xl bg-slate-900/70 border ${
-                  isWinner ? 'border-cyan-500 shadow-2xl shadow-cyan-950/50' : 'border-slate-800'
-                } flex flex-col justify-between card-hover relative`}
+                className={`p-3.5 sm:p-4 rounded-xl bg-white dark:bg-[#0c1424]/90 border transition-all duration-300 card-hover flex flex-col justify-between relative shadow-xs hover:shadow-md ${
+                  isWinner ? 'border-cyan-500 shadow-cyan-500/10' : 'border-slate-200/90 dark:border-white/10'
+                }`}
               >
                 {isWinner && (
-                  <div className="absolute -top-3 left-6 px-3 py-0.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black text-[10px] uppercase tracking-wider shadow-lg">
-                    Top Recommended Pick
+                  <div className="absolute -top-2.5 left-4 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-black text-[9px] uppercase tracking-wider shadow-md">
+                    Top Pick
                   </div>
                 )}
 
                 <div>
-                  {/* Image & Score Gauge */}
-                  <div className="relative w-full h-48 rounded-xl overflow-hidden bg-slate-950 mb-4 border border-slate-800">
+                  {/* Compact Image & Score Gauge */}
+                  <div className="relative w-full h-32 sm:h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-950 mb-2.5 border border-slate-200/80 dark:border-white/10">
                     {product.cleaned_url && (
                       <img
                         src={product.cleaned_url}
@@ -324,24 +324,24 @@ export function SearchContent({
                         className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform"
                       />
                     )}
-                    <div className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-lg bg-black/80 backdrop-blur-md border border-white/20 text-white font-mono font-black text-xs flex items-center gap-1">
-                      <Star className="w-3 h-3 text-amber-400 fill-amber-400" />
+                    <div className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-md bg-white/90 dark:bg-black/80 backdrop-blur-md border border-slate-200 dark:border-white/20 text-slate-900 dark:text-white font-mono font-bold text-[10px] flex items-center gap-1 shadow-2xs">
+                      <Star className="w-2.5 h-2.5 text-amber-400 fill-amber-400" />
                       <span>{product.composite_score?.toFixed(1) || '9.0'}</span>
                     </div>
                   </div>
 
                   {/* Merchant & Badges */}
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className="text-[11px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/20">
+                  <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20">
                       {product.merchant_domain}
                     </span>
-                    {product.badges?.slice(0, 2).map((b, bIdx) => {
+                    {product.badges?.slice(0, 1).map((b, bIdx) => {
                       const badgeColor = b.badge_color || b.color || '#06b6d4';
                       return (
                         <span
                           key={bIdx}
                           style={{ color: badgeColor, borderColor: `${badgeColor}40` }}
-                          className="text-[10px] font-bold px-2 py-0.5 rounded bg-white/5 border"
+                          className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-50 dark:bg-white/5 border"
                         >
                           {b.label}
                         </span>
@@ -350,47 +350,48 @@ export function SearchContent({
                   </div>
 
                   {/* Title & Description */}
-                  <h3 className="text-base font-bold text-white mb-2 leading-snug line-clamp-2">
+                  <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white mb-1 leading-snug line-clamp-2">
                     {product.title}
                   </h3>
-                  <p className="text-xs text-slate-400 line-clamp-2 mb-4">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1 mb-2.5">
                     {product.description}
                   </p>
                 </div>
 
                 {/* Pricing & Cart Action */}
-                <div className="pt-4 border-t border-slate-800/80">
-                  <div className="flex justify-between items-baseline mb-3">
-                    <span className="text-2xl font-black text-white font-mono">
+                <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80">
+                  <div className="flex justify-between items-baseline mb-2">
+                    <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white font-mono">
                       {formatPrice(product.price_cents)}
                     </span>
                     {product.compare_at_price_cents && product.compare_at_price_cents > product.price_cents && (
-                      <span className="text-xs text-slate-500 line-through font-mono">
+                      <span className="text-[10px] text-slate-400 line-through font-mono">
                         {formatPrice(product.compare_at_price_cents)}
                       </span>
                     )}
                   </div>
 
                   {product.commission_rebate_cents && product.commission_rebate_cents > 0 && (
-                    <div className="mb-3 text-[11px] font-mono text-emerald-400 bg-emerald-950/30 border border-emerald-800/40 px-2 py-1 rounded">
+                    <div className="mb-2 text-[10px] font-mono text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 px-1.5 py-0.5 rounded">
                       {showTechnicalDetails
-                        ? `Rebate Savings: +${formatPrice(product.commission_rebate_cents)}`
-                        : `Instant Cashback: ${formatPrice(product.commission_rebate_cents)}`}
+                        ? `Rebate: +${formatPrice(product.commission_rebate_cents)}`
+                        : `Cashback: ${formatPrice(product.commission_rebate_cents)}`}
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <Link
                       href="/"
-                      className="flex-1 text-center py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-cyan-950/50"
+                      className="flex-1 text-center py-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-lg transition-all shadow-xs"
                     >
                       {showTechnicalDetails ? '1-Click Buy in Cockpit' : '1-Click Buy with PayPal'}
                     </Link>
                     <Link
                       href={`/share?product=${encodeURIComponent(product.product_id)}`}
-                      className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition-all"
+                      className="p-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white rounded-lg border border-slate-200 dark:border-slate-700 transition-all shadow-2xs"
+                      title="Share comparison"
                     >
-                      <Share2 className="w-4 h-4" />
+                      <Share2 className="w-3.5 h-3.5" />
                     </Link>
                   </div>
                 </div>

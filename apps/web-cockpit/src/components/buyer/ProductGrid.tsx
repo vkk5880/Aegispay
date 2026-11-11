@@ -15,16 +15,16 @@ export interface ProductGridProps {
 
 function SkeletonCard() {
   return (
-    <div className="animate-pulse rounded-2xl bg-slate-900/60 border border-slate-800 p-5 flex flex-col gap-3 min-h-[360px]">
-      <div className="w-full h-44 rounded-xl bg-slate-800/60" />
+    <div className="animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 p-3 sm:p-4 flex flex-col gap-2.5 min-h-[280px]">
+      <div className="w-full h-32 sm:h-36 rounded-xl bg-slate-200 dark:bg-slate-800/60" />
       <div className="flex items-center gap-2">
-        <div className="h-4 w-20 rounded bg-slate-800" />
-        <div className="h-4 w-16 rounded bg-slate-800" />
+        <div className="h-3.5 w-16 rounded bg-slate-200 dark:bg-slate-800" />
+        <div className="h-3.5 w-12 rounded bg-slate-200 dark:bg-slate-800" />
       </div>
-      <div className="h-5 w-3/4 rounded bg-slate-800" />
-      <div className="h-4 w-full rounded bg-slate-800" />
-      <div className="mt-auto h-7 w-24 rounded bg-slate-800" />
-      <div className="h-9 w-full rounded-xl bg-slate-800" />
+      <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
+      <div className="h-3.5 w-full rounded bg-slate-200 dark:bg-slate-800" />
+      <div className="mt-auto h-6 w-20 rounded bg-slate-200 dark:bg-slate-800" />
+      <div className="h-8 w-full rounded-xl bg-slate-200 dark:bg-slate-800" />
     </div>
   );
 }
@@ -40,8 +40,8 @@ export function ProductGrid({
 
   if (loading) {
     return (
-      <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 ${className}`}>
-        {[1, 2, 3, 4, 5, 6].map((i) => (
+      <div className={`grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4 ${className}`}>
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <SkeletonCard key={i} />
         ))}
       </div>
@@ -50,8 +50,8 @@ export function ProductGrid({
 
   if (!products || !Array.isArray(products) || products.length === 0) {
     return (
-      <div className="p-12 text-center rounded-2xl bg-slate-900/40 border border-slate-800">
-        <p className="text-slate-400 font-mono text-sm">
+      <div className="p-8 sm:p-12 text-center rounded-2xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
+        <p className="text-slate-500 dark:text-slate-400 font-mono text-sm">
           No matching products found. Try adjusting your search query or budget cap.
         </p>
       </div>
@@ -82,21 +82,21 @@ export function ProductGrid({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Grid Toolbar: Sort & Count */}
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-slate-400 pb-2 border-b border-slate-800/80">
-        <span className="flex items-center gap-1.5 text-slate-300">
-          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+      <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-mono text-slate-500 dark:text-slate-400 pb-2 border-b border-slate-200 dark:border-slate-800/80">
+        <span className="flex items-center gap-1.5 text-slate-700 dark:text-slate-300">
+          <Sparkles className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
           <span>Showing {sorted.length} Algorithmic Recommendations</span>
         </span>
 
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1 text-slate-500">
+          <span className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
             <ArrowUpDown className="w-3 h-3" />
             <span>Sort:</span>
           </span>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as any)}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-500 cursor-pointer"
+            className="bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500 cursor-pointer shadow-2xs"
           >
             <option value="SCORE">Composite Score (Default)</option>
             <option value="PRICE_ASC">Lowest Price First</option>
@@ -106,7 +106,7 @@ export function ProductGrid({
       </div>
 
       {/* Grid of Product Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
         {sorted.map((p, idx) => (
           <ProductCard
             key={p.product_id || `product-idx-${idx}`}

@@ -12,17 +12,17 @@ function Badge({
 }: BadgeProps) {
   const variantStyles = {
     default:
-      'bg-cyan-950/80 border-cyan-500/40 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.15)]',
+      'bg-cyan-50 dark:bg-cyan-950/80 border-cyan-200 dark:border-cyan-500/40 text-cyan-800 dark:text-cyan-300',
     secondary:
-      'bg-slate-800/80 border-slate-700 text-slate-300',
+      'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300',
     destructive:
-      'bg-rose-950/80 border-rose-500/40 text-rose-300 shadow-[0_0_10px_rgba(244,63,94,0.15)]',
+      'bg-rose-50 dark:bg-rose-950/80 border-rose-200 dark:border-rose-500/40 text-rose-800 dark:text-rose-300',
     outline:
-      'border-cyan-500/50 text-cyan-400 bg-transparent',
+      'border-cyan-500/50 text-cyan-700 dark:text-cyan-400 bg-transparent',
     success:
-      'bg-emerald-950/80 border-emerald-500/40 text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.15)]',
+      'bg-emerald-50 dark:bg-emerald-950/80 border-emerald-200 dark:border-emerald-500/40 text-emerald-800 dark:text-emerald-300',
     warning:
-      'bg-amber-950/80 border-amber-500/40 text-amber-300 shadow-[0_0_10px_rgba(251,191,36,0.15)]',
+      'bg-amber-50 dark:bg-amber-950/80 border-amber-200 dark:border-amber-500/40 text-amber-800 dark:text-amber-300',
   };
 
   return (

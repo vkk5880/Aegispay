@@ -11,17 +11,17 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = 'default', size = 'default', ...props }, ref) => {
     const variantStyles = {
       default:
-        'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] hover:from-cyan-400 hover:to-blue-500 hover:shadow-[0_0_20px_rgba(6,182,212,0.5)] border-transparent',
+        'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md shadow-cyan-600/20 hover:from-cyan-500 hover:to-blue-500 border-transparent',
       outline:
-        'border-cyan-500/40 bg-slate-900/60 text-slate-200 hover:border-cyan-400 hover:bg-cyan-950/40 hover:text-white',
+        'border-slate-300 dark:border-cyan-500/40 bg-white hover:bg-slate-50 text-slate-700 dark:bg-slate-900/60 dark:text-slate-200 dark:hover:border-cyan-400 dark:hover:bg-cyan-950/40 dark:hover:text-white shadow-xs',
       secondary:
-        'bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white border-slate-700',
+        'bg-slate-100 hover:bg-slate-200 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 dark:hover:text-white dark:border-slate-700 shadow-xs',
       ghost:
-        'bg-transparent text-slate-400 hover:bg-slate-800/60 hover:text-slate-100 border-transparent',
+        'bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/60 dark:hover:text-slate-100 border-transparent',
       destructive:
-        'bg-rose-950/80 border-rose-500/40 text-rose-300 hover:bg-rose-900 hover:text-white shadow-[0_0_15px_rgba(244,63,94,0.2)]',
+        'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100 dark:bg-rose-950/80 dark:border-rose-500/40 dark:text-rose-300 dark:hover:bg-rose-900 dark:hover:text-white shadow-xs',
       link:
-        'text-cyan-400 underline-offset-4 hover:underline bg-transparent border-transparent p-0',
+        'text-cyan-600 dark:text-cyan-400 underline-offset-4 hover:underline bg-transparent border-transparent p-0',
     };
 
     const sizeStyles = {

@@ -166,6 +166,11 @@ body {
 }
 
 .gradient-bg {
+  background: linear-gradient(-45deg, #f8fafc, #edf2f7, #f1f5f9, #ffffff);
+  background-size: 400% 400%;
+  animation: gradientShift 14s ease infinite;
+}
+.dark .gradient-bg {
   background: linear-gradient(-45deg, #060b14, #0c1424, #080f1a, #060b14);
   background-size: 400% 400%;
   animation: gradientShift 14s ease infinite;

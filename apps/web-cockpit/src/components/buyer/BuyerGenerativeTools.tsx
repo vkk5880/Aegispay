@@ -95,7 +95,7 @@ export function GenerativeProductCard({
       }`}
     >
       {/* Product Image & Badges */}
-      <div className="relative aspect-4/3 w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+      <div className="relative h-28 sm:h-32 aspect-video w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={product.cleaned_image_url || product.image_url}
@@ -105,49 +105,49 @@ export function GenerativeProductCard({
 
         {/* Selected Overlay Pill */}
         {isSelected && (
-          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-md bg-cyan-600/95 text-white text-[10px] font-bold shadow-md flex items-center gap-1 backdrop-blur-xs">
-            <CheckCircle2 className="w-3 h-3 text-white" />
+          <div className="absolute top-1.5 left-1.5 z-10 px-1.5 py-0.5 rounded-md bg-cyan-600/95 text-white text-[9px] font-bold shadow-md flex items-center gap-1 backdrop-blur-xs">
+            <CheckCircle2 className="w-2.5 h-2.5 text-white" />
             <span>Selected</span>
           </div>
         )}
 
         {/* Badges Overlay */}
-        <div className={`absolute ${isSelected ? 'top-8' : 'top-2'} left-2 flex flex-col gap-1 z-10 transition-all`}>
+        <div className={`absolute ${isSelected ? 'top-6' : 'top-1.5'} left-1.5 flex flex-col gap-1 z-10 transition-all`}>
           {product.free_shipping && (
-            <span className="px-2 py-0.5 rounded-md bg-emerald-500/90 text-white text-[10px] font-bold shadow-xs flex items-center gap-1 backdrop-blur-xs">
-              <Truck className="w-2.5 h-2.5" /> Free Shipping
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/90 text-white text-[9px] font-bold shadow-xs flex items-center gap-1 backdrop-blur-xs">
+              <Truck className="w-2 h-2" /> Free
             </span>
           )}
           {product.commission_rebate_cents > 0 && (
-            <span className="px-2 py-0.5 rounded-md bg-cyan-600/90 text-white text-[10px] font-bold shadow-xs backdrop-blur-xs">
-              Rebate: -{formatCents(product.commission_rebate_cents)}
+            <span className="px-1.5 py-0.5 rounded bg-cyan-600/90 text-white text-[9px] font-bold shadow-xs backdrop-blur-xs">
+              -{formatCents(product.commission_rebate_cents)}
             </span>
           )}
         </div>
 
-        <div className="absolute top-2 right-2 z-10">
-          <span className="px-2 py-0.5 rounded-md bg-black/60 text-white text-[10px] font-mono backdrop-blur-xs flex items-center gap-1">
-            <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+        <div className="absolute top-1.5 right-1.5 z-10">
+          <span className="px-1.5 py-0.5 rounded bg-slate-900/80 dark:bg-black/80 text-white text-[9px] font-mono backdrop-blur-xs flex items-center gap-1">
+            <ShieldCheck className="w-2 h-2 text-emerald-400" />
             {product.merchant_credibility_score}%
           </span>
         </div>
       </div>
 
       {/* Body */}
-      <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
-        <div className="space-y-1">
-          <div className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400">
+      <div className="p-2.5 flex-1 flex flex-col justify-between space-y-2">
+        <div className="space-y-0.5">
+          <div className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
             {product.merchant_domain}
           </div>
-          <h4 className="font-bold text-slate-900 dark:text-white text-xs line-clamp-2 leading-snug">
+          <h4 className="font-semibold text-slate-900 dark:text-white text-xs line-clamp-1 leading-snug">
             {product.title}
           </h4>
         </div>
 
         {/* Phase 4 Variant Selection Chips */}
         {product.variants && product.variants.length > 0 && (
-          <div className="flex flex-wrap gap-1 pt-1" role="group" aria-label="Product variants">
-            {product.variants.map((v) => (
+          <div className="flex flex-wrap gap-1 pt-0.5" role="group" aria-label="Product variants">
+            {product.variants.slice(0, 3).map((v) => (
               <button
                 key={v.id}
                 type="button"
@@ -155,7 +155,7 @@ export function GenerativeProductCard({
                   e.stopPropagation();
                   setSelectedVariantId(v.id);
                 }}
-                className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all cursor-pointer ${
+                className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-all cursor-pointer ${
                   selectedVariantId === v.id
                     ? 'bg-cyan-500/25 text-cyan-800 dark:text-cyan-200 border border-cyan-500/60 font-bold shadow-2xs'
                     : 'bg-slate-100 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-white'
@@ -170,11 +170,11 @@ export function GenerativeProductCard({
         {/* Pricing */}
         <div className="pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-baseline justify-between">
           <div>
-            <div className="text-sm font-black text-slate-900 dark:text-white">
+            <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white font-mono">
               {formatCents(netCents)}
             </div>
             {product.commission_rebate_cents > 0 && (
-              <div className="text-[10px] text-slate-500 line-through">
+              <div className="text-[9px] text-slate-400 line-through font-mono">
                 {formatCents(product.price_cents)}
               </div>
             )}
@@ -182,46 +182,45 @@ export function GenerativeProductCard({
 
           <div className="text-right text-[10px] text-slate-500 dark:text-slate-400">
             <span>★ {product.rating}</span>
-            <span className="text-slate-400 ml-1">({product.review_count})</span>
           </div>
         </div>
 
         {/* Phase 3 Action Chips */}
-        <div className="grid grid-cols-3 gap-1.5 pt-1">
-          {/* Multi-Select Toggle: [⚖️ Select / Compare] */}
+        <div className="grid grid-cols-3 gap-1 pt-0.5">
+          {/* Multi-Select Toggle */}
           <button
             type="button"
             onClick={() => onToggleSelect && onToggleSelect(product)}
-            className={`px-1.5 py-1.5 rounded-lg text-[10.5px] font-semibold transition-all border flex items-center justify-center gap-1 cursor-pointer active:scale-95 ${
+            className={`px-1 py-1 rounded text-[10px] font-semibold transition-all border flex items-center justify-center gap-0.5 cursor-pointer active:scale-95 ${
               isSelected
-                ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200 border-cyan-500 font-bold shadow-xs'
+                ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200 border-cyan-500 font-bold shadow-2xs'
                 : 'bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/10 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 border-slate-200 dark:border-slate-700'
             }`}
-            title={isSelected ? 'Remove from multi-product selection' : 'Select for multi-product comparison or bundling'}
+            title={isSelected ? 'Remove from comparison' : 'Select for side-by-side comparison'}
           >
-            <Scale className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
-            <span>{isSelected ? 'Selected' : 'Select'}</span>
+            <Scale className="w-2.5 h-2.5 text-cyan-600 dark:text-cyan-400" />
+            <span>{isSelected ? 'Done' : 'Select'}</span>
           </button>
 
-          {/* Single-Item Deep Dive: [💬 Ask AI About This] */}
+          {/* Single-Item Deep Dive */}
           <button
             type="button"
             onClick={() => (onAskAi ? onAskAi(product) : onAction('DETAILS', product))}
-            className="px-1.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/15 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[10.5px] font-semibold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1 cursor-pointer active:scale-95"
-            title="Focus this item & ask AI about specs, warranty, and seller credibility"
+            className="px-1 py-1 rounded bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/15 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[10px] font-semibold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-0.5 cursor-pointer active:scale-95"
+            title="Ask AI about specs"
           >
-            <Sparkles className="w-3 h-3 text-cyan-500" />
-            <span>Ask AI</span>
+            <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
+            <span>Ask</span>
           </button>
 
-          {/* Instant 1-Click Buy: [⚡ Buy for Me] */}
+          {/* Instant Buy */}
           <button
             type="button"
             onClick={() => onAction('BUY', product)}
-            className="px-1.5 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-[10.5px] font-bold transition-all shadow-xs flex items-center justify-center gap-0.5 cursor-pointer active:scale-95"
-            title="Instant 1-Click Buy for Me with pre-purchase stock hold"
+            className="px-1 py-1 rounded bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-[10px] font-bold transition-all shadow-xs flex items-center justify-center gap-0.5 cursor-pointer active:scale-95"
+            title="Instant 1-Click Buy"
           >
-            <Zap className="w-3 h-3" />
+            <Zap className="w-2.5 h-2.5" />
             <span>Buy</span>
           </button>
         </div>
@@ -383,9 +382,9 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
               PAYPAL-HACKATHON-2026
             </span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-44 rounded-lg bg-slate-800/40 border border-slate-700/40" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-36 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
             ))}
           </div>
         </div>
@@ -397,10 +396,10 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
     return (
       <div className="my-2 space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
-          <span>Discovered {products.length} merchant catalog items</span>
-          <span className="text-[10px] text-cyan-400">Promo applied: {promoCode}</span>
+          <span>Discovered {products.length} catalog items</span>
+          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">Promo: {promoCode}</span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}
@@ -441,9 +440,9 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
               PAYPAL-HACKATHON-2026
             </span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-44 rounded-lg bg-slate-800/40 border border-slate-700/40" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-36 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
             ))}
           </div>
         </div>
@@ -455,10 +454,10 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
     return (
       <div className="my-2 space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
-          <span>Discovered {products.length} merchant catalog items</span>
-          <span className="text-[10px] text-cyan-400">Promo applied: {promoCode}</span>
+          <span>Discovered {products.length} catalog items</span>
+          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">Promo: {promoCode}</span>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}
@@ -511,7 +510,7 @@ export const FilterTurnProductsToolUI = makeAssistantToolUI<FilterTurnProductsIn
             </span>
           )}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}

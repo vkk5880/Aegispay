@@ -331,19 +331,19 @@ export function ChatFlow({
   if (flowState === 'CLARIFYING') {
     return (
       <div
-        className="relative w-full max-w-2xl mx-auto rounded-2xl p-6 shadow-2xl flex flex-col gap-5 border border-slate-800 bg-slate-900/95 backdrop-blur-xl"
+        className="relative w-full max-w-2xl mx-auto rounded-2xl p-6 shadow-xl flex flex-col gap-5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/95 backdrop-blur-xl text-slate-900 dark:text-white"
         role="region"
         aria-label="Search clarification"
         aria-live="polite"
       >
-        <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-          <span className="text-xs font-mono text-cyan-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+        <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-slate-800">
+          <span className="text-xs font-mono text-cyan-600 dark:text-cyan-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5" />
             Clarification Engine
           </span>
           <button
             onClick={handleReset}
-            className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+            className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
           >
             Cancel
           </button>
@@ -351,7 +351,7 @@ export function ChatFlow({
 
         {/* User original query */}
         <div className="flex justify-end">
-          <div className="rounded-2xl rounded-tr-none px-4 py-2 text-xs font-medium bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">
+          <div className="rounded-2xl rounded-tr-none px-4 py-2 text-xs font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/50">
             {query}
           </div>
         </div>
@@ -362,7 +362,7 @@ export function ChatFlow({
             if (idx > revealedIdx) return null;
             return (
               <div key={idx} className="space-y-2 animate-fade-in-up">
-                <div className="rounded-2xl rounded-tl-none px-4 py-2.5 text-xs bg-slate-800/80 text-slate-200 border border-slate-700/60 w-fit">
+                <div className="rounded-2xl rounded-tl-none px-4 py-2.5 text-xs bg-slate-100 dark:bg-slate-800/80 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700/60 w-fit">
                   {q}
                 </div>
                 <input
@@ -373,7 +373,7 @@ export function ChatFlow({
                     const cleanVal = sanitizeChatInput(e.target.value, 1000, false);
                     setAnswers((prev) => ({ ...prev, [q]: cleanVal }));
                   }}
-                  className="w-full px-4 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                  className="w-full px-4 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
                   autoFocus={idx === revealedIdx}
                 />
               </div>
@@ -385,7 +385,7 @@ export function ChatFlow({
               <button
                 type="submit"
                 disabled={isEnriching}
-                className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-lg transition-all flex items-center gap-1.5 disabled:opacity-50"
+                className="px-5 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
               >
                 <span>{isEnriching ? 'Synthesizing...' : 'Execute Optimized Search'}</span>
                 <CornerDownLeft className="w-3 h-3" />
@@ -399,7 +399,7 @@ export function ChatFlow({
 
   return (
     <form onSubmit={handleInitialSearch} className="relative w-full max-w-2xl mx-auto">
-      <div className="relative flex items-center bg-slate-900/90 border border-slate-700 rounded-2xl shadow-xl focus-within:border-cyan-500 transition-all p-1.5">
+      <div className="relative flex items-center bg-white dark:bg-slate-900/90 border border-slate-300 dark:border-slate-700 rounded-2xl shadow-md focus-within:border-cyan-500 transition-all p-1.5">
         <div className="pl-3 pr-2 text-slate-400">
           <Search className="w-5 h-5" />
         </div>
@@ -411,13 +411,13 @@ export function ChatFlow({
           disabled={disabled || isClarifyingLoading}
           placeholder={placeholder}
           aria-label="Describe what you want to buy"
-          className="flex-1 bg-transparent px-2 py-3 text-sm text-white outline-none placeholder:text-slate-500 min-w-0"
+          className="flex-1 bg-transparent px-2 py-3 text-sm text-slate-900 dark:text-white outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 min-w-0"
         />
         <button
           type="submit"
           disabled={disabled || isClarifyingLoading || !query.trim()}
           aria-label="Execute search"
-          className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md disabled:opacity-50 cursor-pointer flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
+          className="px-5 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-xs disabled:opacity-50 cursor-pointer flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none"
         >
           <span>{isClarifyingLoading ? 'Analyzing...' : 'Execute'}</span>
           <ArrowRight className="w-3.5 h-3.5" />
@@ -428,8 +428,8 @@ export function ChatFlow({
       {(messageWarning || effectivePills.length > 0) && (
         <div className="mt-3 flex flex-col gap-2 animate-fade-in-up" role="region" aria-label="Proactive recommendations">
           {messageWarning && (
-            <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-500/30 rounded-xl px-3 py-1.5 shadow-sm">
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <div className="flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-500/30 rounded-xl px-3 py-1.5 shadow-2xs">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
               <span>{messageWarning}</span>
             </div>
           )}
@@ -440,9 +440,9 @@ export function ChatFlow({
                   key={pIdx}
                   type="button"
                   onClick={() => handlePillClick(pill)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/40 hover:border-cyan-400 shadow-sm transition-all cursor-pointer group"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-cyan-50 dark:bg-cyan-950/60 hover:bg-cyan-100 dark:hover:bg-cyan-900/80 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/40 hover:border-cyan-400 shadow-2xs transition-all cursor-pointer group"
                 >
-                  <Zap className="w-3 h-3 text-cyan-400 group-hover:scale-110 transition-transform" />
+                  <Zap className="w-3 h-3 text-cyan-600 dark:text-cyan-400 group-hover:scale-110 transition-transform" />
                   <span>{pill.label}</span>
                 </button>
               ))}
