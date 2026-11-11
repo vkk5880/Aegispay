@@ -293,6 +293,8 @@ test('auth scopes: createOrderTrackingToken creates read-only token and blocks s
   const writeJson = writeRes.json();
   assert.equal(writeJson.error, 'READ_ONLY_ACCESS');
   assert.equal(writeJson.order_id, 'ord_test_884920491');
+
+  await app.close();
 });
 
 test('auth scopes: identity_only vs autonomous_buyer token behavior in /api/buyer/chat', async () => {
@@ -356,4 +358,59 @@ test('auth scopes: identity_only vs autonomous_buyer token behavior in /api/buye
   assert.ok(autoChatJson.tracking_number);
   assert.ok(autoChatJson.tracking_url);
   assert.ok(autoChatJson.markdown.includes('1-Prompt Autonomous Purchase Complete!'));
+
+  await app.close();
+});
+
+test('auth scopes: streaming SSE chat enforces token scopes and blocks order_tracking token from procurement', async () => {
+  const app = await buildApp();
+
+  const trackingToken = createOrderTrackingToken('ord_stream_track_999');
+  const streamRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    headers: {
+      authorization: `Bearer ${trackingToken}`,
+      accept: 'text/event-stream',
+    },
+    payload: {
+      message: 'Buy headphones right now',
+      action: 'BUY',
+      stream: true,
+    },
+  });
+
+  assert.equal(streamRes.statusCode, 200);
+  const streamPayload = streamRes.payload;
+  assert.ok(streamPayload.includes('Read-Only Session Active'));
+  assert.ok(streamPayload.includes('ord_stream_track_999'));
+
+  await app.close();
+});
+
+test('pure LLM autonomy: conversational buy prompt without explicit action executes autonomous purchase for authorized buyer', async () => {
+  const app = await buildApp();
+
+  const autoBuyerToken = createAutonomousBuyerToken('usr_pp_buyer', 'vch_active_123');
+  const chatRes = await app.inject({
+    method: 'POST',
+    url: '/api/buyer/chat',
+    headers: {
+      authorization: `Bearer ${autoBuyerToken}`,
+    },
+    payload: {
+      message: 'Buy headphones right now',
+      budget_cap_cents: 60000,
+    },
+  });
+
+  assert.equal(chatRes.statusCode, 200);
+  const chatJson = chatRes.json();
+  assert.equal(chatJson.autonomous_buy_executed, true);
+  assert.ok(chatJson.order_id);
+  assert.ok(chatJson.tracking_number);
+  assert.ok(chatJson.tracking_url);
+  assert.ok(chatJson.markdown.includes('1-Prompt Autonomous Purchase Complete!'));
+
+  await app.close();
 });

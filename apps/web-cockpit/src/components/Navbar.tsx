@@ -17,6 +17,7 @@ import {
   LogIn,
   CreditCard,
   LogOut,
+  Lock,
 } from 'lucide-react';
 import NavbarLogo from './NavbarLogo';
 import { ThemeToggle } from './ThemeToggle';
@@ -33,6 +34,7 @@ export function Navbar() {
     user,
     isLoggedIn,
     isAuthorized,
+    isTrackingMode,
     loginWithPayPal,
     authorizePayment,
     openProfileSidebar,
@@ -141,8 +143,14 @@ export function Navbar() {
 
         {/* Right Section: Auth Button, DevModeToggle, ThemeToggle, Mobile Hamburger */}
         <div className="flex items-center gap-1.5 sm:gap-2 xl:gap-2.5">
-          {/* PayPal Auth Action Button */}
-          {!isLoggedIn ? (
+          {/* PayPal Auth Action Button / Read-Only Tracking Indicator */}
+          {isTrackingMode ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 font-bold text-xs sm:text-sm font-mono shadow-xs">
+              <Lock className="w-3.5 h-3.5 text-amber-500" />
+              <span className="hidden sm:inline">Tracking Mode</span>
+              <span className="sm:hidden">Tracking</span>
+            </div>
+          ) : !isLoggedIn ? (
             <button
               type="button"
               onClick={() => loginWithPayPal()}

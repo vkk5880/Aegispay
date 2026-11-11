@@ -129,6 +129,7 @@ export async function POST(req: Request) {
       const authHeader = req.headers.get('authorization');
       if (authHeader) {
         headers['Authorization'] = authHeader;
+        headers['authorization'] = authHeader;
       }
       const sessionToken = req.headers.get('x-session-token');
       if (sessionToken) {
@@ -174,7 +175,7 @@ export async function POST(req: Request) {
     : [];
   const activeTurnProducts: any[] = Array.isArray(body.active_turn_products) ? body.active_turn_products : [];
 
-  // Determine intent
+  // Determine intent (honors explicit action, falling back to natural language intent detection)
   let action: 'DISCOVER' | 'COMPARE' | 'DETAILS' | 'BUY' = explicitAction || 'DISCOVER';
   if (!explicitAction) {
     if (

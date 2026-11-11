@@ -34,6 +34,7 @@ export default function BuyerPortalPage() {
     user,
     isLoggedIn,
     isAuthorized,
+    isTrackingMode,
     loginWithPayPal,
     authorizePayment,
     openProfileSidebar,
@@ -406,6 +407,10 @@ export default function BuyerPortalPage() {
             cartItemCount={cartItemCount}
             cartSubtotalCents={optimizationData.net_buyer_expenditure_cents}
             onOpenCart={() => {
+              if (isTrackingMode) {
+                showNotification('Cart access and purchases are disabled in read-only tracking mode.');
+                return;
+              }
               logger.info('[BuyerPage:CartDrawer] Opening cart drawer from chat recommendation');
               setIsCartOpen(true);
             }}

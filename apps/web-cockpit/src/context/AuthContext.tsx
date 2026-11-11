@@ -15,14 +15,21 @@ export interface UserProfile {
   mandateId?: string;
   spentCents?: number;
   authorizedAt?: number;
+  budgetCapCents?: number;
+  mandateSignatureHex?: string;
+  publicKeyHex?: string;
+  mandateExpiresAt?: string;
 }
 
 export interface AuthContextType {
   user: UserProfile | null;
   isLoggedIn: boolean;
   isAuthorized: boolean;
+  isTrackingMode: boolean;
+  trackingToken: string | null;
   loginWithPayPal: (account?: { name?: string; email?: string }) => Promise<void>;
-  authorizePayment: () => Promise<void>;
+  authorizePayment: (budgetCapCents?: number) => Promise<void>;
+  revokePaymentAuthorization: () => void;
   logout: () => void;
   isProfileSidebarOpen: boolean;
   setIsProfileSidebarOpen: (open: boolean) => void;
@@ -50,12 +57,64 @@ export const DEFAULT_SANDBOX_USER: UserProfile = {
 
 const STORAGE_KEY = 'aegispay_user_session';
 
+function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function mintWebCryptoEd25519Mandate(params: {
+  userId: string;
+  mandateId: string;
+  budgetCapCents: number;
+}): Promise<{ publicKeyHex: string; signatureHex: string; expiresAt: string }> {
+  const expiresAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+  const subtle = typeof window !== 'undefined' ? window.crypto?.subtle : (globalThis as any).crypto?.subtle;
+
+  if (subtle && typeof subtle.generateKey === 'function') {
+    try {
+      const keyPair = await subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+      const rawPub = await subtle.exportKey('raw', keyPair.publicKey);
+      const publicKeyHex = bufferToHex(rawPub);
+
+      const messageObj = {
+        mandate_id: params.mandateId,
+        buyer_id: params.userId,
+        max_total_spend_cents: params.budgetCapCents,
+        max_single_merchant_cents: params.budgetCapCents,
+        currency_code: 'USD',
+        allowed_category_ids: ['general', 'electronics', 'apparel', 'home'],
+        expires_at: expiresAt,
+        status: 'ACTIVE',
+        public_key_hex: publicKeyHex,
+      };
+
+      const messageBytes = new TextEncoder().encode(JSON.stringify(messageObj));
+      const sigBuffer = await subtle.sign({ name: 'Ed25519' }, keyPair.privateKey, messageBytes);
+      const signatureHex = bufferToHex(sigBuffer);
+
+      return { publicKeyHex, signatureHex, expiresAt };
+    } catch (err) {
+      logger.warn('[AuthContext:WebCrypto] Native Ed25519 WebCrypto failed, falling back to deterministic cryptographic mock', { error: String(err) });
+    }
+  }
+
+  // Fallback 32-byte pubkey hex and 64-byte signature hex
+  const mockPub = '0'.repeat(64);
+  const mockSig = '0'.repeat(128);
+  return { publicKeyHex: mockPub, signatureHex: mockSig, expiresAt };
+}
+
 const defaultAuthContext: AuthContextType = {
   user: null,
   isLoggedIn: false,
   isAuthorized: false,
+  isTrackingMode: false,
+  trackingToken: null,
   loginWithPayPal: async () => {},
   authorizePayment: async () => {},
+  revokePaymentAuthorization: () => {},
   logout: () => {},
   isProfileSidebarOpen: false,
   setIsProfileSidebarOpen: () => {},
@@ -81,10 +140,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'authorize'>('login');
+  const [isTrackingMode, setIsTrackingMode] = useState<boolean>(false);
+  const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // Load saved session on initial mount
+  // Load saved session and detect tracking URL params on initial mount
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const token = params.get('token');
+      if (token) {
+        setIsTrackingMode(true);
+        setTrackingToken(token);
+        logger.info('[AuthContext:TrackingMode] Active tracking token detected, session sandboxed into read-only mode', {
+          tokenPreview: token.slice(0, 16) + '...',
+        });
+      }
+    }
+
     try {
       // Clean up legacy mock/test-user storage artifacts
       localStorage.removeItem('aegispay_test_user_enabled');
@@ -156,42 +229,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [openAuthModal, user]
   );
 
-  const authorizePayment = useCallback(async () => {
-    logger.info('[AuthContext:Authorize] Authorizing PayPal Sandbox Vault v3 Spend Allowance');
-    
-    if (!user) {
-      // Must be logged in first
-      openAuthModal('login');
-      return;
-    }
+  const authorizePayment = useCallback(
+    async (budgetCapCents: number = 25000) => {
+      logger.info('[AuthContext:Authorize] Authorizing PayPal Sandbox Vault v3 Spend Allowance with WebCrypto Ed25519', {
+        budgetCapCents,
+      });
 
-    if (!user.isAuthorized) {
-      // If we don't have active authorization, open modal in authorize mode
-      openAuthModal('authorize');
-      return;
-    }
+      const activeUser = user || {
+        name: DEFAULT_SANDBOX_USER.name,
+        email: DEFAULT_SANDBOX_USER.email,
+        isAuthorized: false,
+        spentCents: 0,
+      };
 
-    // Refresh active authorization
-    const authorizedUser: UserProfile = {
-      ...user,
-      isAuthorized: true,
-      vaultSetupTokenId: user.vaultSetupTokenId || `vault_tok_sandbox_${Date.now()}`,
-      mandateId: user.mandateId || `vch_sandbox_mandate_${Date.now()}`,
-      authorizedAt: Date.now(),
-      spentCents: user.spentCents || 0,
-    };
+      const mandateId = `vch_mandate_${Date.now()}`;
+      const { publicKeyHex, signatureHex, expiresAt } = await mintWebCryptoEd25519Mandate({
+        userId: activeUser.email || 'sb-buyer@personal.example.com',
+        mandateId,
+        budgetCapCents,
+      });
 
-    setUser(authorizedUser);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(authorizedUser));
-    } catch {}
+      const authorizedUser: UserProfile = {
+        ...activeUser,
+        isAuthorized: true,
+        vaultSetupTokenId: activeUser.vaultSetupTokenId || `vault_tok_sandbox_${Date.now()}`,
+        paymentTokenId: activeUser.paymentTokenId || `vault_pm_tok_${Date.now()}`,
+        mandateId,
+        budgetCapCents,
+        mandateSignatureHex: signatureHex,
+        publicKeyHex,
+        mandateExpiresAt: expiresAt,
+        authorizedAt: Date.now(),
+        spentCents: activeUser.spentCents || 0,
+      };
 
-    logger.info('[AuthContext:Authorize] PayPal Sandbox Payment authorized and saved to account', {
-      name: authorizedUser.name,
-      vaultSetupTokenId: authorizedUser.vaultSetupTokenId,
-      mandateId: authorizedUser.mandateId,
+      setUser(authorizedUser);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(authorizedUser));
+      } catch {}
+
+      logger.info('[AuthContext:Authorize] WebCrypto Ed25519 Spend Mandate signed and stored', {
+        name: authorizedUser.name,
+        mandateId,
+        budgetCapCents,
+        publicKeyPrefix: publicKeyHex.slice(0, 8),
+      });
+    },
+    [user]
+  );
+
+  const revokePaymentAuthorization = useCallback(() => {
+    logger.info('[AuthContext:Revoke] Revoking spend allowance authorization (dropping to Mode A: $0 Identity Only)');
+    setUser((current) => {
+      if (!current) return current;
+      const downgraded: UserProfile = {
+        ...current,
+        isAuthorized: false,
+        mandateId: undefined,
+        vaultSetupTokenId: undefined,
+        paymentTokenId: undefined,
+        mandateSignatureHex: undefined,
+        publicKeyHex: undefined,
+        mandateExpiresAt: undefined,
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(downgraded));
+      } catch {}
+      return downgraded;
     });
-  }, [user, openAuthModal]);
+  }, []);
 
   const recordPurchaseSpend = useCallback((amountCents: number) => {
     setSpentCentsState((prev) => {
@@ -247,8 +353,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoggedIn,
         isAuthorized,
+        isTrackingMode,
+        trackingToken,
         loginWithPayPal,
         authorizePayment,
+        revokePaymentAuthorization,
         logout,
         isProfileSidebarOpen,
         setIsProfileSidebarOpen,
