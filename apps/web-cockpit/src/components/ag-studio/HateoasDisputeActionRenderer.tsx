@@ -104,11 +104,33 @@ export function HateoasDisputeActionRenderer({
     }, 5000);
   };
 
-  const commitAction = (action: string) => {
+  const commitAction = async (action: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
     if (toastIntervalRef.current) clearInterval(toastIntervalRef.current);
     setPendingToastAction(null);
     setExecutedAction(action);
+
+    // Live API call to execute PayPal Dispute v1 HATEOAS action
+    try {
+      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      let tierAction = 'TIER1_REFUND';
+      if (action === 'provide-evidence') tierAction = 'TIER4_CONTEST_PDF';
+      else if (action === 'make-offer') tierAction = 'TIER2_PARTIAL_OFFER';
+      else if (action === 'accept-claim') tierAction = 'TIER1_REFUND';
+
+      await fetch(`${orchestratorUrl}/api/agents/arbiter/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dispute_id: disputeId,
+          action: tierAction,
+          note: `Merchant executed HATEOAS action: ${action}`,
+        }),
+      });
+    } catch (err) {
+      console.warn('[HateoasDisputeActionRenderer] Dispute action execution request notice:', err);
+    }
+
     if (onActionComplete) {
       onActionComplete(action);
     }

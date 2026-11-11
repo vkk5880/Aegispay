@@ -416,6 +416,59 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * POST /api/disputes/:id/appeal
+   * Appeals a closed/lost dispute determination (POST /v1/customer/disputes/{id}/appeal)
+   */
+  fastify.post('/api/disputes/:id/appeal', async (request, reply) => {
+    logger.info('[POST /api/disputes/:id/appeal] Inbound dispute appeal request', {
+      params: sanitizeForLogging(request.params),
+      body: sanitizeForLogging(request.body),
+    });
+
+    const paramsResult = DisputeParamsSchema.safeParse(request.params);
+    if (!paramsResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: paramsResult.error.format() });
+    }
+
+    const parseResult = AppealRequestSchema.safeParse(request.body || {});
+    if (!parseResult.success) {
+      return reply.status(400).send({ error: 'INVALID_REQUEST', details: parseResult.error.format() });
+    }
+
+    const { id } = paramsResult.data;
+    const { appeal_reason, evidence_notes } = parseResult.data;
+
+    try {
+      const appealResult = await defaultPayPalClient.appealDispute(
+        id,
+        {
+          evidence_type: 'PROOF_OF_EMPTY_RETURN_OR_TAMPER',
+          notes: `${appeal_reason}: ${evidence_notes || 'Merchant empty-box / fraud appeal with verified visual evidence'}`,
+        }
+      );
+
+      logger.info('[POST /api/disputes/:id/appeal] Dispute appeal submitted successfully', {
+        disputeId: id,
+        appealReason: appeal_reason,
+      });
+
+      return reply.status(200).send({
+        dispute_id: id,
+        action: 'APPEAL',
+        status: 'UNDER_APPEAL',
+        result: appealResult,
+      });
+    } catch (err: any) {
+      logger.error('[POST /api/disputes/:id/appeal] Dispute appeal failed', {
+        disputeId: id,
+        errorMessage: err.message,
+        stack: err.stack,
+      });
+      return reply.status(500).send({ error: 'APPEAL_SUBMISSION_FAILED', message: err.message });
+    }
+  });
+
+  /**
    * POST /api/disputes/forensics/analyze-box
    * Analyzes defect bounding box coordinates and returns severity classification
    */

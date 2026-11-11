@@ -4,7 +4,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import type { GridApi } from 'ag-grid-community';
 
 export interface GridStreamEvent {
-  type: 'ORDER_AUTHORIZED' | 'DISPUTE_CREATED' | 'BID_MATCHED' | 'CAPTURE_COMPLETED' | 'REFUND_ISSUED';
+  type:
+    | 'ORDER_AUTHORIZED'
+    | 'DISPUTE_CREATED'
+    | 'CUSTOMER.DISPUTE.UPDATED'
+    | 'DISPUTE_RESOLVED'
+    | 'BID_MATCHED'
+    | 'CAPTURE_COMPLETED'
+    | 'REFUND_ISSUED';
   payload: Record<string, any>;
   timestamp: string;
 }

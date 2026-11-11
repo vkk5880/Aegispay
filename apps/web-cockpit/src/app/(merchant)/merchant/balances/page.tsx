@@ -1,11 +1,11 @@
 import React from 'react';
 import type { Metadata } from 'next';
-import { EndpointPage } from '@/components/merchant/EndpointPage';
+import { BalancesClientView } from '@/components/merchant/BalancesClientView';
 
 export const metadata: Metadata = { title: 'Held Balances | Merchant Cockpit' };
 
 export default async function BalancesPage() {
-  const balances = [
+  const initialBalances = [
     {
       currency: 'USD',
       total: 15400.0,
@@ -29,34 +29,5 @@ export default async function BalancesPage() {
     },
   ];
 
-  return (
-    <EndpointPage
-      title="Merchant Balances & Liquidity"
-      calls={['GET /v1/reporting/balances']}
-      source="getBalances()"
-      note="The merchant account's balance across each held currency, reflecting available reserves, withheld escrow amounts, and 30-day settlement trajectory."
-      rows={balances}
-      columns={[
-        { field: 'currency', headerName: 'Currency', width: 120, enableRowGroup: true },
-        { field: 'total', headerName: 'Total Balance', type: 'money', width: 140, aggFunc: 'sum' },
-        { field: 'available', headerName: 'Available Balance', type: 'money', width: 150, aggFunc: 'sum' },
-        { field: 'withheld', headerName: 'Withheld (Escrow)', type: 'money', width: 150, aggFunc: 'sum' },
-        {
-          field: 'history_30d',
-          headerName: '30-Day Settlement Trajectory',
-          minWidth: 220,
-          flex: 1,
-          cellRenderer: 'agSparklineCellRenderer',
-          cellRendererParams: {
-            sparklineOptions: {
-              type: 'area',
-              fill: 'rgba(0, 112, 224, 0.2)',
-              line: { stroke: '#0070e0', strokeWidth: 2 },
-              highlightStyle: { fill: '#06b6d4' },
-            },
-          },
-        },
-      ]}
-    />
-  );
+  return <BalancesClientView initialBalances={initialBalances} />;
 }

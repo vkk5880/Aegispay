@@ -5219,4 +5219,70 @@ export const PayPalSandboxStateSchema = z.object({
 });
 export type PayPalSandboxState = z.infer<typeof PayPalSandboxStateSchema>;
 
+/**
+ * PayPal Catalog Products & Billing Plans Contracts
+ */
+export const CreateProductSchema = z.object({
+  name: z.string().min(1).max(127),
+  description: z.string().max(256).optional(),
+  type: z.enum(['PHYSICAL', 'DIGITAL', 'SERVICE']).default('PHYSICAL'),
+  category: z.string().min(1).max(127).default('ELECTRONICS'),
+  image_url: z.string().url().optional(),
+  home_url: z.string().url().optional(),
+  price_cents: z.number().int().nonnegative().optional(),
+  allow_synthetic_intent: z.boolean().default(true),
+  max_discount_percentage: z.number().min(0).max(100).default(10),
+  min_instant_capture_cents: z.number().int().nonnegative().optional(),
+});
+export type CreateProductInput = z.infer<typeof CreateProductSchema>;
+
+export const PatchProductOperationSchema = z.object({
+  op: z.enum(['replace', 'add', 'remove']),
+  path: z.string(),
+  value: z.any().optional(),
+});
+export const PatchProductSchema = z.array(PatchProductOperationSchema);
+export type PatchProductInput = z.infer<typeof PatchProductSchema>;
+
+export const CreateBillingPlanSchema = z.object({
+  product_id: z.string().min(1),
+  name: z.string().min(1).max(127),
+  description: z.string().max(127).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE']).default('ACTIVE'),
+  billing_cycles: z.array(
+    z.object({
+      frequency: z.object({
+        interval_unit: z.enum(['DAY', 'WEEK', 'MONTH', 'YEAR']),
+        interval_count: z.number().int().positive().default(1),
+      }),
+      tenure_type: z.enum(['REGULAR', 'TRIAL']).default('REGULAR'),
+      sequence: z.number().int().positive().default(1),
+      total_cycles: z.number().int().nonnegative().default(0),
+      pricing_scheme: z.object({
+        fixed_price: z.object({
+          value: z.string(),
+          currency_code: z.string().default('USD'),
+        }),
+      }).optional(),
+    })
+  ).min(1),
+  payment_preferences: z.object({
+    auto_bill_outstanding: z.boolean().default(true),
+    setup_fee_failure_action: z.enum(['CONTINUE', 'CANCEL']).default('CONTINUE'),
+    payment_failure_threshold: z.number().int().nonnegative().default(3),
+    setup_fee: z.object({
+      value: z.string(),
+      currency_code: z.string().default('USD'),
+    }).optional(),
+  }).optional(),
+});
+export type CreateBillingPlanInput = z.infer<typeof CreateBillingPlanSchema>;
+
+export const AiProductSuggestSchema = z.object({
+  image_base64: z.string().optional(),
+  image_url: z.string().url().optional(),
+  prompt: z.string().optional(),
+});
+export type AiProductSuggestInput = z.infer<typeof AiProductSuggestSchema>;
+
 export * from './logger.js';

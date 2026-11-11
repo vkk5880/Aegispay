@@ -57,8 +57,22 @@ export function AutonomyDialWidget({
 }: AutonomyDialWidgetProps) {
   const [selectedMode, setSelectedMode] = useState<AutonomyDialMode>(initialMode);
 
+  // Restore persistent mode on mount
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('aegispay_merchant_autonomy_mode') as AutonomyDialMode | null;
+      if (saved && (saved === 'COPILOT' || saved === 'SUPERVISED' || saved === 'AUTONOMOUS')) {
+        setSelectedMode(saved);
+        if (onChange) onChange(saved);
+      }
+    }
+  }, [onChange]);
+
   const handleModeChange = (mode: AutonomyDialMode) => {
     setSelectedMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('aegispay_merchant_autonomy_mode', mode);
+    }
     if (onChange) {
       onChange(mode);
     }

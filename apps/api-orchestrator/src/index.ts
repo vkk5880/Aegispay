@@ -14,6 +14,7 @@ import { hitlRoutes } from './routes/hitl.routes.js';
 import { chatRoutes } from './routes/chat.routes.js';
 import { reconciliationRoutes } from './routes/reconciliation.routes.js';
 import { invoicingRoutes } from './routes/invoicing.routes.js';
+import { merchantCatalogRoutes } from './routes/merchant.catalog.js';
 import { http402Plugin } from './middleware/http402-interceptor.js';
 
 dotenv.config();
@@ -148,6 +149,7 @@ export async function buildApp() {
   await fastify.register(chatRoutes);
   await fastify.register(reconciliationRoutes);
   await fastify.register(invoicingRoutes);
+  await fastify.register(merchantCatalogRoutes);
 
   // Root health route
   fastify.get('/', async () => {

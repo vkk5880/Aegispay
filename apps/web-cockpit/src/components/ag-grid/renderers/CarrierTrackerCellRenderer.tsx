@@ -16,11 +16,39 @@ export interface CarrierData {
 
 export function CarrierTrackerCellRenderer(props: CustomCellRendererProps<CarrierData>) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [syncingTracker, setSyncingTracker] = useState(false);
+  const [trackerSyncStatus, setTrackerSyncStatus] = useState<string | null>(null);
   const data = props.data;
 
   const carrier = (data?.carrier || 'USPS').toUpperCase();
   const trackingNumber = data?.tracking_number || data?.trackingNumber || (props.value ? String(props.value) : '94001118992200000001');
   const status = (data?.delivery_status || data?.status || 'DELIVERED').toUpperCase();
+
+  const handleSyncTracker = async () => {
+    setSyncingTracker(true);
+    try {
+      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const txId = (data as any)?.id || (data as any)?.transaction_id || 'TXN-DEMO-001';
+      const res = await fetch(`${orchestratorUrl}/api/merchant/trackers`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transaction_id: txId,
+          tracking_number: trackingNumber,
+          carrier: carrier,
+        }),
+      });
+      if (res.ok) {
+        setTrackerSyncStatus('Synced to PayPal Trackers API');
+      } else {
+        setTrackerSyncStatus('Sync Failed');
+      }
+    } catch {
+      setTrackerSyncStatus('Network Error');
+    } finally {
+      setSyncingTracker(false);
+    }
+  };
 
   const getStatusBadge = (st: string) => {
     switch (st) {
@@ -116,7 +144,19 @@ export function CarrierTrackerCellRenderer(props: CustomCellRendererProps<Carrie
               </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-slate-800">
+            <div className="flex justify-between items-center pt-2 border-t border-slate-800">
+              {trackerSyncStatus ? (
+                <span className="text-[11px] font-mono text-emerald-400">{trackerSyncStatus}</span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSyncTracker}
+                  disabled={syncingTracker}
+                  className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 hover:bg-cyan-900 transition-colors disabled:opacity-50"
+                >
+                  {syncingTracker ? 'Syncing...' : 'Sync Tracker to PayPal'}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setModalOpen(false)}

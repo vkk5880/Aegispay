@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Metadata } from 'next';
-import { EndpointPage } from '@/components/merchant/EndpointPage';
+import { TransactionsClientView } from '@/components/merchant/TransactionsClientView';
 
 export const metadata: Metadata = { title: 'Transactions | Merchant Cockpit' };
 
@@ -174,51 +174,5 @@ export default async function TransactionsPage() {
     },
   ];
 
-  return (
-    <EndpointPage
-      title="Transaction Search (Last 31 Days)"
-      calls={['GET /v1/reporting/transactions']}
-      source="searchTransactions(start, end)"
-      note="Multi-merchant settlement ledger powered by AG Grid Enterprise Master/Detail, dynamic row grouping, status bar summaries, and in-line HATEOAS actions."
-      rows={transactions}
-      columns={[
-        {
-          field: 'date',
-          headerName: 'Date',
-          type: 'dateTime',
-          width: 175,
-          cellRenderer: 'agGroupCellRenderer',
-        },
-        { field: 'id', headerName: 'Transaction ID', width: 140 },
-        { field: 'currency', headerName: 'Currency', width: 100, enableRowGroup: true },
-        { field: 'status', headerName: 'Status', width: 85, enableRowGroup: true },
-        {
-          field: 'amount',
-          headerName: 'Financial Split (Gross / Fee / Rebate)',
-          width: 230,
-          cellRenderer: 'MonetarySplitCellRenderer',
-          aggFunc: 'sum',
-        },
-        {
-          field: 'tracking_number',
-          headerName: 'Carrier Tracker',
-          width: 240,
-          cellRenderer: 'CarrierTrackerCellRenderer',
-        },
-        {
-          field: 'liability_score_l',
-          headerName: 'Forensic Risk (L, R)',
-          width: 140,
-          cellRenderer: 'RiskScoreRadialCellRenderer',
-        },
-        {
-          field: 'hateoasAllowedActions',
-          headerName: 'One-Click Actions',
-          minWidth: 220,
-          cellRenderer: 'HateoasActionCellRenderer',
-        },
-        { field: 'counterparty', headerName: 'Counterparty', minWidth: 170, flex: 1 },
-      ]}
-    />
-  );
+  return <TransactionsClientView initialTransactions={transactions} />;
 }

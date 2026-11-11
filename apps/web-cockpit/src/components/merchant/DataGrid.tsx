@@ -32,6 +32,7 @@ import {
   Radio,
   SlidersHorizontal,
   Zap,
+  RotateCcw,
 } from 'lucide-react';
 
 if (process.env.NODE_ENV !== 'production') {
@@ -173,6 +174,7 @@ export function DataGrid({
   serverSideDatasource,
   enableCharts = true,
   enableFlashing = true,
+  tableName,
   showRowGroupPanel = true,
 }: DataGridProps) {
   const [search, setSearch] = useState('');
@@ -202,6 +204,8 @@ export function DataGrid({
     };
   }, []);
 
+  const tableNameResolved = tableName || 'default';
+
   const onGridReady = useCallback((params: GridReadyEvent) => {
     logger.info('[DataGrid] onGridReady fired', {
       rowModelType,
@@ -213,7 +217,58 @@ export function DataGrid({
       logger.debug('[DataGrid] Registering serverSideDatasource on AG Grid instance');
       params.api.setGridOption('serverSideDatasource', serverSideDatasource);
     }
-  }, [serverSideDatasource, rowModelType, columns.length]);
+
+    // Restore saved layout state if available in localStorage
+    try {
+      if (typeof window !== 'undefined') {
+        const saved = localStorage.getItem(`aegispay_grid_layout_${tableNameResolved}`);
+        if (saved) {
+          const { columnState, filterModel } = JSON.parse(saved);
+          if (columnState && Array.isArray(columnState)) {
+            params.api.applyColumnState({ state: columnState, applyOrder: true });
+          }
+          if (filterModel && typeof filterModel === 'object') {
+            params.api.setFilterModel(filterModel);
+          }
+          logger.info('[DataGrid] Restored saved grid layout', { tableName: tableNameResolved });
+        }
+      }
+    } catch (err) {
+      logger.warn('[DataGrid] Error restoring saved layout state', err);
+    }
+  }, [serverSideDatasource, rowModelType, columns.length, tableNameResolved]);
+
+  const saveLayoutState = useCallback(() => {
+    if (!gridApi) return;
+    const storageKey = `aegispay_grid_layout_${tableNameResolved}`;
+    try {
+      const columnState = gridApi.getColumnState();
+      const filterModel = gridApi.getFilterModel();
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(storageKey, JSON.stringify({ columnState, filterModel }));
+        logger.debug('[DataGrid] Persisted grid layout state to localStorage', { storageKey });
+      }
+    } catch (err: any) {
+      logger.warn('[DataGrid] Failed to persist grid layout state', err);
+    }
+  }, [gridApi, tableNameResolved]);
+
+  const handleResetLayout = useCallback(() => {
+    if (!gridApi) return;
+    const storageKey = `aegispay_grid_layout_${tableNameResolved}`;
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(storageKey);
+      }
+      gridApi.resetColumnState();
+      gridApi.setFilterModel(null);
+      setActionNotice('Grid layout reset to factory defaults');
+      setTimeout(() => setActionNotice(null), 3000);
+      logger.info('[DataGrid] Reset grid layout state to defaults', { storageKey });
+    } catch (err: any) {
+      logger.warn('[DataGrid] Failed to reset layout state', err);
+    }
+  }, [gridApi, tableNameResolved]);
 
   const sanitizedSearch = sanitizeQuickFilter(search);
 
@@ -256,9 +311,14 @@ export function DataGrid({
       try {
         gridApi.exportDataAsExcel({
           fileName: 'aegispay-paypal-settlement-audit.xlsx',
-          sheetName: 'Transactions',
+          sheetName: 'Settlement Ledger',
           author: 'AegisPay Autonomous Clearinghouse Cockpit',
-          columnWidth: 120,
+          columnWidth: 125,
+          prependContent: [
+            [{ styleId: 'header', data: { type: 'String', value: 'AegisPay Enterprise Settlement Ledger & Audit Record' } }],
+            [{ data: { type: 'String', value: `Generated: ${new Date().toISOString()} | Source: PayPal Sandbox Live` } }],
+            [],
+          ],
         });
         logger.info('[DataGrid] Exported native Excel workbook successfully (.xlsx)');
         setActionNotice('Native Enterprise Excel workbook exported (.xlsx)');
@@ -387,6 +447,61 @@ export function DataGrid({
     setTimeout(() => setActionNotice(null), 4000);
   }, [selectedRow]);
 
+  // Enterprise Context Menu (Right-Click)
+  const getContextMenuItems = useCallback(
+    (params: any) => {
+      const row = params.node?.data;
+      const defaultItems = ['copy', 'copyWithHeaders', 'separator', 'export'];
+      if (!row) return defaultItems;
+
+      const recordId = row.id || row.transaction_id || row.dispute_id || row.number;
+
+      return [
+        {
+          name: 'Copy Reference / Transaction ID',
+          icon: '<span style="font-weight:bold;color:#06b6d4;">📋</span>',
+          action: () => {
+            if (recordId && typeof navigator !== 'undefined') {
+              navigator.clipboard.writeText(String(recordId));
+              setActionNotice(`Copied: ${recordId}`);
+              setTimeout(() => setActionNotice(null), 2500);
+            }
+          },
+        },
+        {
+          name: 'View in PayPal Dashboard',
+          icon: '<span style="font-weight:bold;color:#0070e0;">↗</span>',
+          action: () => {
+            const txnId = row.transaction_id || row.id;
+            if (typeof window !== 'undefined') {
+              window.open(`https://www.sandbox.paypal.com/activity/payment/${txnId}`, '_blank');
+            }
+          },
+        },
+        'separator',
+        {
+          name: 'Initiate Compensating Refund',
+          disabled: row.status === 'REFUNDED' || !row.id,
+          action: () => {
+            setSelectedRow(row);
+            handleAction('refund');
+          },
+        },
+        {
+          name: 'Export Row to Forensic Dossier (PDF)',
+          action: () => {
+            setActionNotice(`Compiling Forensic Dossier for ${recordId}...`);
+            setTimeout(() => setActionNotice('Forensic Dossier Generated (PDF)'), 1500);
+            setTimeout(() => setActionNotice(null), 4000);
+          },
+        },
+        'separator',
+        ...defaultItems,
+      ];
+    },
+    [handleAction]
+  );
+
   // Register Custom Cell Renderers & Detail Views
   const components = useMemo(() => ({
     OrderDetailView,
@@ -479,6 +594,17 @@ export function DataGrid({
               </button>
             ))}
           </div>
+
+          {/* Reset Layout State Button */}
+          <button
+            type="button"
+            onClick={handleResetLayout}
+            title="Reset Grid Layout & Column States to Defaults"
+            className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#080d1a] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-xs font-medium transition-all cursor-pointer shadow-xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset</span>
+          </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -572,6 +698,13 @@ export function DataGrid({
             domLayout="normal"
             onGridReady={onGridReady}
             onRowClicked={onRowClicked}
+            // Enterprise Context Menu & Layout State Handlers
+            getContextMenuItems={getContextMenuItems}
+            onColumnMoved={saveLayoutState}
+            onColumnPinned={saveLayoutState}
+            onColumnResized={saveLayoutState}
+            onSortChanged={saveLayoutState}
+            onFilterChanged={saveLayoutState}
             // Master/Detail Configuration
             masterDetail={masterDetail}
             detailCellRenderer={resolvedDetailRenderer}

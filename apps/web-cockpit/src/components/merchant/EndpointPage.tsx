@@ -14,6 +14,7 @@ export function EndpointPage({
   note,
   rows,
   columns,
+  headerAction,
 }: {
   title: string;
   calls: string[];
@@ -21,6 +22,7 @@ export function EndpointPage({
   note?: string;
   rows: Row[];
   columns: ColDef<Row>[];
+  headerAction?: React.ReactNode;
 }) {
   const { showTechnicalDetails } = useUiMode();
   return (
@@ -40,9 +42,12 @@ export function EndpointPage({
           </Link>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h1 className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white tracking-tight">{title}</h1>
-            <span className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-mono font-bold text-xs shadow-xs">
-              Live Records ({rows.length})
-            </span>
+            <div className="flex items-center gap-3">
+              {headerAction}
+              <span className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-mono font-bold text-xs shadow-xs">
+                Live Records ({rows.length})
+              </span>
+            </div>
           </div>
 
           {showTechnicalDetails ? (

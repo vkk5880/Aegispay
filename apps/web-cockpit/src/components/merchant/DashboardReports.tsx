@@ -14,16 +14,34 @@ export interface DashboardReportMetrics {
   recentTxCount?: number;
 }
 
-export function DashboardReports({ metrics = {} }: { metrics?: DashboardReportMetrics }) {
+export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: DashboardReportMetrics }) {
   const { showTechnicalDetails } = useUiMode();
+  const [metrics, setMetrics] = React.useState<DashboardReportMetrics>(initialMetrics);
+
+  useEffect(() => {
+    async function fetchLiveMetrics() {
+      try {
+        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const res = await fetch(`${orchestratorUrl}/api/merchant/overview-metrics`);
+        if (res.ok) {
+          const data = await res.json();
+          setMetrics(data);
+          logger.info('[DashboardReports] Successfully loaded live overview metrics', data);
+        }
+      } catch (err: any) {
+        logger.debug('[DashboardReports] Overview metrics live fetch notice:', err?.message);
+      }
+    }
+    fetchLiveMetrics();
+  }, []);
 
   useEffect(() => {
     logger.info('[DashboardReports] Rendered DashboardReports with metrics', {
-      totalProducts: metrics.totalProducts ?? 2,
+      totalProducts: metrics.totalProducts ?? 3,
       activePlans: metrics.activePlans ?? 1,
       openInvoices: metrics.openInvoices ?? 1,
       usdBalance: metrics.usdBalance ?? '$14,800.00',
-      recentTxCount: metrics.recentTxCount ?? 1,
+      recentTxCount: metrics.recentTxCount ?? 24,
       showTechnicalDetails,
     });
   }, [metrics, showTechnicalDetails]);

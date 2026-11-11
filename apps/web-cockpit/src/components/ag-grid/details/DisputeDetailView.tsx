@@ -1,10 +1,10 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import type { CustomCellRendererProps } from 'ag-grid-react';
 import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceComparatorWidget';
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
-import { ShieldCheck, FileText, Cpu } from 'lucide-react';
+import { ShieldCheck, FileText, Cpu, ShieldAlert } from 'lucide-react';
 
 export interface DisputeDetailProps {
   data?: {
@@ -39,6 +39,33 @@ export function DisputeDetailView(props: CustomCellRendererProps<any> | DisputeD
   const abuseR = typeof data.abuseRiskScoreR === 'number' ? data.abuseRiskScoreR : 0.84;
   const actions = data.hateoasAllowedActions || ['provide-evidence', 'make-offer'];
 
+  const [isAppealing, setIsAppealing] = useState(false);
+  const [appealMessage, setAppealMessage] = useState<string | null>(null);
+
+  const handleAppeal = async () => {
+    setIsAppealing(true);
+    try {
+      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const res = await fetch(`${orchestratorUrl}/api/disputes/${encodeURIComponent(disputeId)}/appeal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appeal_reason: 'MERCHANT_RECEIVED_EMPTY_BOX',
+          evidence_notes: 'Visual scan confirmed empty box return. Initiating PayPal dispute appeal.',
+        }),
+      });
+      if (res.ok) {
+        setAppealMessage('Appeal Submitted');
+      } else {
+        setAppealMessage('Appeal Failed');
+      }
+    } catch {
+      setAppealMessage('Network Error');
+    } finally {
+      setIsAppealing(false);
+    }
+  };
+
   return (
     <div className="p-4 bg-slate-950/95 border-t border-b border-rose-500/30 text-slate-100 rounded-b-xl my-1 shadow-2xl space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
@@ -53,6 +80,20 @@ export function DisputeDetailView(props: CustomCellRendererProps<any> | DisputeD
         </div>
 
         <div className="flex items-center gap-2">
+          {appealMessage ? (
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              {appealMessage}
+            </span>
+          ) : (
+            <button
+              onClick={handleAppeal}
+              disabled={isAppealing}
+              className="flex items-center gap-1 text-[11px] font-mono px-2.5 py-1 rounded-lg bg-amber-950/60 hover:bg-amber-900/80 text-amber-200 border border-amber-500/40 transition-colors disabled:opacity-50"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+              {isAppealing ? 'Submitting Appeal...' : 'Appeal Decision'}
+            </button>
+          )}
           <a
             href={`/api/disputes/${disputeId}/dossier`}
             target="_blank"
