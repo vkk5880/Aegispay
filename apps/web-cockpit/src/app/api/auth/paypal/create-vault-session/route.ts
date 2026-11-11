@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolvePublicOrigin, sanitizeCallbackUrl } from '@/lib/origin';
 
 interface PayPalTokenResponse {
   access_token: string;
@@ -11,7 +12,7 @@ interface PayPalTokenResponse {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const origin = req.nextUrl.origin || 'http://localhost:3000';
+    const origin = resolvePublicOrigin(req, body.origin);
 
     const clientId = process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID;
     const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
@@ -50,8 +51,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const returnUrl = body.returnUrl || `${origin}/auth/vault-callback`;
-    const cancelUrl = body.cancelUrl || `${origin}/auth/vault-callback?cancelled=true`;
+    const returnUrl = body.returnUrl ? sanitizeCallbackUrl(body.returnUrl) : `${origin}/auth/vault-callback`;
+    const cancelUrl = body.cancelUrl ? sanitizeCallbackUrl(body.cancelUrl) : `${origin}/auth/vault-callback?cancelled=true`;
     const customerId = body.customerId || `cust_${Date.now().toString(36)}`;
 
     // 2. Create Real Vault v3 Setup Token on PayPal Sandbox

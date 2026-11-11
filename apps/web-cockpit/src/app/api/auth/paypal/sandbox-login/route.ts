@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolvePublicOrigin, sanitizeCallbackUrl } from '@/lib/origin';
 
 interface PayPalTokenResponse {
   access_token: string;
@@ -63,7 +64,9 @@ export async function POST(req: NextRequest) {
     // 2. Pre-create a real Vault setup session on PayPal Sandbox for this customer
     const cleanEmail = email.toLowerCase();
     const customerId = `cust_${Buffer.from(cleanEmail).toString('hex').slice(0, 16)}`;
-    const origin = req.nextUrl.origin || 'http://localhost:3000';
+    const origin = resolvePublicOrigin(req, body.origin);
+    const returnUrl = body.returnUrl ? sanitizeCallbackUrl(body.returnUrl) : `${origin}/auth/vault-callback`;
+    const cancelUrl = body.cancelUrl ? sanitizeCallbackUrl(body.cancelUrl) : `${origin}/auth/vault-callback?cancelled=true`;
 
     const setupTokenRes = await fetch('https://api-m.sandbox.paypal.com/v3/vault/setup-tokens', {
       method: 'POST',
@@ -77,8 +80,8 @@ export async function POST(req: NextRequest) {
           paypal: {
             usage_type: 'MERCHANT',
             experience_context: {
-              return_url: `${origin}/auth/vault-callback`,
-              cancel_url: `${origin}/auth/vault-callback?cancelled=true`,
+              return_url: returnUrl,
+              cancel_url: cancelUrl,
               shipping_preference: 'NO_SHIPPING',
             },
           },

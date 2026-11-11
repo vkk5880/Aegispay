@@ -18,6 +18,7 @@ import {
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth, UserProfile } from '@/context/AuthContext';
 import { webLogger as logger } from '@/lib/logger';
+import { getClientOrigin } from '@/lib/origin';
 
 export interface PayPalRealSandboxAuthModalProps {
   isOpen: boolean;
@@ -99,11 +100,15 @@ export function PayPalRealSandboxAuthModal({
     setStatusMessage('Connecting to PayPal Sandbox API & Minting Setup Token...');
 
     try {
+      const clientOrigin = getClientOrigin();
       const res = await fetch('/api/auth/paypal/create-vault-session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerId: user?.email ? `cust_${user.email.split('@')[0]}` : undefined,
+          origin: clientOrigin,
+          returnUrl: `${clientOrigin}/auth/vault-callback`,
+          cancelUrl: `${clientOrigin}/auth/vault-callback?cancelled=true`,
         }),
       });
 
@@ -176,12 +181,16 @@ export function PayPalRealSandboxAuthModal({
     setStatusMessage('Authenticating Sandbox Buyer Account...');
 
     try {
+      const clientOrigin = getClientOrigin();
       const res = await fetch('/api/auth/paypal/sandbox-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: emailInput,
           name: nameInput || undefined,
+          origin: clientOrigin,
+          returnUrl: `${clientOrigin}/auth/vault-callback`,
+          cancelUrl: `${clientOrigin}/auth/vault-callback?cancelled=true`,
         }),
       });
 
