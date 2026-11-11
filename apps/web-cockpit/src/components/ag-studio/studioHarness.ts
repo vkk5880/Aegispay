@@ -222,7 +222,7 @@ export async function executeStudioPrompt(
         return {
           success: true,
           commandExecuted: 'isolate_high_risk_disputes',
-          message: 'Filtered cockpit grid for High Abuse Risk (R >= 0.60, L < 0.25). 12 matching cases isolated.',
+          message: 'Filtered cockpit grid for High Abuse Risk (R >= 0.60, L < 0.25). High-risk cases isolated.',
           filters: [
             { field: 'abuse_risk_score_r', operator: 'gte', value: 0.6 },
             { field: 'liability_score_l', operator: 'lt', value: 0.25 },
@@ -250,7 +250,7 @@ export async function executeStudioPrompt(
         return {
           success: true,
           commandExecuted: 'highlight_unallocated_sla',
-          message: 'Filtered disputes for imminent SLA default (<24h remaining). 3 critical cases flagged.',
+          message: 'Filtered disputes for imminent SLA default (<24h remaining). Active SLA cases flagged.',
           filters: [{ field: 'sla_hours_remaining', operator: 'lte', value: 24 }],
         };
       } catch (err: any) {
@@ -275,7 +275,7 @@ export async function executeStudioPrompt(
         return {
           success: true,
           commandExecuted: 'calculate_net_clearing_margin',
-          message: 'Calculated Net Retained Margin column and updated summary footers ($14,834.12 retained).',
+          message: 'Calculated Net Retained Margin column and updated summary footers from live ledger.',
         };
       } catch (err: any) {
         logger.error('[studioHarness:executeStudioPrompt] Error executing calculate_net_clearing_margin command handler', {

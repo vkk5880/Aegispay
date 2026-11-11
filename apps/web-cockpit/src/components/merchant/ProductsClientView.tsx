@@ -36,17 +36,17 @@ export function ProductsClientView({ initialProducts }: ProductsClientViewProps)
       const res = await fetch(`${orchestratorUrl}/api/merchant/products`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.products) && data.products.length > 0) {
+        if (Array.isArray(data.products)) {
           const mapped: ProductRow[] = data.products.map((p: any, idx: number) => ({
             id: p.id || `PROD-${idx + 1}`,
             name: p.name || 'Unnamed Product',
             type: p.type || 'PHYSICAL',
             category: p.category || 'ELECTRONICS',
-            description: p.description || 'Verified PayPal Catalog Product',
+            description: p.description || '',
             created: p.create_time || new Date().toISOString(),
-            recent_bids_distribution: p.recent_bids_distribution || [5, 12, 18, 25, 30, 42, 55, 68, 80],
-            price: p.price_cents ? p.price_cents / 100 : 99.0,
-            allow_synthetic_intent: p.allow_synthetic_intent ?? true,
+            recent_bids_distribution: Array.isArray(p.recent_bids_distribution) ? p.recent_bids_distribution : [],
+            price: p.price_cents ? p.price_cents / 100 : (p.price ? parseFloat(p.price) : 0),
+            allow_synthetic_intent: p.allow_synthetic_intent ?? false,
           }));
           setProducts(mapped);
           logger.info(`[ProductsClientView] Updated with ${mapped.length} live products`);
@@ -73,9 +73,9 @@ export function ProductsClientView({ initialProducts }: ProductsClientViewProps)
       category: newProduct.category || 'ELECTRONICS',
       description: newProduct.description || 'Newly created catalog product',
       created: newProduct.create_time || new Date().toISOString(),
-      recent_bids_distribution: [10, 20, 35, 50, 65, 80, 95],
-      price: newProduct.price_cents ? newProduct.price_cents / 100 : 99.0,
-      allow_synthetic_intent: newProduct.allow_synthetic_intent ?? true,
+      recent_bids_distribution: Array.isArray(newProduct.recent_bids_distribution) ? newProduct.recent_bids_distribution : [],
+      price: newProduct.price_cents ? newProduct.price_cents / 100 : (newProduct.price ? parseFloat(newProduct.price) : 0),
+      allow_synthetic_intent: newProduct.allow_synthetic_intent ?? false,
     };
     setProducts((prev) => [formatted, ...prev]);
   };

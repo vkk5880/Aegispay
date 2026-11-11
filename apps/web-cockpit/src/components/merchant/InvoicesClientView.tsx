@@ -22,7 +22,7 @@ export function InvoicesClientView({ initialInvoices }: InvoicesClientViewProps)
       const res = await fetch(`${orchestratorUrl}/api/merchant/invoices`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.invoices) && data.invoices.length > 0) {
+        if (Array.isArray(data.invoices)) {
           setInvoices(data.invoices);
           logger.info(`[InvoicesClientView] Successfully loaded ${data.invoices.length} invoices`);
           return;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { AutonomyDialWidget } from '@/components/ag-studio/AutonomyDialWidget';
@@ -8,8 +8,18 @@ import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceCompara
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
 import { LiveStudioCanvas } from '@/components/ag-studio/LiveStudioCanvas';
 import { DashboardReports } from '@/components/merchant/DashboardReports';
-import { Store, Database, ArrowLeft, Bot, Sparkles } from 'lucide-react';
+import {
+  Store,
+  Database,
+  ArrowLeft,
+  CheckCircle2,
+  ShieldCheck,
+  UserCheck,
+  LogIn,
+  AlertCircle,
+} from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 import { webLogger as logger } from '@/lib/logger';
 
 const DisputeSlaScheduler = dynamic(
@@ -41,24 +51,46 @@ const DisputeSlaScheduler = dynamic(
 
 export default function MerchantCockpitPage() {
   const { showTechnicalDetails } = useUiMode();
+  const { user, isLoggedIn, openAuthModal } = useAuth();
+  const [disputes, setDisputes] = useState<any[]>([]);
+  const [isLoadingDisputes, setIsLoadingDisputes] = useState(true);
 
   useEffect(() => {
     logger.info('[MerchantCockpitPage] Mounted Merchant Cockpit page', {
       showTechnicalDetails,
+      isLoggedIn,
+      userEmail: user?.email,
       timestamp: new Date().toISOString(),
       viewport: typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : 'SSR',
     });
 
-    if (showTechnicalDetails) {
-      logger.debug('[MerchantCockpitPage] Operating in TECHNICAL mode: displaying AG Studio 3 harness & Bryntum scheduler details');
-    } else {
-      logger.debug('[MerchantCockpitPage] Operating in CONSUMER / SELLER mode: simplified dispute & resolution descriptions active');
+    async function fetchDisputes() {
+      setIsLoadingDisputes(true);
+      try {
+        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`);
+        if (res.ok) {
+          const data = await res.json();
+          setDisputes(Array.isArray(data.disputes) ? data.disputes : []);
+          logger.info(`[MerchantCockpitPage] Loaded ${data.disputes?.length || 0} live merchant disputes`);
+        }
+      } catch (err: any) {
+        logger.debug('[MerchantCockpitPage] Live disputes fetch notice:', err?.message);
+      } finally {
+        setIsLoadingDisputes(false);
+      }
     }
+
+    fetchDisputes();
 
     return () => {
       logger.info('[MerchantCockpitPage] Unmounting Merchant Cockpit page');
     };
-  }, [showTechnicalDetails]);
+  }, [showTechnicalDetails, isLoggedIn, user?.email]);
+
+  const activeDisputeWithEvidence = disputes.find(
+    (d) => d.buyer_image_url || d.evidence_image_url || (Array.isArray(d.images) && d.images.length > 0)
+  );
 
   return (
     <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full transition-colors">
@@ -103,6 +135,54 @@ export default function MerchantCockpitPage() {
         </div>
       </div>
 
+      {/* Linked User / Merchant Account Identity Banner */}
+      <div className="relative p-4 rounded-2xl bg-white/80 dark:bg-[#0b1324]/80 backdrop-blur-xl border border-slate-200/80 dark:border-white/10 shadow-md shadow-black/5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-xl ${isLoggedIn && user ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' : 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/30'}`}>
+            <UserCheck className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Connected Merchant Profile
+              </span>
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${isLoggedIn && user ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30' : 'bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300'}`}>
+                {isLoggedIn && user ? 'PayPal Account Active' : 'Sandbox Identity'}
+              </span>
+            </div>
+            <p className="text-sm font-black text-slate-900 dark:text-white">
+              {user?.name || 'PayPal Sandbox Merchant'}
+              <span className="text-xs font-normal text-slate-500 dark:text-slate-400 ml-2">
+                ({user?.email || 'sb-merchant@business.example.com'})
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5 self-end sm:self-auto">
+          {user?.budgetCapCents && user.budgetCapCents > 0 ? (
+            <span className="text-xs font-mono font-bold px-3 py-1.5 rounded-xl bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+              Vault Allowance: ${(user.budgetCapCents / 100).toFixed(2)}
+            </span>
+          ) : null}
+          {!isLoggedIn ? (
+            <button
+              type="button"
+              onClick={() => openAuthModal('login')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold transition-all shadow-md shadow-cyan-600/20"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              Connect PayPal Account
+            </button>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600 dark:text-emerald-400 px-3 py-1 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Live Account Linked
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* Merchant Reporting & APIMatic Overview */}
       <DashboardReports />
 
@@ -117,14 +197,33 @@ export default function MerchantCockpitPage() {
 
           {/* Vision Forensics Evidence */}
           <div className="bg-white dark:bg-[#0b1324] rounded-2xl shadow-sm dark:shadow-xl border border-slate-200 dark:border-slate-800 p-5">
-            <EvidenceComparatorWidget
-              channel3CleanedUrl="https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&q=80"
-              buyerReturnPhotoUrl="https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=400&q=80"
-              defectBoundingBox={{ ymin: 0.3, xmin: 0.4, ymax: 0.7, xmax: 0.8 }}
-              exifTamperFlag={true}
-              liabilityScoreL={0.15}
-              abuseRiskScoreR={0.82}
-            />
+            {activeDisputeWithEvidence ? (
+              <EvidenceComparatorWidget
+                channel3CleanedUrl={activeDisputeWithEvidence.catalog_cleaned_image_url || activeDisputeWithEvidence.channel3_cleaned_url || ''}
+                buyerReturnPhotoUrl={activeDisputeWithEvidence.buyer_image_url || activeDisputeWithEvidence.buyer_return_photo_url || ''}
+                defectBoundingBox={activeDisputeWithEvidence.defect_bounding_box}
+                exifTamperFlag={Boolean(activeDisputeWithEvidence.exif_tamper_flag)}
+                liabilityScoreL={activeDisputeWithEvidence.liability_score_l ?? 0.5}
+                abuseRiskScoreR={activeDisputeWithEvidence.abuse_risk_score_r ?? 0.5}
+              />
+            ) : (
+              <div className="p-8 flex flex-col items-center justify-center text-center space-y-3 min-h-[220px]">
+                <div className="p-3.5 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 shadow-xs">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+                    Vision Forensics Comparator Ready
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mt-1 leading-relaxed">
+                    No active return disputes awaiting visual defect verification. When a buyer submits a photo claim, Channel3 and Gemini 3.8 Flash Vision will automatically perform side-by-side defect inspection here.
+                  </p>
+                </div>
+                <span className="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  Live PayPal Ground-Truth Active
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -147,44 +246,49 @@ export default function MerchantCockpitPage() {
             </div>
 
             <div className="p-4 space-y-3.5">
-              <div className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs">
-                <div className="text-[11px] font-mono text-slate-500 font-semibold">
-                  {showTechnicalDetails ? 'Dispute ID: PP-D-1002' : 'Case: PP-D-1002'}
+              {isLoadingDisputes ? (
+                <div className="p-6 text-center text-xs text-slate-400 font-mono">
+                  Loading live disputes from PayPal...
                 </div>
-                <div className="font-bold text-xs text-rose-600 dark:text-rose-400">
-                  {showTechnicalDetails ? 'High Abuse Risk Detected (R=0.82)' : 'High Risk of Fraud Detected'}
-                </div>
-                <HateoasDisputeActionRenderer
-                  disputeId="PP-D-1002"
-                  hateoasAllowedActions={['provide-evidence']}
-                />
-              </div>
+              ) : disputes.length > 0 ? (
+                disputes.map((d, idx) => {
+                  const disputeId = d.dispute_id || d.id || `PP-D-${idx + 1}`;
+                  const allowedActions = Array.isArray(d.links)
+                    ? d.links.map((l: any) => l.rel).filter(Boolean)
+                    : ['provide-evidence', 'make-offer'];
+                  const amountStr = d.dispute_amount?.value
+                    ? `${d.dispute_amount.value} ${d.dispute_amount.currency_code || 'USD'}`
+                    : '';
 
-              <div className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs">
-                <div className="text-[11px] font-mono text-slate-500 font-semibold">
-                  {showTechnicalDetails ? 'Dispute ID: PP-D-1003' : 'Case: PP-D-1003'}
+                  return (
+                    <div
+                      key={disputeId}
+                      className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs"
+                    >
+                      <div className="text-[11px] font-mono text-slate-500 font-semibold flex items-center justify-between">
+                        <span>{showTechnicalDetails ? `Dispute ID: ${disputeId}` : `Case: ${disputeId}`}</span>
+                        {amountStr && <span className="text-slate-700 dark:text-slate-300 font-bold">{amountStr}</span>}
+                      </div>
+                      <div className="font-bold text-xs text-amber-600 dark:text-amber-400">
+                        {(d.reason || 'Customer Claim').replace(/_/g, ' ')}
+                      </div>
+                      <HateoasDisputeActionRenderer
+                        disputeId={disputeId}
+                        hateoasAllowedActions={allowedActions.length > 0 ? allowedActions : ['provide-evidence']}
+                        links={d.links}
+                      />
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="p-6 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center justify-center min-h-[160px] space-y-2">
+                  <CheckCircle2 className="w-7 h-7 text-emerald-500" />
+                  <p className="text-xs font-bold text-slate-900 dark:text-white">Zero Active Disputes</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
+                    All PayPal transactions are in good standing. No HATEOAS dispute actions pending seller resolution.
+                  </p>
                 </div>
-                <div className="font-bold text-xs text-amber-600 dark:text-amber-400">
-                  {showTechnicalDetails ? 'Cosmetic Defect Claim (L=0.45)' : 'Cosmetic Defect Claim'}
-                </div>
-                <HateoasDisputeActionRenderer
-                  disputeId="PP-D-1003"
-                  hateoasAllowedActions={['make-offer']}
-                />
-              </div>
-
-              <div className="bg-slate-50/80 dark:bg-[#080e1c]/80 border border-slate-200/80 dark:border-white/5 rounded-xl p-3.5 space-y-1.5 shadow-xs">
-                <div className="text-[11px] font-mono text-slate-500 font-semibold">
-                  {showTechnicalDetails ? 'Synthetic Intent Bid: SYN-B-999' : 'Price Match Offer: #999'}
-                </div>
-                <div className="font-bold text-xs text-emerald-600 dark:text-emerald-400">
-                  {showTechnicalDetails ? 'Vault Token Reserve Floor Matched' : 'Customer Price Match Target Met'}
-                </div>
-                <HateoasDisputeActionRenderer
-                  disputeId="SYN-B-999"
-                  hateoasAllowedActions={['accept-claim']}
-                />
-              </div>
+              )}
             </div>
           </div>
         </div>

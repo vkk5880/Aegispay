@@ -35,16 +35,16 @@ export function PlansClientView({ initialPlans }: PlansClientViewProps) {
       const res = await fetch(`${orchestratorUrl}/api/merchant/plans`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.plans) && data.plans.length > 0) {
+        if (Array.isArray(data.plans)) {
           const mapped: PlanRow[] = data.plans.map((p: any, idx: number) => {
             const cycle = p.billing_cycles?.[0];
-            const priceVal = parseFloat(cycle?.pricing_scheme?.fixed_price?.value || '29.00');
+            const priceVal = parseFloat(cycle?.pricing_scheme?.fixed_price?.value || '0.00');
             const intervalUnit = cycle?.frequency?.interval_unit || 'MONTH';
             const intervalCount = cycle?.frequency?.interval_count || 1;
             return {
               id: p.id || `PLAN-${idx + 1}`,
-              productId: p.product_id || 'PROD-1',
-              name: p.name || 'Pro Recurring Plan',
+              productId: p.product_id || '',
+              name: p.name || 'Untitled Plan',
               status: p.status || 'ACTIVE',
               price: priceVal,
               billedEvery: `${intervalCount} ${intervalUnit}`,
