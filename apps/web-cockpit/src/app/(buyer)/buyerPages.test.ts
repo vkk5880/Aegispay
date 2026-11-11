@@ -154,7 +154,6 @@ test('WatchlistContent renders price-drop items with auto-buy triggers and poten
   assert.ok(html.includes('Auto-Buy Now') || html.includes('Buy at Target Price'));
   assert.ok(html.includes('Potential Savings'));
 });
-});
 
 test('WatchlistContent renders empty state when zero items are watched', () => {
   const html = renderToStaticMarkup(React.createElement(WatchlistContent, { initialItems: [] }));
