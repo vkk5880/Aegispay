@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 import { ChatInputBar } from './ChatInputBar';
 import {
   AssistantRuntimeProvider,
@@ -108,6 +109,7 @@ export function ConversationalAgentChat({
   cartItemCount = 0,
   cartSubtotalCents = 0,
 }: ConversationalAgentChatProps) {
+  const { user } = useAuth();
   const { showTechnicalDetails } = useUiMode();
   const developerModeEnabled = devProp || showTechnicalDetails;
 
@@ -216,6 +218,8 @@ export function ConversationalAgentChat({
     developerModeEnabled,
     selectedModel,
     userApiKey,
+    allowedCategories: user?.allowedCategories,
+    allowedMerchants: user?.allowedMerchants,
     initialMessages: savedMessages,
     onTurnProductsReceived: (products) => {
       logger.info('[BuyerChat:TurnProducts] Grounded turn products bound to context', { count: products.length });

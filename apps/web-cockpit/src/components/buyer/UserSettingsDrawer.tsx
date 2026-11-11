@@ -27,10 +27,14 @@ import {
   Zap,
   AlertTriangle,
   Loader2,
+  Search,
+  Store,
+  Filter,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth, DEFAULT_ALLOWED_CATEGORIES, DEFAULT_ALLOWED_MERCHANTS } from '@/context/AuthContext';
+import { AVAILABLE_CATEGORIES } from './PayPalRealSandboxAuthModal';
 
 export interface CommerceModelUIOption {
   id: string;
@@ -105,6 +109,10 @@ export interface UserSettings {
 
   // Single-Merchant Exposure Cap
   singleMerchantExposureCapCents: number;
+
+  // Security Controls: Authorized Categories and Whitelisted Stores
+  allowedCategories?: string[];
+  allowedMerchants?: string[];
 }
 
 export const DEFAULT_USER_SETTINGS: UserSettings = {
@@ -119,6 +127,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   purchasingRule: 'ALWAYS_CONFIRM',
   autoBuyThresholdCents: 15000, // $150.00
   singleMerchantExposureCapCents: 35000, // $350.00
+  allowedCategories: DEFAULT_ALLOWED_CATEGORIES,
+  allowedMerchants: DEFAULT_ALLOWED_MERCHANTS,
 };
 
 interface UserSettingsDrawerProps {
@@ -143,6 +153,7 @@ export function UserSettingsDrawer({
     isAuthorized,
     loginWithPayPal,
     authorizePayment,
+    updateSpendSecuritySettings,
     revokePaymentAuthorization,
   } = useAuth();
   const [formData, setFormData] = useState<UserSettings>(initialSettings);
@@ -151,14 +162,51 @@ export function UserSettingsDrawer({
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationError, setVerificationError] = useState<string | null>(null);
 
+  // Security whitelist controls
+  const [whitelistMode, setWhitelistMode] = useState<boolean>(true);
+  const [merchantSearchQuery, setMerchantSearchQuery] = useState<string>('');
+  const [availableMerchants, setAvailableMerchants] = useState<any[]>([]);
+  const [isSearchingMerchants, setIsSearchingMerchants] = useState<boolean>(false);
+
   useEffect(() => {
+    const isAll = user?.allowedMerchants?.includes('*');
     setFormData({
       ...initialSettings,
       aiModel: initialSettings.aiModel || 'google/gemini-3.5-flash-lite',
       developerModeEnabled: initialSettings.developerModeEnabled || showTechnicalDetails,
+      allowedCategories: user?.allowedCategories || initialSettings.allowedCategories || DEFAULT_ALLOWED_CATEGORIES,
+      allowedMerchants: isAll ? DEFAULT_ALLOWED_MERCHANTS : (user?.allowedMerchants || initialSettings.allowedMerchants || DEFAULT_ALLOWED_MERCHANTS),
     });
+    setWhitelistMode(!isAll);
     setVerificationError(null);
-  }, [initialSettings, isOpen, showTechnicalDetails]);
+  }, [initialSettings, isOpen, showTechnicalDetails, user]);
+
+  // Fetch merchants for search
+  useEffect(() => {
+    if (!isOpen) return;
+    let isCancelled = false;
+    const fetchMerchants = async () => {
+      setIsSearchingMerchants(true);
+      try {
+        const q = merchantSearchQuery.trim();
+        const res = await fetch(`/api/buyer/merchants?query=${encodeURIComponent(q)}&limit=15`);
+        if (!res.ok) throw new Error('Failed to query merchants');
+        const data = await res.json();
+        if (!isCancelled && Array.isArray(data.merchants)) {
+          setAvailableMerchants(data.merchants);
+        }
+      } catch {
+      } finally {
+        if (!isCancelled) setIsSearchingMerchants(false);
+      }
+    };
+
+    const timer = setTimeout(fetchMerchants, 200);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isOpen, merchantSearchQuery]);
 
   if (!isOpen) return null;
 
@@ -222,7 +270,19 @@ export function UserSettingsDrawer({
     }
 
     // Key is verified (or platform default model was chosen): proceed with saving
-    onSave(formData);
+    const effectiveCats = formData.allowedCategories && formData.allowedCategories.length > 0
+      ? formData.allowedCategories
+      : DEFAULT_ALLOWED_CATEGORIES;
+    const effectiveMerchants = whitelistMode ? (formData.allowedMerchants || DEFAULT_ALLOWED_MERCHANTS) : ['*'];
+
+    const updatedFormData: UserSettings = {
+      ...formData,
+      allowedCategories: effectiveCats,
+      allowedMerchants: effectiveMerchants,
+    };
+
+    await updateSpendSecuritySettings(effectiveCats, effectiveMerchants);
+    onSave(updatedFormData);
     setShowTechnicalDetails(formData.developerModeEnabled);
     setSavedSuccess(true);
     setTimeout(() => {
@@ -645,6 +705,174 @@ export function UserSettingsDrawer({
                   <span>$50.00</span>
                   <span>Max: {formatCents(maxBudgetCents)}</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Section 4b: Authorized Categories & Merchant Whitelist */}
+            <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800/80">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Authorized Categories & Whitelist</span>
+                </label>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                  Policy Enforced
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Configure which product categories and merchant domains your autonomous shopping assistant is permitted to purchase from.
+              </p>
+
+              {/* Allowed Categories Chips */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300">Allowed Categories:</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          allowedCategories: AVAILABLE_CATEGORIES.map((c) => c.id),
+                        })
+                      }
+                      className="text-[11px] text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer"
+                    >
+                      All
+                    </button>
+                    <span className="text-slate-400">|</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormData({
+                          ...formData,
+                          allowedCategories: [],
+                        })
+                      }
+                      className="text-[11px] text-slate-400 hover:underline cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  {AVAILABLE_CATEGORIES.map((cat) => {
+                    const isSelected = (formData.allowedCategories || []).includes(cat.id);
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => {
+                          const current = formData.allowedCategories || [];
+                          const updated = isSelected
+                            ? current.filter((c) => c !== cat.id)
+                            : [...current, cat.id];
+                          setFormData({ ...formData, allowedCategories: updated });
+                        }}
+                        className={`p-2 rounded-xl border text-xs font-medium flex items-center gap-2 transition-all cursor-pointer text-left ${
+                          isSelected
+                            ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/40 text-indigo-900 dark:text-indigo-200 shadow-xs'
+                            : 'bg-slate-50/60 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                        }`}
+                      >
+                        <span className="text-sm shrink-0">{cat.icon}</span>
+                        <span className="truncate">{cat.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Allowed Merchants Whitelist */}
+              <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Allowed Stores Whitelist:</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setWhitelistMode((prev) => !prev)}
+                    className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer"
+                  >
+                    {whitelistMode ? 'Switch to All Stores' : 'Enable Whitelist Only'}
+                  </button>
+                </div>
+
+                {whitelistMode && (
+                  <div className="space-y-2 animate-fade-in">
+                    {/* Selected merchant chips */}
+                    <div className="flex flex-wrap gap-1 p-2 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 min-h-[38px] items-center">
+                      {(formData.allowedMerchants || []).length === 0 ? (
+                        <span className="text-[11px] text-rose-500 italic">No stores allowed. Please add a store.</span>
+                      ) : (
+                        (formData.allowedMerchants || []).map((dom) => (
+                          <span
+                            key={dom}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-mono bg-indigo-100/70 dark:bg-indigo-950/70 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
+                          >
+                            <span>{dom}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = (formData.allowedMerchants || []).filter((d) => d !== dom);
+                                setFormData({ ...formData, allowedMerchants: updated });
+                              }}
+                              className="hover:text-rose-500 cursor-pointer"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Search box for stores */}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                      <input
+                        type="text"
+                        value={merchantSearchQuery}
+                        onChange={(e) => setMerchantSearchQuery(e.target.value)}
+                        placeholder="Search stores from Channel3 (e.g. Best Buy, Amazon...)"
+                        className="w-full pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+
+                    {/* Available merchant options */}
+                    <div className="max-h-36 overflow-y-auto space-y-1">
+                      {availableMerchants.slice(0, 8).map((m) => {
+                        const isAllowed = (formData.allowedMerchants || []).includes(m.domain);
+                        return (
+                          <div
+                            key={m.domain}
+                            className="flex items-center justify-between p-1.5 rounded-lg bg-white/60 dark:bg-slate-900/40 border border-slate-200/60 dark:border-slate-800 text-[11px]"
+                          >
+                            <span className="font-medium text-slate-800 dark:text-slate-200 truncate">{m.name} ({m.domain})</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const current = formData.allowedMerchants || [];
+                                const updated = isAllowed
+                                  ? current.filter((d) => d !== m.domain)
+                                  : [...current, m.domain];
+                                setFormData({ ...formData, allowedMerchants: updated });
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-semibold cursor-pointer ${
+                                isAllowed
+                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                                  : 'bg-indigo-600 text-white'
+                              }`}
+                            >
+                              {isAllowed ? 'Remove' : '+ Add'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

@@ -142,6 +142,20 @@ export function UnifiedCartDrawer({
   const shippingSavedCents = activeCart.total_shipping_saved_cents;
   const netTotalCents = grossSubtotalCents - platformSubsidyCents + shippingFeeCents + estimatedTaxCents;
 
+  // Merchant whitelist validation
+  const allowedMerchants = auth.user?.allowedMerchants;
+  const isWhitelistActive = Boolean(allowedMerchants && allowedMerchants.length > 0 && !allowedMerchants.includes('*'));
+  const unauthorizedMerchants = isWhitelistActive
+    ? activeCart.assigned_merchants.filter((m) => {
+        const mDomain = m.merchant_domain.toLowerCase().replace(/^www\./, '');
+        return !allowedMerchants!.some((allowed) => {
+          const aDomain = allowed.trim().toLowerCase().replace(/^www\./, '');
+          return mDomain === aDomain || mDomain.includes(aDomain) || aDomain.includes(mDomain);
+        });
+      })
+    : [];
+  const hasUnauthorizedMerchants = unauthorizedMerchants.length > 0;
+
   logger.debug('[UnifiedCartDrawer:Render] Rendering knapsack settlement summary', {
     totalItemsCount,
     grossSubtotalCents,
@@ -235,10 +249,28 @@ export function UnifiedCartDrawer({
                 Shipment Groups & Delivery Windows
               </h4>
 
-              {activeCart.assigned_merchants.map((merchant, mIdx) => (
+              {hasUnauthorizedMerchants && (
+                <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs space-y-1 animate-fade-in font-medium">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <ShieldCheck className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>Store Whitelist Policy Restriction</span>
+                  </div>
+                  <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                    Cart contains items from stores not in your authorized whitelist ({unauthorizedMerchants.map(m => m.merchant_domain).join(', ')}). Remove unauthorized items or add them to your whitelist in Settings to checkout.
+                  </p>
+                </div>
+              )}
+
+              {activeCart.assigned_merchants.map((merchant, mIdx) => {
+                const isMerchantBlocked = unauthorizedMerchants.some(u => u.merchant_domain === merchant.merchant_domain);
+                return (
                 <div
                   key={merchant.merchant_domain}
-                  className="bg-slate-50 dark:bg-[#0b1426] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs"
+                  className={`border rounded-xl overflow-hidden shadow-xs transition-colors ${
+                    isMerchantBlocked
+                      ? 'bg-rose-50/30 dark:bg-rose-950/20 border-rose-300 dark:border-rose-900/60'
+                      : 'bg-slate-50 dark:bg-[#0b1426] border-slate-200 dark:border-slate-800'
+                  }`}
                 >
                   {/* Merchant Header Bar */}
                   <div className="p-3 bg-slate-100/70 dark:bg-[#070e1c] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-xs">
@@ -247,6 +279,11 @@ export function UnifiedCartDrawer({
                       <span className="font-bold text-slate-900 dark:text-white font-mono">
                         {merchant.merchant_domain}
                       </span>
+                      {isMerchantBlocked && (
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30">
+                          Unauthorized Store
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
@@ -330,7 +367,8 @@ export function UnifiedCartDrawer({
                     )}
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
 
@@ -415,9 +453,9 @@ export function UnifiedCartDrawer({
 
           <button
             type="button"
-            disabled={totalItemsCount === 0 || auth.isTrackingMode}
+            disabled={totalItemsCount === 0 || auth.isTrackingMode || hasUnauthorizedMerchants}
             onClick={() => {
-              if (auth.isTrackingMode) return;
+              if (auth.isTrackingMode || hasUnauthorizedMerchants) return;
               logger.info('[UnifiedCartDrawer:Checkout] Checkout initiated from cart drawer', {
                 netTotalCents,
                 totalItemsCount,
@@ -435,6 +473,11 @@ export function UnifiedCartDrawer({
               <>
                 <Lock className="w-4 h-4" />
                 <span>Checkout Disabled (Read-Only Tracking)</span>
+              </>
+            ) : hasUnauthorizedMerchants ? (
+              <>
+                <ShieldCheck className="w-4 h-4 text-rose-300" />
+                <span>Checkout Blocked (Store Whitelist Policy)</span>
               </>
             ) : (
               <>

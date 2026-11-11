@@ -25,6 +25,14 @@ export function CryptographicMandateSigner({
     'electronics',
     'peripherals',
   ]);
+  const [allowedMerchants, setAllowedMerchants] = useState<string[]>([
+    'bestbuy.com',
+    'audio-gear-direct.com',
+    'nordic-workspaces.io',
+    'amazon.com',
+    'apple.com',
+  ]);
+  const [newMerchantInput, setNewMerchantInput] = useState<string>('');
   const [validityMinutes, setValidityMinutes] = useState<number>(15);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [generatedMandate, setGeneratedMandate] = useState<SessionMandate | null>(null);
@@ -95,6 +103,7 @@ export function CryptographicMandateSigner({
         cumulative_spent_cents: 0,
         currency_code: 'USD',
         allowed_category_ids: allowedCategories,
+        allowed_merchant_domains: allowedMerchants,
         public_key_hex: publicKeyHex,
       };
 
@@ -145,10 +154,12 @@ export function CryptographicMandateSigner({
       totalBudgetCents,
       singleMerchantCapCents,
       validityMinutes,
+      allowedCategoriesCount: allowedCategories.length,
+      allowedMerchantsCount: allowedMerchants.length,
     });
     generateAndSignMandate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalBudgetCents, singleMerchantCapCents, validityMinutes]);
+  }, [totalBudgetCents, singleMerchantCapCents, validityMinutes, allowedCategories, allowedMerchants]);
 
   const copyMandateJson = () => {
     if (!generatedMandate) {
@@ -301,6 +312,67 @@ export function CryptographicMandateSigner({
                   <span>{cat.label}</span>
                 </label>
               ))}
+            </div>
+          </div>
+
+          {/* Allowed Merchants Boundaries */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 font-medium">
+              <span>Authorized Merchant Domains:</span>
+              <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
+                {allowedMerchants.length} Whitelisted
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1 p-2 rounded-lg bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800">
+              {allowedMerchants.map((domain) => (
+                <span
+                  key={domain}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30"
+                >
+                  <span>{domain}</span>
+                  <button
+                    type="button"
+                    onClick={() => setAllowedMerchants((prev) => prev.filter((d) => d !== domain))}
+                    className="hover:text-rose-500 cursor-pointer"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-1.5">
+              <input
+                type="text"
+                placeholder="Add store domain (e.g. target.com)"
+                value={newMerchantInput}
+                onChange={(e) => setNewMerchantInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newMerchantInput.trim()) {
+                    e.preventDefault();
+                    const clean = newMerchantInput.trim().toLowerCase().replace(/^https?:\/\//, '');
+                    if (!allowedMerchants.includes(clean)) {
+                      setAllowedMerchants([...allowedMerchants, clean]);
+                    }
+                    setNewMerchantInput('');
+                  }
+                }}
+                className="flex-1 px-2 py-1 text-xs rounded border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (newMerchantInput.trim()) {
+                    const clean = newMerchantInput.trim().toLowerCase().replace(/^https?:\/\//, '');
+                    if (!allowedMerchants.includes(clean)) {
+                      setAllowedMerchants([...allowedMerchants, clean]);
+                    }
+                    setNewMerchantInput('');
+                  }
+                }}
+                className="px-2.5 py-1 text-xs font-semibold rounded bg-cyan-600 text-white hover:bg-cyan-500 cursor-pointer"
+              >
+                + Add
+              </button>
             </div>
           </div>
 

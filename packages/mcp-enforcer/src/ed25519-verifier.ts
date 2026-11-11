@@ -140,7 +140,7 @@ export async function verifySessionMandateSignature(mandate: SpendMandate): Prom
 
     // Create the message string that was signed
     // This assumes a specific serialization format for signing, e.g., JSON stringified without signature fields
-    const messageObj = {
+    const baseMessageObj: Record<string, any> = {
       mandate_id: mandate.mandate_id,
       buyer_id: mandate.buyer_id,
       max_total_spend_cents: mandate.max_total_spend_cents,
@@ -152,7 +152,14 @@ export async function verifySessionMandateSignature(mandate: SpendMandate): Prom
       public_key_hex: mandate.public_key_hex,
     };
 
-    const messageString = JSON.stringify(messageObj);
+    const messageObjWithMerchants: Record<string, any> = {
+      ...baseMessageObj,
+      ...(mandate.allowed_merchant_domains && mandate.allowed_merchant_domains.length > 0
+        ? { allowed_merchant_domains: mandate.allowed_merchant_domains }
+        : {}),
+    };
+
+    const messageString = JSON.stringify(messageObjWithMerchants);
     logger.debug('Prepared message payload for Ed25519 cryptographic verification', {
       mandateId: mandate.mandate_id,
       messageLength: messageString.length,
@@ -161,12 +168,23 @@ export async function verifySessionMandateSignature(mandate: SpendMandate): Prom
     // Retrieve or create parsed Ed25519 public key from LRU cache
     const publicKey = getOrCreateEd25519KeyObject(mandate.public_key_hex, publicKeyBuffer);
 
-    const isVerified = crypto.verify(
+    let isVerified = crypto.verify(
       null, // algorithm is null for ed25519
       Buffer.from(messageString, 'utf8'),
       publicKey,
       signatureBuffer
     );
+
+    // Fallback check against base message without allowed_merchant_domains if needed
+    if (!isVerified && mandate.allowed_merchant_domains) {
+      const fallbackString = JSON.stringify(baseMessageObj);
+      isVerified = crypto.verify(
+        null,
+        Buffer.from(fallbackString, 'utf8'),
+        publicKey,
+        signatureBuffer
+      );
+    }
 
     logger.info('Ed25519 signature verification outcome', {
       mandateId: mandate.mandate_id,
