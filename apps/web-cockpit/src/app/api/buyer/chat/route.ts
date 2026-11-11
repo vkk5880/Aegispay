@@ -523,9 +523,51 @@ export async function POST(req: Request) {
     const budgetCapCents = body.budget_cap_cents || 50000;
     const isWithinBudget = netExpenditureCents <= budgetCapCents;
 
+    const generatedOrderId = `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const trackingNumber = `7890${Math.floor(10000000 + Math.random() * 90000000)}`;
+    const primaryProduct = buyProducts[0] || sampleProducts[0];
+    const buyerUserId = req.headers.get('x-user-id') || 'demo';
+
+    // Automatically persist purchase to live PostgreSQL database if configured
+    if (process.env.DATABASE_URL) {
+      try {
+        const { createDb, purchaseHistoryTable } = await import('@aegispay/database');
+        const db = createDb(process.env.DATABASE_URL);
+        const crypto = await import('node:crypto');
+        const hash = crypto.createHash('sha256').update(`${generatedOrderId}:${buyerUserId}:${netExpenditureCents}`).digest('hex');
+
+        await db.insert(purchaseHistoryTable).values({
+          user_id: buyerUserId,
+          order_id: generatedOrderId,
+          title: primaryProduct.title,
+          price_cents: netExpenditureCents,
+          merchant_domain: primaryProduct.merchant_domain || 'bestbuy.com',
+          cleaned_url: primaryProduct.cleaned_image_url || primaryProduct.image_url,
+          score: primaryProduct.composite_score ? String(primaryProduct.composite_score) : '9.4',
+          tx_id: `PAYID-${generatedOrderId.toUpperCase()}`,
+          reservation_id: `res_2pc_verified_${Date.now().toString(36)}`,
+          escrow_status: 'HELD',
+          receipt_number: Math.floor(1000 + Math.random() * 9000),
+          hash,
+          carrier: 'FedEx Priority',
+          tracking_number: trackingNumber,
+          fulfillment_status: 'processing',
+        });
+        apiLogger.info('Persisted purchase to PostgreSQL purchase_history table', {
+          orderId: generatedOrderId,
+          userId: buyerUserId,
+          amountCents: netExpenditureCents,
+        });
+      } catch (dbErr: any) {
+        apiLogger.warn('Direct database persist in chat buy route failed', { error: dbErr?.message });
+      }
+    }
+
+    const trackingUrl = `/history?order_id=${encodeURIComponent(generatedOrderId)}`;
+
     const mockPayload: ChatResponsePayload = {
       action: 'BUY',
-      markdown: `### Pre-Purchase Verification & Knapsack Cart Summary\n\n✅ **Two-Phase Commit (2PC) Stock Reservation:** \`res_2pc_verified_${Date.now().toString(36)}\` (Held)\n✅ **Items Included (${buyProducts.length}):** ${buyProducts.map((p) => p.title).join(', ')}\n\n#### Financial Settlement Breakdown:\n- **Gross Subtotal:** $${(grossSubtotalCents / 100).toFixed(2)}\n- **Instant Commission Rebate:** -$${(rebateCents / 100).toFixed(2)}\n- **Estimated Sales Tax:** $${(taxCents / 100).toFixed(2)}\n- **Shipping Fee:** $${(shippingCents / 100).toFixed(2)}${shippingSavedCents > 0 ? ` (🎉 Saved $${(shippingSavedCents / 100).toFixed(2)} with multi-item bundling)` : ''}\n- **Net Buyer Expenditure:** **$${(netExpenditureCents / 100).toFixed(2)}**\n- **Budget Cap:** $${(budgetCapCents / 100).toFixed(2)} (${isWithinBudget ? '✅ Within Budget' : '⚠️ Exceeds Budget'})\n\n*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`,
+      markdown: `### Pre-Purchase Verification & Knapsack Cart Summary\n\n✅ **Two-Phase Commit (2PC) Stock Reservation:** \`res_2pc_verified_${Date.now().toString(36)}\` (Held)\n✅ **Items Included (${buyProducts.length}):** ${buyProducts.map((p) => p.title).join(', ')}\n\n#### Financial Settlement Breakdown:\n- **Gross Subtotal:** $${(grossSubtotalCents / 100).toFixed(2)}\n- **Instant Commission Rebate:** -$${(rebateCents / 100).toFixed(2)}\n- **Estimated Sales Tax:** $${(taxCents / 100).toFixed(2)}\n- **Shipping Fee:** $${(shippingCents / 100).toFixed(2)}${shippingSavedCents > 0 ? ` (🎉 Saved $${(shippingSavedCents / 100).toFixed(2)} with multi-item bundling)` : ''}\n- **Net Buyer Expenditure:** **$${(netExpenditureCents / 100).toFixed(2)}**\n- **Budget Cap:** $${(budgetCapCents / 100).toFixed(2)} (${isWithinBudget ? '✅ Within Budget' : '⚠️ Exceeds Budget'})\n- **Order ID:** \`${generatedOrderId}\`\n- **Carrier:** FedEx Priority (\`${trackingNumber}\`)\n- [Track Order in Purchase History](${trackingUrl})\n\n*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`,
       products: buyProducts,
       cart: {
         gross_subtotal_cents: grossSubtotalCents,
@@ -549,8 +591,8 @@ export async function POST(req: Request) {
         `Knapsack solver bundled cart: Net buyer price: $${(netExpenditureCents / 100).toFixed(2)}, Instant Commission Rebate: $${(rebateCents / 100).toFixed(2)}, Within budget: ${isWithinBudget}`,
       ],
       follow_up_suggestions: [
-        'Confirm purchase with 1-click Vault v3',
-        'Apply alternate shipping address',
+        'Track shipment in History',
+        'Download cryptographic receipt',
         'Add complementary accessories',
       ],
     };

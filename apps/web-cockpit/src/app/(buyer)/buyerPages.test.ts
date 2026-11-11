@@ -109,17 +109,47 @@ test('ShareContent renders empty state when comparison data is unavailable', () 
   assert.ok(html.includes('Search &amp; Compare Products') || html.includes('Search & Compare Products'));
 });
 
-test('WatchlistPage renders price-drop watchlist with auto-buy triggers and add modal', () => {
+test('WatchlistPage renders price-drop watchlist headers and clean empty state when no items are watched', () => {
   const html = renderToStaticMarkup(React.createElement(WatchlistPage));
 
   assert.ok(html.includes('Price-Drop Watchlist'));
   assert.ok(html.includes('Autonomous Price-Drop Watchlist &amp; 72h Escrow Auto-Buy') || html.includes('Autonomous Price-Drop Watchlist & 72h Escrow Auto-Buy'));
+  assert.ok(html.includes('Your Watchlist is Empty'));
+  assert.ok(html.includes('Add First Item'));
+  assert.ok(html.includes('Trigger Price Check'));
+  assert.ok(html.includes('Add Item'));
+});
+
+test('WatchlistContent renders price-drop watchlist with auto-buy triggers when items exist', () => {
+  const items = [
+    {
+      id: 'wch_test_01',
+      user_id: 'user_alice',
+      title: 'Sony WH-1000XM5 Wireless Headphones (Midnight Silver)',
+      current_price_cents: 34800,
+      target_price_cents: 32000,
+      source: 'bestbuy.com',
+      added_at: '2026-11-06T10:00:00.000Z',
+      triggered: false,
+    },
+    {
+      id: 'wch_test_02',
+      user_id: 'user_alice',
+      title: 'Apple AirPods Pro 2 with USB-C Case',
+      current_price_cents: 19900,
+      target_price_cents: 18900,
+      source: 'target.com',
+      added_at: '2026-11-05T10:00:00.000Z',
+      triggered: true,
+    },
+  ];
+
+  const html = renderToStaticMarkup(React.createElement(WatchlistContent, { initialItems: items }));
+
   assert.ok(html.includes('Sony WH-1000XM5 Wireless Headphones (Midnight Silver)'));
   assert.ok(html.includes('Apple AirPods Pro 2 with USB-C Case'));
   assert.ok(html.includes('Target Price Drop Triggered!'));
   assert.ok(html.includes('Auto-Buy Now'));
-  assert.ok(html.includes('Trigger Price Check'));
-  assert.ok(html.includes('Add Item'));
 });
 
 test('WatchlistContent renders empty state when zero items are watched', () => {

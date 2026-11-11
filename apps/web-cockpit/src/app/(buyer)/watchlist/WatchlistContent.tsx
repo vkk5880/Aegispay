@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useMounted } from '@/hooks/useMounted';
 import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 
 export interface WatchlistItem {
   id: string;
@@ -35,60 +36,16 @@ export interface WatchlistItem {
   triggered: boolean;
 }
 
-const STATIC_WATCHLIST_TIMESTAMP_1 = '2026-11-06T10:00:00.000Z';
-const STATIC_WATCHLIST_TIMESTAMP_2 = '2026-11-05T10:00:00.000Z';
-const STATIC_WATCHLIST_TIMESTAMP_3 = '2026-11-04T10:00:00.000Z';
-const STATIC_CHECKED_TIMESTAMP = '2026-11-07T08:00:00.000Z';
-
-const MOCK_WATCHLIST_ITEMS: WatchlistItem[] = [
-  {
-    id: 'wch_1730810400_a1',
-    user_id: 'demo',
-    title: 'Sony WH-1000XM5 Wireless Headphones (Midnight Silver)',
-    current_price_cents: 34800,
-    target_price_cents: 32000,
-    source: 'bestbuy.com',
-    link: 'https://bestbuy.com',
-    query: 'Sony WH-1000XM5 under 320',
-    added_at: STATIC_WATCHLIST_TIMESTAMP_1,
-    last_checked: STATIC_CHECKED_TIMESTAMP,
-    triggered: false,
-  },
-  {
-    id: 'wch_1730810400_b2',
-    user_id: 'demo',
-    title: 'Apple AirPods Pro 2 with USB-C Case',
-    current_price_cents: 19900,
-    target_price_cents: 18900,
-    source: 'target.com',
-    link: 'https://target.com',
-    query: 'AirPods Pro 2 under 189',
-    added_at: STATIC_WATCHLIST_TIMESTAMP_2,
-    last_checked: STATIC_CHECKED_TIMESTAMP,
-    triggered: true,
-  },
-  {
-    id: 'wch_1730810400_c3',
-    user_id: 'demo',
-    title: 'Keychron Q1 Pro Wireless Custom Mechanical Keyboard',
-    current_price_cents: 21000,
-    target_price_cents: 18000,
-    source: 'keychron.com',
-    link: 'https://keychron.com',
-    query: 'Keychron Q1 Pro',
-    added_at: STATIC_WATCHLIST_TIMESTAMP_3,
-    last_checked: STATIC_CHECKED_TIMESTAMP,
-    triggered: false,
-  },
-];
-
 export function WatchlistContent({
-  initialItems = MOCK_WATCHLIST_ITEMS,
+  initialItems = [],
 }: {
   initialItems?: WatchlistItem[];
 }) {
   const mounted = useMounted();
   const { showTechnicalDetails } = useUiMode();
+  const { user } = useAuth();
+  const effectiveUserId = user?.email || (user as any)?.id || 'demo';
+
   const [items, setItems] = useState<WatchlistItem[]>(initialItems);
   const [loading, setLoading] = useState<boolean>(true);
   const [isChecking, setIsChecking] = useState<boolean>(false);
@@ -108,30 +65,36 @@ export function WatchlistContent({
 
   useEffect(() => {
     async function loadWatchlist() {
+      setLoading(true);
       try {
-        const res = await fetch('/api/buyer/watchlist?user_id=demo');
+        const res = await fetch(`/api/buyer/watchlist?user_id=${encodeURIComponent(effectiveUserId)}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.watchlist && Array.isArray(data.watchlist) && data.watchlist.length > 0) {
+          if (data.watchlist && Array.isArray(data.watchlist)) {
             setItems(data.watchlist);
+          } else {
+            setItems([]);
           }
+        } else {
+          setItems([]);
         }
       } catch (err) {
-        console.warn('Backend watchlist unreachable, using cached mock data.', err);
+        console.warn('Backend watchlist unreachable or empty.', err);
+        setItems([]);
       } finally {
         setLoading(false);
       }
     }
 
     loadWatchlist();
-  }, []);
+  }, [effectiveUserId]);
 
   const handleRemove = async (id: string, title: string) => {
     try {
       await fetch('/api/buyer/watchlist', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'demo', item_id: id }),
+        body: JSON.stringify({ user_id: effectiveUserId, item_id: id }),
       });
     } catch {
       // Local fallback
@@ -175,7 +138,7 @@ export function WatchlistContent({
     const nowIso = new Date().toISOString();
     const newItem: WatchlistItem = {
       id: `wch_${Date.now()}`,
-      user_id: 'demo',
+      user_id: effectiveUserId,
       title: newTitle,
       current_price_cents: currCents > 0 ? currCents : targCents * 1.15,
       target_price_cents: targCents,
@@ -196,7 +159,7 @@ export function WatchlistContent({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        user_id: 'demo',
+        user_id: effectiveUserId,
         title: newItem.title,
         current_price_cents: newItem.current_price_cents,
         target_price_cents: newItem.target_price_cents,
@@ -240,6 +203,12 @@ export function WatchlistContent({
               ? 'Agents continuously poll Channel3 & merchant catalogs. Auto-capture fires instantly when your target is reached.'
               : 'Track items you love. We monitor store prices 24/7 and alert you the second prices drop.'}
           </p>
+          {user?.email && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-1 text-xs font-mono font-medium text-emerald-800 dark:text-emerald-300 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Connected Account: <strong>{user.email}</strong></span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
