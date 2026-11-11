@@ -376,32 +376,30 @@ export default function BuyerPortalPage() {
           />
         </section>
 
-        {/* Spending Limits & Protection Drawer (Collapsible) */}
-        <div className="pt-2">
-          <details className="group border border-slate-200 dark:border-slate-800 rounded-2xl bg-white/70 dark:bg-[#070e1c]/70 p-4 transition-colors">
-            <summary className="cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between list-none">
-              <span className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                <span>
-                  {showTechnicalDetails
-                    ? '▾ Inspect Cryptographic Proofs & Hardware Spend Signer (Ed25519) — For Auditors'
-                    : '▾ Spending Limit & Security Settings'}
+        {/* Spending Limits & Cryptographic Hardware Signer (Visible only when Dev Mode is ON) */}
+        {showTechnicalDetails && (
+          <div className="pt-2">
+            <details className="group border border-slate-200 dark:border-slate-800 rounded-2xl bg-white/70 dark:bg-[#070e1c]/70 p-4 transition-colors">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between list-none">
+                <span className="flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                  <span>
+                    ▾ Inspect Cryptographic Proofs & Hardware Spend Signer (Ed25519) — For Auditors
+                  </span>
                 </span>
-              </span>
-              <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
-                {showTechnicalDetails
-                  ? (activeMandate?.mandate_id || 'Active Hardware Key')
-                  : 'Protected by PayPal'}
-              </span>
-            </summary>
-            <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
-              <CryptographicMandateSigner
-                onMandateGenerated={handleMandateGenerated}
-                externalBudgetCents={externalBudgetCents}
-              />
-            </div>
-          </details>
-        </div>
+                <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
+                  {activeMandate?.mandate_id || 'Active Hardware Key'}
+                </span>
+              </summary>
+              <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
+                <CryptographicMandateSigner
+                  onMandateGenerated={handleMandateGenerated}
+                  externalBudgetCents={externalBudgetCents}
+                />
+              </div>
+            </details>
+          </div>
+        )}
       </main>
 
       {/* User Settings Drawer */}

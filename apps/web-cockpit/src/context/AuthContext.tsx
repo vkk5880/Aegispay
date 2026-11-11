@@ -67,13 +67,26 @@ const defaultAuthContext: AuthContextType = {
 const AuthContext = createContext<AuthContextType>(defaultAuthContext);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { isProduction, isDevEnvironment } = useUiMode();
-  const canToggleTestUser = !isProduction && isDevEnvironment;
+  const { isProduction, isDevEnvironment, showTechnicalDetails } = useUiMode();
+  const canToggleTestUser = !isProduction && isDevEnvironment && showTechnicalDetails;
 
   const [isTestUserMode, setIsTestUserModeState] = useState<boolean>(false);
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
+
+  // When Dev Mode is OFF, revert test user mode to behave cleanly like production
+  useEffect(() => {
+    if (!showTechnicalDetails && isTestUserMode) {
+      logger.info('[AuthContext] Dev Mode is OFF: Disabling test user mode to match production behavior');
+      setIsTestUserModeState(false);
+      setUser(null);
+      try {
+        localStorage.removeItem('aegispay_test_user_enabled');
+        localStorage.removeItem('aegispay_user_session');
+      } catch {}
+    }
+  }, [showTechnicalDetails, isTestUserMode]);
 
   // Initialize from localStorage or default state
   useEffect(() => {

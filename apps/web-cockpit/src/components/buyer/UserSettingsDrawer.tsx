@@ -523,7 +523,9 @@ export function UserSettingsDrawer({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Guarded by Redis Lua script: prevents an agent from allocating more than this ceiling to any single vendor domain.
+                {showTechnicalDetails
+                  ? 'Guarded by Redis Lua script: prevents an agent from allocating more than this ceiling to any single vendor domain.'
+                  : 'Safety protection: prevents an agent from spending more than this maximum with any single store.'}
               </p>
 
               <div className="space-y-1">
