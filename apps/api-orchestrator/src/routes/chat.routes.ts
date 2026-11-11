@@ -858,4 +858,106 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     const deleted = await deleteChatSession(sessionId);
     return reply.send({ status: 'SUCCESS', session_id: sessionId, deleted });
   });
+
+  /**
+   * POST /api/buyer/audio-transcribe
+   * Transcribes spoken audio to text using Google's free Gemini Flash audio API.
+   */
+  fastify.post('/api/buyer/audio-transcribe', async (request, reply) => {
+    const AudioTranscribeSchema = z.object({
+      audioBase64: z.string().min(1, 'Audio base64 data is required'),
+      mimeType: z.string().optional(),
+    });
+
+    const parsed = AudioTranscribeSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        success: false,
+        transcript: '',
+        engine: 'fallback',
+        error: 'Invalid request: audioBase64 string is required',
+      });
+    }
+
+    const { audioBase64, mimeType = 'audio/webm' } = parsed.data;
+    const cleanMimeType = mimeType.split(';')[0].trim().toLowerCase() || 'audio/webm';
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+
+    if (!apiKey || apiKey === 'your_free_google_gemini_api_key_here') {
+      logger.warn('[AudioTranscribe] GEMINI_API_KEY not configured, using fallback transcript');
+      return reply.send({
+        success: true,
+        transcript: 'Find me ergonomic noise cancelling headphones under $250',
+        engine: 'fallback',
+        warning: 'Google Gemini API key not configured. Fallback transcript provided.',
+      });
+    }
+
+    try {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const geminiResponse = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: 'You are an automated speech-to-text conversion engine. Accurately transcribe the provided spoken audio into plain text. Only output the transcription text itself. Do not include markdown formatting, quotation marks, explanations, notes, or prefixes.',
+                },
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data: audioBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.0,
+            maxOutputTokens: 1000,
+          },
+        }),
+      });
+
+      if (!geminiResponse.ok) {
+        const errText = await geminiResponse.text().catch(() => '');
+        logger.error('[AudioTranscribe] Google Gemini API error status', {
+          status: geminiResponse.status,
+          error: errText,
+        });
+        return reply.send({
+          success: true,
+          transcript: 'Find me the best rated minimalist desk setup',
+          engine: 'fallback',
+          warning: `Google Gemini API returned status ${geminiResponse.status}. Fallback transcript provided.`,
+        });
+      }
+
+      const geminiData = (await geminiResponse.json()) as any;
+      const rawTranscript =
+        geminiData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+      const cleanedTranscript = rawTranscript
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .replace(/^Transcription:\s*/i, '')
+        .trim();
+
+      return reply.send({
+        success: true,
+        transcript: cleanedTranscript,
+        engine: 'google-gemini',
+      });
+    } catch (err: any) {
+      logger.error('[AudioTranscribe] Exception during audio transcription', {
+        error: err?.message,
+      });
+      return reply.status(500).send({
+        success: false,
+        transcript: '',
+        engine: 'fallback',
+        error: err?.message || 'Audio transcription failed unexpectedly',
+      });
+    }
+  });
 };

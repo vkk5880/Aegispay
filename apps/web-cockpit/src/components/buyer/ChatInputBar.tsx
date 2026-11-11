@@ -5,6 +5,7 @@ import type { ProductCardData } from '@aegispay/shared-types';
 import { Send, Scale, ShoppingBag, Sparkles, X, Tag, LogIn, CreditCard, User } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useAuth } from '@/context/AuthContext';
+import { AudioPromptButton } from './AudioPromptButton';
 
 export interface ChatInputBarProps {
   inputMessage: string;
@@ -201,16 +202,27 @@ export function ChatInputBar({
             onChange={(e) => onInputChange(e.target.value)}
             placeholder={placeholder || defaultPlaceholder}
             disabled={isLoading}
-            className="w-full pl-4 pr-24 py-3 bg-white dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans"
+            className="w-full pl-4 pr-32 py-3 bg-white dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans"
           />
-          <button
-            type="submit"
-            disabled={isLoading || (!inputMessage.trim() && selectedProducts.length === 0)}
-            className="absolute right-1.5 px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
-          >
-            <span>Send</span>
-            <Send className="w-3.5 h-3.5" />
-          </button>
+          <div className="absolute right-1.5 flex items-center gap-1">
+            <AudioPromptButton
+              onTranscript={(transcript) => {
+                const updated = inputMessage.trim()
+                  ? `${inputMessage.trim()} ${transcript}`
+                  : transcript;
+                onInputChange(updated);
+              }}
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              disabled={isLoading || (!inputMessage.trim() && selectedProducts.length === 0)}
+              className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+            >
+              <span>Send</span>
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
     </form>
