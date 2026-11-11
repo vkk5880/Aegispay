@@ -4,6 +4,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "start:both": "PORT=4000 node apps/api-orchestrator/dist/index.js & pnpm --filter @aegispay/web-cockpit start",
     "lint": "turbo run lint",
     "test": "turbo run test"
   },
