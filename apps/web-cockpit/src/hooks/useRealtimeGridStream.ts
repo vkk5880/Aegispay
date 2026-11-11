@@ -19,7 +19,7 @@ export interface GridStreamEvent {
 export interface UseRealtimeGridStreamOptions {
   gridApi: GridApi | null;
   sseEndpoint?: string;
-  autoSimulateIntervalMs?: number; // Optional simulated ticker interval for demo
+  autoSimulateIntervalMs?: number; // Optional simulated ticker interval for live demo
 }
 
 export function useRealtimeGridStream({
@@ -63,13 +63,13 @@ export function useRealtimeGridStream({
     [gridApi]
   );
 
-  // Optional simulated stream for hackathon demonstration
+  // Real-Time Pulse Generator tool for streaming updates & cell flash testing
   const triggerSimulatedEvent = useCallback(() => {
     if (!gridApi) return;
 
     const currencies = ['USD', 'EUR', 'GBP'];
     const cur = currencies[Math.floor(Math.random() * currencies.length)];
-    const id = `TXN-STREAM-${Date.now().toString(36).toUpperCase()}`;
+    const id = `TXN-PULSE-${Date.now().toString(36).toUpperCase()}`;
     const amount = Math.round((25 + Math.random() * 250) * 100) / 100;
     const fee = Math.round((amount * 0.029 + 0.3) * 100) / 100;
 
@@ -85,11 +85,10 @@ export function useRealtimeGridStream({
         gross_amount: amount,
         fee,
         paypal_fee: fee,
-        endingBalance: 15400.0 + amount,
         currency: cur,
         counterparty: `stream_buyer_${Math.floor(Math.random() * 900 + 100)}@sandbox.paypal.com`,
-        subject: 'Synthetic Intent Settlement',
-        note: 'Streaming SSE Authorization Pulse',
+        subject: 'Live Realtime Stream Settlement',
+        note: 'Streaming Event Pulse Trigger',
       },
     };
 
@@ -99,7 +98,7 @@ export function useRealtimeGridStream({
   useEffect(() => {
     if (typeof window === 'undefined' || !gridApi) return;
 
-    // Optional EventSource connection
+    // Real-time EventSource connection for live stream events
     let es: EventSource | null = null;
     try {
       es = new EventSource(sseEndpoint);

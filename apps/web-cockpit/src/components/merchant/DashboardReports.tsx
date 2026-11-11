@@ -37,11 +37,11 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
 
   useEffect(() => {
     logger.info('[DashboardReports] Rendered DashboardReports with metrics', {
-      totalProducts: metrics.totalProducts ?? 3,
-      activePlans: metrics.activePlans ?? 1,
-      openInvoices: metrics.openInvoices ?? 1,
-      usdBalance: metrics.usdBalance ?? '$14,800.00',
-      recentTxCount: metrics.recentTxCount ?? 24,
+      totalProducts: metrics.totalProducts ?? 0,
+      activePlans: metrics.activePlans ?? 0,
+      openInvoices: metrics.openInvoices ?? 0,
+      usdBalance: metrics.usdBalance ?? '$0.00',
+      recentTxCount: metrics.recentTxCount ?? 0,
       showTechnicalDetails,
     });
   }, [metrics, showTechnicalDetails]);
@@ -49,9 +49,9 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
   const cards = [
     {
       title: 'Catalog Products',
-      count: metrics.totalProducts ?? 2,
+      count: metrics.totalProducts ?? 0,
       label: 'Active SKUs in Catalog',
-      trend: '+12% this week',
+      trend: 'PayPal Live Catalog',
       badge: 'Channel3 Synced',
       href: '/merchant/products',
       icon: Package,
@@ -60,9 +60,9 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
     },
     {
       title: 'Subscription Plans',
-      count: metrics.activePlans ?? 1,
+      count: metrics.activePlans ?? 0,
       label: 'Recurring Billing Plans',
-      trend: '100% active',
+      trend: 'PayPal Subscriptions',
       badge: 'Auto-Renew',
       href: '/merchant/plans',
       icon: Repeat,
@@ -71,9 +71,9 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
     },
     {
       title: 'Commercial Invoices',
-      count: metrics.openInvoices ?? 1,
+      count: metrics.openInvoices ?? 0,
       label: 'Invoicing & Settlements',
-      trend: '0 overdue',
+      trend: 'Invoicing API v2',
       badge: 'Net 30',
       href: '/merchant/invoices',
       icon: FileText,
@@ -82,9 +82,9 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
     },
     {
       title: 'Held Balances',
-      count: metrics.usdBalance ?? '$14,800.00',
+      count: metrics.usdBalance ?? '$0.00',
       label: 'Available Merchant Reserve',
-      trend: 'Settled instant',
+      trend: 'Reporting API',
       badge: 'Vault Protected',
       href: '/merchant/balances',
       icon: Wallet,
@@ -93,9 +93,9 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
     },
     {
       title: 'Transaction Stream',
-      count: metrics.recentTxCount ?? 1,
+      count: metrics.recentTxCount ?? 0,
       label: 'Last 31-Day Ledger Entries',
-      trend: 'Sub-10ms query',
+      trend: 'PayPal Ledger',
       badge: 'DuckDB-WASM',
       href: '/merchant/transactions',
       icon: ArrowLeftRight,

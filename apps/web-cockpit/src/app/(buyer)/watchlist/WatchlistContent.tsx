@@ -38,7 +38,7 @@ export function WatchlistContent({
   const mounted = useMounted();
   const { showTechnicalDetails } = useUiMode();
   const { user } = useAuth();
-  const activeUserId = user?.email || user?.name || 'sb-buyer@personal.example.com';
+  const activeUserId = user?.email || (user as any)?.id || user?.name || 'sb-buyer@personal.example.com';
 
   const [items, setItems] = useState<WatchlistItem[]>(initialItems);
   const [loading, setLoading] = useState<boolean>(false);
@@ -68,9 +68,12 @@ export function WatchlistContent({
           if (isMounted) {
             setItems(Array.isArray(data.watchlist) ? data.watchlist : []);
           }
+        } else {
+          if (isMounted) setItems([]);
         }
       } catch (err) {
         console.warn('Backend watchlist fetch error:', err);
+        if (isMounted) setItems([]);
       } finally {
         if (isMounted) {
           setLoading(false);
@@ -239,6 +242,12 @@ export function WatchlistContent({
               ? 'Agents continuously poll Channel3 & merchant catalogs. Auto-capture fires instantly when your target is reached.'
               : 'Track items you love. We monitor store prices 24/7 and alert you the second prices drop.'}
           </p>
+          {user?.email && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-1 text-xs font-mono font-medium text-emerald-800 dark:text-emerald-300 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Connected Account: <strong>{user.email}</strong></span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

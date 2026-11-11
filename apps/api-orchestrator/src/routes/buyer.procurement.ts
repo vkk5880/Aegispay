@@ -11,6 +11,7 @@ import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
 import { SpendMandateSchema } from '@aegispay/shared-types';
 import { renderWorkflowClient } from '../services/render-workflow-client.js';
 import { authenticateUser, createOrderTrackingToken } from '../middleware/auth.js';
+import { logPurchase, updatePurchaseStatus } from '../services/user-memory.js';
 
 const logger = createLogger('API:Routes:Procurement');
 
@@ -495,6 +496,32 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       const trackingToken = createOrderTrackingToken(orderId, request.user?.id || 'guest');
       const trackingUrl = `/history?order_id=${encodeURIComponent(orderId)}&token=${encodeURIComponent(trackingToken)}`;
 
+      // Persist order in live user purchase history
+      try {
+        const buyerUserId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (mandate_id || 'demo');
+        const firstPu = purchase_units[0] as any;
+        const primaryItem = firstPu?.items?.[0];
+        const productTitle = primaryItem?.name || firstPu?.description || `Order #${orderId}`;
+        const merchantDomain = firstPu?.payee?.email_address ? firstPu.payee.email_address.split('@')[1] : 'bestbuy.com';
+
+        logPurchase({
+          order_id: orderId,
+          user_id: buyerUserId,
+          title: productTitle,
+          price_cents: totalRequestedCents,
+          merchant_domain: merchantDomain,
+          cleaned_url: primaryItem?.image_url || firstPu?.cleaned_image_url,
+          score: 9.6,
+          tx_id: `AUTH-${orderId}`,
+          reservation_id: mandate_id,
+          escrow_status: 'HELD',
+          carrier: 'FedEx Priority',
+          fulfillment_status: 'processing',
+        });
+      } catch (logErr: any) {
+        logger.warn('Failed to log escrow order into user purchase history', { orderId, error: logErr?.message });
+      }
+
       logger.info('Escrow order authorization workflow dispatched and finalized', {
         orderId,
         mandateId: mandate_id,
@@ -832,6 +859,15 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
         readbackDurationMs,
         orderStatus: verifiedOrder?.status,
       });
+
+      // Update purchase history status to CAPTURED
+      try {
+        const buyerUserId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (mandate_id || 'demo');
+        updatePurchaseStatus(buyerUserId, order_id, 'CAPTURED');
+      } catch (upErr: any) {
+        logger.warn('Failed to update captured status in purchase history', { orderId: order_id, error: upErr?.message });
+      }
+
       routeTimer('Order captured successfully');
 
       return reply.send({

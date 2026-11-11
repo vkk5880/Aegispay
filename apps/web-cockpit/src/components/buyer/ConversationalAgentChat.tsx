@@ -393,17 +393,23 @@ export function ConversationalAgentChat({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                      {showTechnicalDetails ? 'AegisPay Autonomous Concierge' : 'AegisPay Shopping Assistant'}
+                    <h3 className="font-bold text-sm sm:text-base text-slate-900 dark:text-white tracking-tight">
+                      AegisPay
                     </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-[10px] font-mono border border-cyan-500/30">
-                      Mastra SSE
-                    </span>
+                    {showTechnicalDetails && (
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 text-[10px] font-mono border border-cyan-500/30">
+                        Mastra SSE
+                      </span>
+                    )}
                   </div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono flex items-center gap-2">
-                    <span>Model: {selectedModel.split('/').pop()}</span>
-                    <span>•</span>
-                    <span>Cap: {formatCents(budgetCapCents)}</span>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5">
+                    <span>your ai shopping assistant</span>
+                    {showTechnicalDetails && (
+                      <>
+                        <span>•</span>
+                        <span className="font-mono text-[10px]">Cap: {formatCents(budgetCapCents)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>

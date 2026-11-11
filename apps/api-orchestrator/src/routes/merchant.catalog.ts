@@ -418,37 +418,61 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   /**
+   * GET /api/merchant/disputes
+   * Fetches real-time disputes from PayPal Disputes v1 API.
+   */
+  fastify.get('/api/merchant/disputes', async (request, reply) => {
+    logger.debug('Fetching live merchant disputes from PayPal Disputes API');
+    try {
+      const disputes = await defaultPayPalClient.listDisputes({ pageSize: 50 });
+      return reply.send({ disputes: Array.isArray(disputes) ? disputes : [] });
+    } catch (err: any) {
+      logger.error('Failed to list disputes from PayPal', { error: err?.message });
+      return reply.send({ disputes: [] });
+    }
+  });
+
+  /**
    * GET /api/merchant/overview-metrics
    * Aggregates real-time metrics for DashboardReports overview cards.
    */
   fastify.get('/api/merchant/overview-metrics', async (request, reply) => {
     try {
-      const [products, plans, balances, disputes] = await Promise.all([
-        defaultPayPalClient.listProducts(10).catch(() => []),
-        defaultPayPalClient.listPlans(10).catch(() => []),
+      const [products, plans, balances, disputes, invoices, transactions] = await Promise.all([
+        defaultPayPalClient.listProducts(50).catch(() => []),
+        defaultPayPalClient.listPlans(50).catch(() => []),
         defaultPayPalClient.getBalances().catch(() => ({ balances: [], total_balance_usd: 0 })),
-        defaultPayPalClient.listDisputes({ pageSize: 10 }).catch(() => []),
+        defaultPayPalClient.listDisputes({ pageSize: 50 }).catch(() => []),
+        defaultPayPalClient.listInvoices(50).catch(() => []),
+        defaultPayPalClient.searchTransactions(
+          new Date(Date.now() - 30 * 24 * 3600 * 1000),
+          new Date()
+        ).catch(() => []),
       ]);
 
-      const primaryBalance = (balances as any)?.balances?.find((b: any) => b.currency === 'USD');
-      const usdAvailable = primaryBalance ? primaryBalance.available : 14800.0;
+      const primaryBalance = (balances as any)?.balances?.find((b: any) => b.currency === 'USD') || (balances as any)?.balances?.[0];
+      const usdAvailable = primaryBalance
+        ? (typeof primaryBalance.available === 'number'
+            ? primaryBalance.available
+            : parseFloat(primaryBalance.available?.value || primaryBalance.available || '0'))
+        : 0;
 
       return reply.send({
-        totalProducts: products.length || 3,
-        activePlans: plans.length || 1,
-        openInvoices: 1,
-        usdBalance: `$${Number(usdAvailable).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        recentTxCount: 24,
-        openDisputes: disputes.length || 0,
+        totalProducts: Array.isArray(products) ? products.length : 0,
+        activePlans: Array.isArray(plans) ? plans.length : 0,
+        openInvoices: Array.isArray(invoices) ? invoices.length : 0,
+        usdBalance: `$${Number(usdAvailable || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        recentTxCount: Array.isArray(transactions) ? transactions.length : 0,
+        openDisputes: Array.isArray(disputes) ? disputes.length : 0,
       });
     } catch (err: any) {
       logger.error('Failed to aggregate overview metrics', { error: err?.message });
       return reply.send({
-        totalProducts: 3,
-        activePlans: 1,
-        openInvoices: 1,
-        usdBalance: '$14,800.00',
-        recentTxCount: 24,
+        totalProducts: 0,
+        activePlans: 0,
+        openInvoices: 0,
+        usdBalance: '$0.00',
+        recentTxCount: 0,
         openDisputes: 0,
       });
     }

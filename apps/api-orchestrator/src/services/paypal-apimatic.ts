@@ -1489,22 +1489,7 @@ export class PayPalApimaticClient {
    */
   async listDisputes(params?: { disputeState?: string; pageSize?: number }): Promise<any[]> {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-      return [
-        {
-          dispute_id: 'PP-D-8823901',
-          status: 'REQUIRED_ACTION',
-          dispute_amount: { currency_code: 'USD', value: '149.99' },
-          reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
-          dispute_life_cycle_stage: 'CHARGEBACK',
-          seller_response_due_date: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
-          links: [
-            { href: `${this.getBaseUrl()}/v1/customer/disputes/PP-D-8823901/provide-evidence`, rel: 'provide-evidence', method: 'POST' },
-            { href: `${this.getBaseUrl()}/v1/customer/disputes/PP-D-8823901/make-offer`, rel: 'make-offer', method: 'POST' },
-            { href: `${this.getBaseUrl()}/v1/customer/disputes/PP-D-8823901/accept-claim`, rel: 'accept-claim', method: 'POST' },
-            { href: `${this.getBaseUrl()}/v1/customer/disputes/PP-D-8823901/appeal`, rel: 'appeal', method: 'POST' },
-          ],
-        },
-      ];
+      return [];
     }
 
     const token = await this.getAccessToken();
@@ -2123,10 +2108,7 @@ export class PayPalApimaticClient {
    */
   async listProducts(pageSize = 20): Promise<CatalogProductItem[]> {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-      return [
-        { id: 'PROD-1', name: 'Standard Subscription', type: 'DIGITAL', category: 'SOFTWARE', create_time: new Date().toISOString() },
-        { id: 'PROD-2', name: 'Physical Hardware Lock', type: 'PHYSICAL', category: 'ELECTRONICS', create_time: new Date().toISOString() }
-      ];
+      return [];
     }
     const token = await this.getAccessToken();
     const res = await this.fetchWithRetry(
@@ -2328,18 +2310,7 @@ export class PayPalApimaticClient {
    */
   async listPlans(pageSize = 20): Promise<BillingPlanItem[]> {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-      return [
-        {
-          id: 'PLAN-1',
-          product_id: 'PROD-1',
-          name: 'Pro Monthly Plan',
-          status: 'ACTIVE',
-          create_time: new Date().toISOString(),
-          billing_cycles: [
-            { frequency: { interval_unit: 'MONTH', interval_count: 1 }, tenure_type: 'REGULAR', sequence: 1, total_cycles: 0, pricing_scheme: { fixed_price: { value: '29.00', currency_code: 'USD' } } }
-          ]
-        }
-      ];
+      return [];
     }
     const token = await this.getAccessToken();
     const res = await this.fetchWithRetry(
@@ -2380,15 +2351,7 @@ export class PayPalApimaticClient {
    */
   async listInvoices(pageSize = 20): Promise<InvoiceItemSummary[]> {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-      return [
-        {
-          id: 'INV-DEMO-1',
-          status: 'PAID',
-          detail: { invoice_number: 'INV-001', invoice_date: '2026-11-01', currency_code: 'USD' },
-          amount: { currency_code: 'USD', value: '450.00' },
-          primary_recipients: [{ billing_info: { name: { full_name: 'Acme Corp' }, business_name: 'Acme Corp', email_address: 'billing@acme.com' } }]
-        }
-      ];
+      return [];
     }
     const token = await this.getAccessToken();
     const res = await this.fetchWithRetry(
@@ -2606,10 +2569,7 @@ export class PayPalApimaticClient {
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
       return {
         as_of_time: new Date().toISOString(),
-        balances: [
-          { currency: 'USD', total_balance: { value: '15400.00', currency_code: 'USD' }, available_balance: { value: '14800.00', currency_code: 'USD' }, withheld_balance: { value: '600.00', currency_code: 'USD' } },
-          { currency: 'EUR', total_balance: { value: '3200.00', currency_code: 'EUR' }, available_balance: { value: '3200.00', currency_code: 'EUR' }, withheld_balance: { value: '0.00', currency_code: 'EUR' } }
-        ]
+        balances: []
       };
     }
     const token = await this.getAccessToken();
@@ -2643,21 +2603,7 @@ export class PayPalApimaticClient {
     const endStr = typeof endDate === 'string' ? endDate : endDate.toISOString();
 
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-      return [
-        {
-          transaction_info: {
-            transaction_id: 'TXN-DEMO-001',
-            transaction_initiation_date: new Date().toISOString(),
-            transaction_event_code: 'T0001',
-            transaction_status: 'S',
-            transaction_amount: { value: '150.00', currency_code: 'USD' },
-            fee_amount: { value: '4.50', currency_code: 'USD' },
-            ending_balance: { value: '15400.00', currency_code: 'USD' },
-            transaction_subject: 'Affiliate settlement'
-          },
-          payer_info: { email_address: 'affiliate@partner.com' }
-        }
-      ];
+      return [];
     }
     const token = await this.getAccessToken();
     const res = await this.fetchWithRetry(

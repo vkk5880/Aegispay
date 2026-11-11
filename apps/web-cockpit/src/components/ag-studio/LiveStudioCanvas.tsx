@@ -13,6 +13,23 @@ export function LiveStudioCanvas() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [aiResponse, setAiResponse] = useState<string | null>(null);
   const [activeFilters, setActiveFilters] = useState<any[]>([]);
+  const [metrics, setMetrics] = useState<{ openDisputes?: number; usdBalance?: string }>({});
+
+  useEffect(() => {
+    async function fetchCanvasMetrics() {
+      try {
+        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const res = await fetch(`${orchestratorUrl}/api/merchant/overview-metrics`);
+        if (res.ok) {
+          const data = await res.json();
+          setMetrics(data);
+        }
+      } catch (err: any) {
+        logger.debug('[LiveStudioCanvas] Failed to fetch canvas overview metrics', err?.message);
+      }
+    }
+    fetchCanvasMetrics();
+  }, []);
 
   useEffect(() => {
     logger.info('[LiveStudioCanvas] Initializing AG Studio 3 Live Canvas harness');
@@ -208,7 +225,7 @@ export function LiveStudioCanvas() {
               Active High-Risk Cases
             </span>
             <p className="text-xl font-black font-mono text-cyan-600 dark:text-cyan-400">
-              {activeFilters.length > 0 ? '12 Cases' : '38 Total Cases'}
+              {activeFilters.length > 0 ? `${activeFilters.length} Filtered` : `${metrics.openDisputes ?? 0} Cases`}
             </p>
             <p className="text-[10px] text-slate-500 font-mono">Abuse Risk &ge; 0.60, Liability &lt; 0.25</p>
           </div>
@@ -218,7 +235,9 @@ export function LiveStudioCanvas() {
               <BarChart2 className="w-3.5 h-3.5 text-emerald-500" />
               Net Retained Margin
             </span>
-            <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">$14,834.12</p>
+            <p className="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400">
+              {metrics.usdBalance || '$0.00'}
+            </p>
             <p className="text-[10px] text-slate-500 font-mono">Evaluated via Studio Expression Engine</p>
           </div>
 

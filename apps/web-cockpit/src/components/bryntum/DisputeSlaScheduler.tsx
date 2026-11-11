@@ -27,80 +27,60 @@ export interface SlaDisputeItem {
   endDate?: string;
 }
 
-const INITIAL_DISPUTES: SlaDisputeItem[] = [
-  {
-    id: 'sla-1',
-    disputeId: 'PP-D-1004',
-    amountCents: 14500,
-    reason: 'Defective / Damaged',
-    remainingHours: 4.5,
-    status: 'UNALLOCATED_URGENT',
-    leftPercent: 8,
-    widthPercent: 18,
-    dueDate: 'In 4.5 hrs',
-    startDate: new Date(Date.now()).toISOString(),
-    endDate: new Date(Date.now() + 4.5 * 3600000).toISOString(),
-  },
-  {
-    id: 'sla-2',
-    disputeId: 'PP-D-1005',
-    amountCents: 21000,
-    reason: 'Unauthorized Claim',
-    remainingHours: 9.0,
-    status: 'UNALLOCATED_URGENT',
-    leftPercent: 15,
-    widthPercent: 22,
-    dueDate: 'In 9.0 hrs',
-    startDate: new Date(Date.now()).toISOString(),
-    endDate: new Date(Date.now() + 9.0 * 3600000).toISOString(),
-  },
-  {
-    id: 'sla-3',
-    disputeId: 'PP-D-1002',
-    amountCents: 4999,
-    reason: 'Damaged Surface',
-    remainingHours: 18.0,
-    status: 'VISION_TRIAGE',
-    analyst: 'AI Arbiter / Vision Task',
-    leftPercent: 28,
-    widthPercent: 24,
-    dueDate: 'In 18.0 hrs',
-    startDate: new Date(Date.now()).toISOString(),
-    endDate: new Date(Date.now() + 18.0 * 3600000).toISOString(),
-  },
-  {
-    id: 'sla-4',
-    disputeId: 'PP-D-1003',
-    amountCents: 8500,
-    reason: 'Significantly Not as Described',
-    remainingHours: 32.5,
-    status: 'SUBMITTED',
-    analyst: 'Sarah J. (Lead Analyst)',
-    leftPercent: 45,
-    widthPercent: 30,
-    dueDate: 'In 32.5 hrs',
-    startDate: new Date(Date.now()).toISOString(),
-    endDate: new Date(Date.now() + 32.5 * 3600000).toISOString(),
-  },
-  {
-    id: 'sla-5',
-    disputeId: 'PP-D-1006',
-    amountCents: 12000,
-    reason: 'Item Not Received',
-    remainingHours: 54.0,
-    status: 'SUBMITTED',
-    analyst: 'David M. (Risk Ops)',
-    leftPercent: 62,
-    widthPercent: 28,
-    dueDate: 'In 54.0 hrs',
-    startDate: new Date(Date.now()).toISOString(),
-    endDate: new Date(Date.now() + 54.0 * 3600000).toISOString(),
-  },
-];
-
 export function DisputeSlaScheduler() {
-  const [disputes] = useState<SlaDisputeItem[]>(INITIAL_DISPUTES);
+  const [disputes, setDisputes] = useState<SlaDisputeItem[]>([]);
   const [filterImminentBreach, setFilterImminentBreach] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    async function fetchDisputes() {
+      setIsLoading(true);
+      try {
+        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.disputes)) {
+            const mapped: SlaDisputeItem[] = data.disputes.map((d: any, idx: number) => {
+              const disputeId = d.dispute_id || d.id || `PP-D-${idx + 1}`;
+              const amountCents = Math.round(parseFloat(d.dispute_amount?.value || d.amount || '0') * 100);
+              const reason = (d.reason || 'Dispute Claim').replace(/_/g, ' ');
+              const dueDateStr = d.seller_response_due_date;
+              let remainingHours = 72;
+              if (dueDateStr) {
+                const diffMs = new Date(dueDateStr).getTime() - Date.now();
+                remainingHours = Math.max(0, Math.round((diffMs / 3600000) * 10) / 10);
+              }
+              let status: SlaDisputeItem['status'] = 'UNALLOCATED_URGENT';
+              if (d.status === 'RESOLVED') status = 'RESOLVED';
+              else if (d.status === 'UNDER_REVIEW') status = 'VISION_TRIAGE';
+              else if (remainingHours > 24) status = 'SUBMITTED';
+
+              return {
+                id: `sla-${disputeId}`,
+                disputeId,
+                amountCents,
+                reason,
+                remainingHours,
+                status,
+                leftPercent: Math.min(80, Math.max(5, (72 - remainingHours) * 1.1)),
+                widthPercent: Math.min(35, Math.max(15, remainingHours * 0.4)),
+                dueDate: remainingHours > 0 ? `In ${remainingHours} hrs` : 'Expired',
+                startDate: new Date().toISOString(),
+                endDate: dueDateStr || new Date(Date.now() + remainingHours * 3600000).toISOString(),
+              };
+            });
+            setDisputes(mapped);
+          }
+        }
+      } catch (err: any) {
+        logger.debug('[DisputeSlaScheduler] Notice fetching live disputes:', err?.message);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    fetchDisputes();
+  }, []);
 
   useEffect(() => {
     logger.info('[DisputeSlaScheduler] Mounted DisputeSlaScheduler component', {

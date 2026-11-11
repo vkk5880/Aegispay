@@ -691,7 +691,7 @@ export const SearchCatalogInputSchema = z.object({
   query: z.string(),
   category: z.string().optional(),
   max_price_usd: z.number().positive().optional(),
-  limit: z.number().int().positive().optional().default(10),
+  limit: z.number().int().positive().optional().default(50),
 });
 export type SearchCatalogInput = z.infer<typeof SearchCatalogInputSchema>;
 

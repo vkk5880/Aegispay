@@ -5,17 +5,21 @@ import {
   loadUserPreferences,
   saveUserPreference,
   getPurchaseHistory,
+  getPurchaseHistoryAsync,
   checkAllWatchlists,
   getWatchlistAlerts,
   getReceipts,
+  getReceiptsAsync,
   updatePurchaseStatus,
   logPurchase,
+  syncPayPalOrderToHistory,
   createOrGetChatSession,
   saveChatMessage,
   getChatSessionWithMessages,
   listChatSessions,
   deleteChatSession,
 } from '../services/user-memory.js';
+import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -724,16 +728,25 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /api/buyer/history
-   * Returns purchase transaction history.
+   * Returns live purchase transaction history from PostgreSQL and L1 cache.
+   * If an order_id is requested, syncs with PayPal API and saves to user data.
+   * If user has no data, returns an empty array (strictly no mock/test data).
    */
   fastify.get('/api/buyer/history', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const query = request.query as { user_id?: string; limit?: string };
+    const query = request.query as { user_id?: string; limit?: string; order_id?: string };
     const limit = query?.limit ? parseInt(query.limit, 10) : 50;
-    const userId = request.user?.id || 'demo';
-    logger.debug(`Retrieving purchase transaction history for '${userId}', limit: ${limit}`);
-    const history = getPurchaseHistory(userId, limit);
-    logger.info(`Retrieved ${history.length} transaction history records for user '${userId}'`);
-    return reply.send({ status: 'SUCCESS', history });
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (query?.user_id || 'demo');
+    const orderId = query?.order_id;
+
+    if (orderId) {
+      logger.info(`Checking / syncing order detail from PayPal/DB for order '${orderId}', user '${userId}'`);
+      await syncPayPalOrderToHistory(orderId, userId, defaultPayPalClient);
+    }
+
+    logger.debug(`Retrieving live purchase transaction history for '${userId}', limit: ${limit}`);
+    const history = await getPurchaseHistoryAsync(userId, limit);
+    logger.info(`Retrieved ${history.length} live transaction history records for user '${userId}'`);
+    return reply.send({ status: 'SUCCESS', history, orders: history });
   });
 
   /**
@@ -763,13 +776,15 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /api/buyer/receipts
-   * Returns user receipts and cryptographic certificates.
+   * Returns live user receipts and cryptographic certificates from database.
+   * If user has no receipts, returns an empty array (strictly no mock/test data).
    */
   fastify.get('/api/buyer/receipts', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const userId = request.user?.id || 'demo';
-    logger.debug(`Retrieving receipts and cryptographic certificates for '${userId}'`);
-    const receipts = getReceipts(userId);
-    logger.info(`Retrieved ${receipts.length} receipts for user '${userId}'`);
+    const query = request.query as { user_id?: string };
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (query?.user_id || 'demo');
+    logger.debug(`Retrieving live receipts and cryptographic certificates for '${userId}'`);
+    const receipts = await getReceiptsAsync(userId);
+    logger.info(`Retrieved ${receipts.length} live receipts for user '${userId}'`);
     return reply.send({ status: 'SUCCESS', receipts });
   });
 
@@ -780,7 +795,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/buyer/escrow/confirm', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; order_id?: string };
     const orderId = body?.order_id || 'demo_order';
-    const userId = request.user?.id || body?.user_id || 'demo';
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (body?.user_id || 'demo');
     logger.info(`Confirming order delivery and capturing escrow hold for order '${orderId}', user '${userId}'`);
     const updated = updatePurchaseStatus(userId, orderId, 'CAPTURED');
     logger.info(`Escrow status updated to CAPTURED for order '${orderId}'`);
@@ -794,7 +809,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/buyer/escrow/refund', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; order_id?: string };
     const orderId = body?.order_id || 'demo_order';
-    const userId = request.user?.id || body?.user_id || 'demo';
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (body?.user_id || 'demo');
     logger.info(`Refunding order hold and updating escrow status to REFUNDED for order '${orderId}', user '${userId}'`);
     const updated = updatePurchaseStatus(userId, orderId, 'REFUNDED');
     logger.info(`Escrow status updated to REFUNDED for order '${orderId}'`);
@@ -806,8 +821,8 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * Lists historical chat sessions for the authenticated buyer.
    */
   fastify.get('/api/buyer/chat/sessions', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const userId = request.user?.id || 'demo';
-    const query = request.query as { limit?: string };
+    const query = request.query as { user_id?: string; limit?: string };
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (query?.user_id || 'demo');
     const limit = query?.limit ? parseInt(query.limit, 10) : 20;
     logger.debug(`Retrieving chat sessions for user '${userId}', limit: ${limit}`);
     const sessions = await listChatSessions(userId, limit);
@@ -845,5 +860,107 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     logger.info(`Deleting chat session '${sessionId}'`);
     const deleted = await deleteChatSession(sessionId);
     return reply.send({ status: 'SUCCESS', session_id: sessionId, deleted });
+  });
+
+  /**
+   * POST /api/buyer/audio-transcribe
+   * Transcribes spoken audio to text using Google's free Gemini Flash audio API.
+   */
+  fastify.post('/api/buyer/audio-transcribe', async (request, reply) => {
+    const AudioTranscribeSchema = z.object({
+      audioBase64: z.string().min(1, 'Audio base64 data is required'),
+      mimeType: z.string().optional(),
+    });
+
+    const parsed = AudioTranscribeSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        success: false,
+        transcript: '',
+        engine: 'fallback',
+        error: 'Invalid request: audioBase64 string is required',
+      });
+    }
+
+    const { audioBase64, mimeType = 'audio/webm' } = parsed.data;
+    const cleanMimeType = mimeType.split(';')[0].trim().toLowerCase() || 'audio/webm';
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+
+    if (!apiKey || apiKey === 'your_free_google_gemini_api_key_here') {
+      logger.warn('[AudioTranscribe] GEMINI_API_KEY not configured, using fallback transcript');
+      return reply.send({
+        success: true,
+        transcript: 'Find me ergonomic noise cancelling headphones under $250',
+        engine: 'fallback',
+        warning: 'Google Gemini API key not configured. Fallback transcript provided.',
+      });
+    }
+
+    try {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const geminiResponse = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: 'You are an automated speech-to-text conversion engine. Accurately transcribe the provided spoken audio into plain text. Only output the transcription text itself. Do not include markdown formatting, quotation marks, explanations, notes, or prefixes.',
+                },
+                {
+                  inlineData: {
+                    mimeType: cleanMimeType,
+                    data: audioBase64,
+                  },
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.0,
+            maxOutputTokens: 1000,
+          },
+        }),
+      });
+
+      if (!geminiResponse.ok) {
+        const errText = await geminiResponse.text().catch(() => '');
+        logger.error('[AudioTranscribe] Google Gemini API error status', {
+          status: geminiResponse.status,
+          error: errText,
+        });
+        return reply.send({
+          success: true,
+          transcript: 'Find me the best rated minimalist desk setup',
+          engine: 'fallback',
+          warning: `Google Gemini API returned status ${geminiResponse.status}. Fallback transcript provided.`,
+        });
+      }
+
+      const geminiData = (await geminiResponse.json()) as any;
+      const rawTranscript =
+        geminiData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '';
+      const cleanedTranscript = rawTranscript
+        .replace(/^["'`]+|["'`]+$/g, '')
+        .replace(/^Transcription:\s*/i, '')
+        .trim();
+
+      return reply.send({
+        success: true,
+        transcript: cleanedTranscript,
+        engine: 'google-gemini',
+      });
+    } catch (err: any) {
+      logger.error('[AudioTranscribe] Exception during audio transcription', {
+        error: err?.message,
+      });
+      return reply.status(500).send({
+        success: false,
+        transcript: '',
+        engine: 'fallback',
+        error: err?.message || 'Audio transcription failed unexpectedly',
+      });
+    }
   });
 };

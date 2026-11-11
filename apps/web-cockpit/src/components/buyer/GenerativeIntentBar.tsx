@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Search, Sparkles, SlidersHorizontal, ArrowRight, CornerDownLeft, Tag } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { AudioPromptButton } from './AudioPromptButton';
 
 export interface ParsedSearchIntent {
   rawQuery: string;
@@ -166,22 +167,33 @@ export function GenerativeIntentBar({ onSearchIntent, isLoading = false }: Gener
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder='Find me a minimalist ergonomic workspace under $400 with walnut wood and fast shipping...'
-            className="w-full pl-12 pr-32 py-3.5 bg-slate-50/80 dark:bg-[#060b14]/80 border border-slate-200/80 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans shadow-inner"
+            className="w-full pl-12 pr-44 py-3.5 bg-slate-50/80 dark:bg-[#060b14]/80 border border-slate-200/80 dark:border-white/10 rounded-2xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans shadow-inner"
           />
-          <button
-            type="submit"
-            disabled={isLoading || !query.trim()}
-            className="absolute right-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs tracking-wide transition-all shadow-md shadow-cyan-600/25 flex items-center gap-1.5 disabled:opacity-40 active:scale-95 cursor-pointer"
-          >
-            {isLoading ? (
-              <span className="animate-spin text-sm">⟳</span>
-            ) : (
-              <>
-                <span>Solve</span>
-                <CornerDownLeft className="w-3.5 h-3.5" />
-              </>
-            )}
-          </button>
+          <div className="absolute right-2 flex items-center gap-1.5">
+            <AudioPromptButton
+              onTranscript={(spoken) => {
+                const nextQuery = query ? `${query.trim()} ${spoken}` : spoken;
+                setQuery(nextQuery);
+                const parsed = parseNaturalLanguage(nextQuery);
+                setActiveIntent(parsed);
+              }}
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !query.trim()}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs tracking-wide transition-all shadow-md shadow-cyan-600/25 flex items-center gap-1.5 disabled:opacity-40 active:scale-95 cursor-pointer"
+            >
+              {isLoading ? (
+                <span className="animate-spin text-sm">⟳</span>
+              ) : (
+                <>
+                  <span>Solve</span>
+                  <CornerDownLeft className="w-3.5 h-3.5" />
+                </>
+              )}
+            </button>
+          </div>
         </div>
       </form>
 

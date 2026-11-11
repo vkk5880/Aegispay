@@ -23,7 +23,7 @@ function VaultCallbackContent() {
       setStatus('cancelled');
       if (window.opener) {
         window.opener.postMessage({ type: 'PAYPAL_VAULT_CANCELLED' }, window.location.origin);
-        setTimeout(() => window.close(), 1500);
+        setTimeout(() => window.close(), 600);
       }
       return;
     }
@@ -31,6 +31,13 @@ function VaultCallbackContent() {
     if (!setupTokenId) {
       setStatus('error');
       setErrorMessage('No PayPal approval session ID was returned in the callback URL.');
+      if (window.opener) {
+        window.opener.postMessage(
+          { type: 'PAYPAL_VAULT_ERROR', message: 'No PayPal approval session ID was returned in the callback URL.' },
+          window.location.origin
+        );
+        setTimeout(() => window.close(), 800);
+      }
       return;
     }
 
@@ -74,20 +81,44 @@ function VaultCallbackContent() {
             );
             setTimeout(() => {
               window.close();
-            }, 1200);
+            }, 600);
           } else {
             // Standalone redirect
             setTimeout(() => {
               router.push('/');
-            }, 2000);
+            }, 1500);
           }
         } else {
           setStatus('error');
           setErrorMessage(data.message || 'PayPal Sandbox verification failed.');
+          if (window.opener) {
+            window.opener.postMessage(
+              {
+                type: 'PAYPAL_VAULT_ERROR',
+                message: data.message || 'PayPal Sandbox verification failed.',
+              },
+              window.location.origin
+            );
+            setTimeout(() => {
+              window.close();
+            }, 800);
+          }
         }
       } catch (err: any) {
         setStatus('error');
         setErrorMessage(err?.message || 'Network error verifying PayPal session.');
+        if (window.opener) {
+          window.opener.postMessage(
+            {
+              type: 'PAYPAL_VAULT_ERROR',
+              message: err?.message || 'Network error verifying PayPal session.',
+            },
+            window.location.origin
+          );
+          setTimeout(() => {
+            window.close();
+          }, 800);
+        }
       }
     }
 

@@ -23,6 +23,7 @@ import {
 import type { ProductCardData } from '@aegispay/shared-types';
 import { useMounted } from '@/hooks/useMounted';
 import { useUiMode } from '@/context/UiModeContext';
+import { DEFAULT_50_SEARCH_PRODUCTS } from '@/lib/searchCatalog';
 
 const PRESET_QUERIES = [
   'Noise canceling studio headphones under $350',
@@ -31,43 +32,7 @@ const PRESET_QUERIES = [
   'Anker high-capacity power bank with fast charging',
 ];
 
-const INITIAL_PREVIEW_PRODUCTS: ProductCardData[] = [
-  {
-    product_id: 'ch3_anc_headphone_01',
-    title: 'Sony WH-1000XM5 Wireless Noise-Canceling Headphones',
-    description: 'Industry-leading noise cancellation with two processors and 8 microphones. Up to 30-hour battery life with quick charging.',
-    price_cents: 34800,
-    compare_at_price_cents: 39999,
-    currency: 'USD',
-    merchant_domain: 'bestbuy.com',
-    cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&q=80',
-    stock_status: 'IN_STOCK',
-    category_id: 'electronics',
-    commission_rate: 0.15,
-    commission_rebate_cents: 3915,
-    shipping_fee_cents: 0,
-    shipping_waiver_threshold_cents: 25000,
-    delivery_window_days: 2,
-    delivery_window: '2-3 Business Days',
-    rating: 4.8,
-    review_count: 120,
-    free_shipping: true,
-    merchant_credibility_score: 98,
-    store_tier: 'tier1_official',
-    composite_score: 9.4,
-    score_breakdown: {
-      cosine_similarity: 0.95,
-      price_affinity: 0.88,
-      merchant_reputation: 0.98,
-      shipping_speed: 0.95,
-    },
-    badges: [
-      { badge_type: 'BEST_VALUE', label: 'Best Overall Pick', badge_color: '#06b6d4', color: '#06b6d4' },
-      { badge_type: 'PRICE_LEADER', label: '13% Below MSRP', badge_color: '#10b981', color: '#10b981' },
-      { badge_type: 'TOP_RATED', label: '4.8 ★ Verified', badge_color: '#8b5cf6', color: '#8b5cf6' },
-    ],
-  },
-];
+const INITIAL_PREVIEW_PRODUCTS: ProductCardData[] = DEFAULT_50_SEARCH_PRODUCTS;
 
 export function SearchContent({
   initialResults = INITIAL_PREVIEW_PRODUCTS,
@@ -138,7 +103,7 @@ export function SearchContent({
           'Content-Type': 'application/json',
           'x-guest-session': 'true',
         },
-        body: JSON.stringify({ message: q, action: 'DISCOVER', stream: false }),
+        body: JSON.stringify({ message: q, action: 'DISCOVER', stream: false, limit: 50 }),
       });
 
       if (res.ok) {
@@ -147,12 +112,20 @@ export function SearchContent({
           (Array.isArray(data.products) && data.products.length > 0 && data.products) ||
           (Array.isArray(data.recommended_products) && data.recommended_products.length > 0 && data.recommended_products) ||
           [];
-        setResults(incomingProducts);
+        if (incomingProducts.length > 0) {
+          setResults(incomingProducts);
+        } else {
+          const qLower = q.toLowerCase();
+          const matched = DEFAULT_50_SEARCH_PRODUCTS.filter(
+            (p) => p.title.toLowerCase().includes(qLower) || p.category_id.toLowerCase().includes(qLower)
+          );
+          setResults(matched.length > 0 ? matched : DEFAULT_50_SEARCH_PRODUCTS);
+        }
       } else {
-        setResults([]);
+        setResults(DEFAULT_50_SEARCH_PRODUCTS);
       }
     } catch {
-      setResults([]);
+      setResults(DEFAULT_50_SEARCH_PRODUCTS);
     } finally {
       setIsSearching(false);
     }

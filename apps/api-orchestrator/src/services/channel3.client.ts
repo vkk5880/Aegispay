@@ -265,7 +265,7 @@ export class Channel3Client {
         const searchReq: Channel3Api.SearchRequest = {
           query: filters.query || undefined,
           image_url: filters.image_url || undefined,
-          limit: Math.min(30, Math.max(1, filters.limit || 20)),
+          limit: Math.min(50, Math.max(1, filters.limit || 50)),
         };
         const searchFilters: Channel3Api.SearchFilters = {};
         if (filters.category_ids && filters.category_ids.length > 0) {

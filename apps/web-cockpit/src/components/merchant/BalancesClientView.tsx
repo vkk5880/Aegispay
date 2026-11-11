@@ -34,13 +34,13 @@ export function BalancesClientView({ initialBalances }: { initialBalances: Balan
       const res = await fetch(`${orchestratorUrl}/api/merchant/balances`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.balances) && data.balances.length > 0) {
+        if (Array.isArray(data.balances)) {
           const mapped: BalanceRow[] = data.balances.map((b: any) => ({
             currency: b.currency || 'USD',
-            total: typeof b.total === 'number' ? b.total : parseFloat(b.total || '0'),
-            available: typeof b.available === 'number' ? b.available : parseFloat(b.available || '0'),
-            withheld: typeof b.withheld === 'number' ? b.withheld : parseFloat(b.withheld || '0'),
-            history_30d: b.history_30d || [11200, 11800, 12400, 12100, 13500, 14200, 14800, 15400],
+            total: typeof b.total === 'number' ? b.total : parseFloat(b.total?.value || b.total || '0'),
+            available: typeof b.available === 'number' ? b.available : parseFloat(b.available?.value || b.available || '0'),
+            withheld: typeof b.withheld === 'number' ? b.withheld : parseFloat(b.withheld?.value || b.withheld || '0'),
+            history_30d: Array.isArray(b.history_30d) ? b.history_30d : [],
           }));
           setBalances(mapped);
           logger.info(`[BalancesClientView] Loaded ${mapped.length} live currency balances`);

@@ -26,6 +26,7 @@ import {
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
 import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 
 export interface PurchaseHistoryItem {
   order_id: string;
@@ -56,106 +57,18 @@ export interface NFTReceiptItem {
   timestamp: string;
 }
 
-const STATIC_BASE_TIMESTAMP_1 = '2026-11-07T10:00:00.000Z';
-const STATIC_BASE_TIMESTAMP_2 = '2026-11-06T20:00:00.000Z';
-const STATIC_BASE_TIMESTAMP_3 = '2026-11-05T14:00:00.000Z';
-
-const MOCK_INITIAL_ORDERS: PurchaseHistoryItem[] = [
-  {
-    order_id: 'ord_pp_884920491',
-    user_id: 'demo',
-    title: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
-    price_cents: 34800,
-    merchant_domain: 'bestbuy.com',
-    cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400',
-    score: 9.4,
-    tx_id: 'PAYID-M884920491XAU',
-    reservation_id: 'vch_9f8a7d6c5b4e3a21',
-    escrow_status: 'CAPTURED',
-    timestamp: STATIC_BASE_TIMESTAMP_1,
-    receipt_number: 1042,
-    hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    carrier: 'FedEx Priority',
-    tracking_number: '789012345678',
-    fulfillment_status: 'delivered',
-  },
-  {
-    order_id: 'ord_pp_104928502',
-    user_id: 'demo',
-    title: 'Apple AirPods Pro (2nd Generation) with MagSafe Case (USB-C)',
-    price_cents: 19900,
-    merchant_domain: 'target.com',
-    cleaned_url: 'https://images.unsplash.com/photo-1600294037681-c80b4cb5b434?w=400',
-    score: 9.1,
-    tx_id: 'PAYID-M104928502YTB',
-    reservation_id: 'vch_4d3c2b1a8e7f6g5h',
-    escrow_status: 'HELD',
-    timestamp: STATIC_BASE_TIMESTAMP_2,
-    receipt_number: 1043,
-    hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
-    carrier: 'UPS Ground',
-    tracking_number: '1Z999AA10123456784',
-    fulfillment_status: 'shipped',
-  },
-  {
-    order_id: 'ord_pp_395829104',
-    user_id: 'demo',
-    title: 'Anker Prime 20,000mAh Power Bank (200W Output)',
-    price_cents: 8999,
-    merchant_domain: 'anker.com',
-    cleaned_url: 'https://images.unsplash.com/photo-1609592807664-8395568393e8?w=400',
-    score: 8.8,
-    tx_id: 'PAYID-M395829104ZTC',
-    reservation_id: 'vch_2a4c6e8f0b1d3f5a',
-    escrow_status: 'CAPTURED',
-    timestamp: STATIC_BASE_TIMESTAMP_3,
-    receipt_number: 1044,
-    hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4',
-    carrier: 'USPS Express',
-    tracking_number: '9400111899562537628841',
-    fulfillment_status: 'delivered',
-  },
-];
-
-const MOCK_INITIAL_RECEIPTS: NFTReceiptItem[] = [
-  {
-    receipt_number: 1042,
-    product_title: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
-    amount_cents: 34800,
-    merchant_domain: 'bestbuy.com',
-    tx_id: 'PAYID-M884920491XAU',
-    chain_hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    timestamp: STATIC_BASE_TIMESTAMP_1,
-  },
-  {
-    receipt_number: 1043,
-    product_title: 'Apple AirPods Pro (2nd Generation) with MagSafe Case (USB-C)',
-    amount_cents: 19900,
-    merchant_domain: 'target.com',
-    tx_id: 'PAYID-M104928502YTB',
-    chain_hash: 'a1b2c3d4e5f67890123456789abcdef0123456789abcdef0123456789abcdef0',
-    timestamp: STATIC_BASE_TIMESTAMP_2,
-  },
-  {
-    receipt_number: 1044,
-    product_title: 'Anker Prime 20,000mAh Power Bank (200W Output)',
-    amount_cents: 8999,
-    merchant_domain: 'anker.com',
-    tx_id: 'PAYID-M395829104ZTC',
-    chain_hash: '8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4',
-    timestamp: STATIC_BASE_TIMESTAMP_3,
-  },
-];
-
 export function HistoryContent({
-  initialItems = MOCK_INITIAL_ORDERS,
-  initialReceipts = MOCK_INITIAL_RECEIPTS,
+  initialItems = [],
+  initialReceipts = [],
 }: {
   initialItems?: PurchaseHistoryItem[];
   initialReceipts?: NFTReceiptItem[];
 }) {
   const mounted = useMounted();
   const { showTechnicalDetails } = useUiMode();
+  const { user, isLoggedIn } = useAuth();
+  const effectiveUserId = user?.email || (user as any)?.id || 'guest';
+
   const [items, setItems] = useState<PurchaseHistoryItem[]>(initialItems);
   const [receipts, setReceipts] = useState<NFTReceiptItem[]>(initialReceipts);
   const [loading, setLoading] = useState<boolean>(true);
@@ -165,25 +78,8 @@ export function HistoryContent({
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [targetOrderId, setTargetOrderId] = useState<string | null>(null);
 
-  // Phase 4: Chat session history state
-  const [chatSessions, setChatSessions] = useState<any[]>([
-    {
-      id: 'session_demo_audiophile',
-      buyer_id: 'demo',
-      title: 'Studio Headphones & Audio Setup',
-      created_at: '2026-11-09T18:00:00.000Z',
-      updated_at: '2026-11-09T18:30:00.000Z',
-      message_count: 4,
-    },
-    {
-      id: 'session_demo_irons',
-      buyer_id: 'demo',
-      title: 'Rowenta vs Black+Decker Steam Iron Face-Off',
-      created_at: '2026-11-08T14:00:00.000Z',
-      updated_at: '2026-11-08T14:15:00.000Z',
-      message_count: 6,
-    },
-  ]);
+  // Live turn-bound chat sessions
+  const [chatSessions, setChatSessions] = useState<any[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<{ session: any; messages: any[] } | null>(null);
   const [loadingSession, setLoadingSession] = useState<boolean>(false);
@@ -201,55 +97,75 @@ export function HistoryContent({
     }
 
     async function loadData() {
-      const headers: Record<string, string> = {};
+      setLoading(true);
+      const headers: Record<string, string> = {
+        'x-user-id': effectiveUserId,
+      };
       if (activeToken) {
         headers['authorization'] = `Bearer ${activeToken}`;
       }
 
       try {
         const historyUrl = activeOrderId
-          ? `/api/buyer/history?user_id=demo&order_id=${encodeURIComponent(activeOrderId)}`
-          : '/api/buyer/history?user_id=demo';
+          ? `/api/buyer/history?user_id=${encodeURIComponent(effectiveUserId)}&order_id=${encodeURIComponent(activeOrderId)}`
+          : `/api/buyer/history?user_id=${encodeURIComponent(effectiveUserId)}`;
         const res = await fetch(historyUrl, { headers });
         if (res.ok) {
           const data = await res.json();
-          if (data.history && Array.isArray(data.history) && data.history.length > 0) {
+          if (Array.isArray(data.history)) {
             setItems(data.history);
+          } else if (Array.isArray(data.orders)) {
+            setItems(data.orders);
+          } else {
+            setItems([]);
           }
+        } else {
+          setItems([]);
         }
       } catch (err) {
-        console.warn('Backend history unreachable, using cached mock ledger.', err);
+        console.warn('Backend history unreachable or empty ledger.', err);
+        setItems([]);
       }
 
       try {
-        const resReceipts = await fetch('/api/buyer/receipts?user_id=demo', { headers });
+        const resReceipts = await fetch(`/api/buyer/receipts?user_id=${encodeURIComponent(effectiveUserId)}`, { headers });
         if (resReceipts.ok) {
           const data = await resReceipts.json();
-          if (data.receipts && Array.isArray(data.receipts) && data.receipts.length > 0) {
+          if (Array.isArray(data.receipts)) {
             setReceipts(data.receipts);
+          } else {
+            setReceipts([]);
           }
+        } else {
+          setReceipts([]);
         }
       } catch (err) {
-        console.warn('Backend receipts unreachable, using cached cryptographic receipts.', err);
+        console.warn('Backend receipts unreachable or empty.', err);
+        setReceipts([]);
       }
 
       try {
-        const resSessions = await fetch('/api/buyer/chat/sessions', { headers });
+        const resSessions = await fetch(`/api/buyer/chat/sessions?user_id=${encodeURIComponent(effectiveUserId)}`, { headers });
         if (resSessions.ok) {
           const sData = await resSessions.json();
-          if (sData.sessions && Array.isArray(sData.sessions) && sData.sessions.length > 0) {
+          if (Array.isArray(sData.sessions)) {
             setChatSessions(sData.sessions);
+          } else {
+            setChatSessions([]);
           }
+        } else {
+          setChatSessions([]);
         }
       } catch (err) {
-        console.warn('Backend chat sessions unreachable, using cached sessions.', err);
+        console.warn('Backend chat sessions unreachable or empty.', err);
+        setChatSessions([]);
       } finally {
         setLoading(false);
       }
     }
 
     loadData();
-  }, []);
+  }, [effectiveUserId]);
 
   const handleSelectSession = async (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -274,7 +190,7 @@ export function HistoryContent({
       await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: 'demo', order_id: orderId }),
+        body: JSON.stringify({ user_id: effectiveUserId, order_id: orderId }),
       });
 
       const newStatus = action === 'confirm' ? 'CAPTURED' : 'REFUNDED';
@@ -345,6 +261,13 @@ export function HistoryContent({
             ? 'Autonomous 2PC escrow holds, price-drop watcher captures, and cryptographically verified transaction receipts.'
             : 'Track your purchases, delivery progress, and official receipts with PayPal purchase protection.'}
         </p>
+
+        {user?.email && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 px-3.5 py-1 text-xs font-mono font-medium text-emerald-800 dark:text-emerald-300 shadow-2xs">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Connected Account: <strong>{user.email}</strong></span>
+          </div>
+        )}
 
         {/* Scoped Read-Only Tracking Mode Banner */}
         {Boolean(trackingToken || targetOrderId) && (

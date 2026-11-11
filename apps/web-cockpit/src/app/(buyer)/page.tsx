@@ -501,13 +501,49 @@ export default function BuyerPortalPage() {
         cart={optimizationData}
         zipCode={userSettings.zipCode}
         onRemoveItem={handleRemoveCartItem}
-        onProceedToCheckout={() => {
+        onProceedToCheckout={async () => {
+          const totalCents = optimizationData.net_buyer_expenditure_cents;
+          const firstMerchant = optimizationData.assigned_merchants[0];
+          const firstItem = firstMerchant?.items?.[0];
+          const effectiveUserId = user?.email || (user as any)?.id || 'demo';
+          const orderId = `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
           logger.info('[BuyerPage:Checkout] Proceed to checkout triggered from UnifiedCartDrawer', {
-            netBuyerExpenditureCents: optimizationData.net_buyer_expenditure_cents,
+            orderId,
+            effectiveUserId,
+            netBuyerExpenditureCents: totalCents,
             merchantCount: optimizationData.assigned_merchants.length,
           });
+
+          try {
+            await fetch('/api/buyer/chat', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-user-id': effectiveUserId,
+              },
+              body: JSON.stringify({
+                message: `Order checkout for ${firstItem?.title || 'cart items'}`,
+                action: 'BUY',
+                selected_product_ids: optimizationData.assigned_merchants.flatMap((m) =>
+                  m.items.map((i) => i.product_id)
+                ),
+                budget_cap_cents: totalCents + 5000,
+              }),
+            });
+          } catch (err: any) {
+            logger.warn('Failed to dispatch checkout via buyer chat', { error: err?.message });
+          }
+
           setIsCartOpen(false);
-          showNotification('1-Click PayPal Authorization initialized!');
+          recordPurchaseSpend(totalCents);
+          showNotification(`Order authorized! Saved to order history for ${effectiveUserId}`);
+
+          if (typeof window !== 'undefined') {
+            setTimeout(() => {
+              window.location.href = `/history?order_id=${encodeURIComponent(orderId)}`;
+            }, 800);
+          }
         }}
       />
 

@@ -3,12 +3,26 @@ import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const userId =
+    url.searchParams.get('user_id') ||
+    req.headers.get('x-user-id') ||
+    'demo';
+
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const url = new URL(req.url);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      const authHeader = req.headers.get('authorization');
+      if (authHeader) headers['authorization'] = authHeader;
+      const sessionToken = req.headers.get('x-session-token');
+      if (sessionToken) headers['x-session-token'] = sessionToken;
+      if (userId) headers['x-user-id'] = userId;
+
       const res = await fetch(`${orchestratorUrl}/api/buyer/watchlist${url.search}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         cache: 'no-store',
       });
       if (res.ok) {

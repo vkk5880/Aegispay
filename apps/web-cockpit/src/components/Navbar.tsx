@@ -158,6 +158,7 @@ export function Navbar() {
               aria-label="Login with PayPal"
             >
               <LogIn className="w-4 h-4 sm:w-4.5 sm:h-4.5" />
+              <span className="hidden sm:inline xl:hidden">Login</span>
               <span className="hidden xl:inline">Login with PayPal</span>
               {/* Floating Tooltip for compact screens */}
               <span className="xl:hidden absolute -bottom-9 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-slate-900/95 dark:bg-slate-100/95 backdrop-blur-md text-white dark:text-slate-900 text-xs font-semibold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50 border border-white/10 dark:border-black/10">

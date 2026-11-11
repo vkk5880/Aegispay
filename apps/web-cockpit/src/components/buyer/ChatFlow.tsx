@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { webLogger as logger } from '@/lib/logger';
 import { Search, Sparkles, ArrowRight, CornerDownLeft, RotateCcw, AlertTriangle, Zap } from 'lucide-react';
+import { AudioPromptButton } from './AudioPromptButton';
 
 export interface RecoveryPill {
   label: string;
@@ -412,6 +413,14 @@ export function ChatFlow({
           placeholder={placeholder}
           aria-label="Describe what you want to buy"
           className="flex-1 bg-transparent px-2 py-3 text-sm text-slate-900 dark:text-white outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500 min-w-0"
+        />
+        <AudioPromptButton
+          onTranscript={(spoken) => {
+            const nextQuery = query ? `${query.trim()} ${spoken}` : spoken;
+            setQuery(nextQuery);
+          }}
+          disabled={disabled || isClarifyingLoading}
+          className="mr-1"
         />
         <button
           type="submit"

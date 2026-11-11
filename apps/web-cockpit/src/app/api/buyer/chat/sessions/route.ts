@@ -3,44 +3,71 @@ import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
 export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const userId =
+    url.searchParams.get('user_id') ||
+    req.headers.get('x-user-id') ||
+    'demo';
+
   const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
   apiLogger.debug('GET /api/buyer/chat/sessions received');
 
   try {
-    const res = await fetch(`${orchestratorUrl}/api/buyer/chat/sessions`, {
-      headers: {
-        'authorization': req.headers.get('authorization') || '',
-      },
+    const headers: Record<string, string> = {
+      'authorization': req.headers.get('authorization') || '',
+    };
+    const sessionToken = req.headers.get('x-session-token');
+    if (sessionToken) headers['x-session-token'] = sessionToken;
+    if (userId) headers['x-user-id'] = userId;
+
+    const res = await fetch(`${orchestratorUrl}/api/buyer/chat/sessions${url.search}`, {
+      headers,
       cache: 'no-store',
     });
     if (res.ok) {
       const data = await res.json();
       return NextResponse.json(data);
     }
-  } catch (err) {
-    apiLogger.warn('Upstream orchestrator unreachable for sessions; returning fallback session list');
+  } catch (err: any) {
+    apiLogger.warn('Upstream orchestrator unreachable for sessions; attempting database query', {
+      error: err?.message,
+    });
   }
 
-  // Graceful fallback session for demo & offline evaluation
+  // Direct PostgreSQL query for user's chat sessions when orchestrator is unavailable
+  if (process.env.DATABASE_URL) {
+    try {
+      const { createDb, chatSessions, eq, desc } = await import('@aegispay/database');
+      const db = createDb(process.env.DATABASE_URL);
+      const rows = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.buyer_id, userId))
+        .orderBy(desc(chatSessions.updated_at))
+        .limit(20);
+
+      if (rows && rows.length > 0) {
+        const sessions = rows.map((r) => ({
+          id: r.id,
+          buyer_id: r.buyer_id,
+          title: r.title,
+          created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+          updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString(),
+          message_count: 2,
+        }));
+        return NextResponse.json({
+          status: 'SUCCESS',
+          sessions,
+        });
+      }
+    } catch (dbErr: any) {
+      apiLogger.warn('Direct database query for chat sessions encountered error', { error: dbErr?.message });
+    }
+  }
+
+  // Strictly return empty list if no user sessions exist (zero mock data)
   return NextResponse.json({
     status: 'SUCCESS',
-    sessions: [
-      {
-        id: 'session_demo_audiophile',
-        buyer_id: 'demo',
-        title: 'Studio Headphones & Audio Setup',
-        created_at: '2026-11-09T18:00:00.000Z',
-        updated_at: '2026-11-09T18:30:00.000Z',
-        message_count: 4,
-      },
-      {
-        id: 'session_demo_irons',
-        buyer_id: 'demo',
-        title: 'Rowenta vs Black+Decker Steam Iron Face-Off',
-        created_at: '2026-11-08T14:00:00.000Z',
-        updated_at: '2026-11-08T14:15:00.000Z',
-        message_count: 6,
-      },
-    ],
+    sessions: [],
   });
 }
