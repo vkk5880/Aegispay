@@ -102,7 +102,7 @@ export function ConversationalAgentChat({
   budgetCapCents = 50000,
   zipCode = '94016',
   developerModeEnabled: devProp = false,
-  selectedModel = 'google/gemini-2.5-flash',
+  selectedModel = 'google/gemini-3.5-flash-lite',
   userApiKey,
   cartItemCount = 0,
   cartSubtotalCents = 0,

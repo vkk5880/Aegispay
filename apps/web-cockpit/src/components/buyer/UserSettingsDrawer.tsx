@@ -25,10 +25,64 @@ import {
   ToggleLeft,
   ToggleRight,
   Zap,
+  AlertTriangle,
+  Loader2,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth } from '@/context/AuthContext';
+
+export interface CommerceModelUIOption {
+  id: string;
+  name: string;
+  provider: 'google' | 'anthropic' | 'openai' | 'custom';
+  badge: string;
+  desc: string;
+  requiresKey: boolean;
+}
+
+export const COMMERCE_MODELS: CommerceModelUIOption[] = [
+  {
+    id: 'google/gemini-3.5-flash-lite',
+    name: 'Gemini 3.5 Flash Lite',
+    provider: 'google',
+    badge: 'Default & Recommended',
+    desc: 'Ultra-low latency sub-second tool execution with 1M context window. Pre-configured platform key.',
+    requiresKey: false,
+  },
+  {
+    id: 'google/gemma-4-26b-a4b-it',
+    name: 'Gemma 4 26B',
+    provider: 'google',
+    badge: 'Gemma Platform',
+    desc: 'Open-weights dense reasoning using pre-configured platform credentials. No user key required.',
+    requiresKey: false,
+  },
+  {
+    id: 'google/gemma-4-31b-it',
+    name: 'Gemma 4 31B',
+    provider: 'google',
+    badge: 'Gemma High-Accuracy',
+    desc: 'High-accuracy open model for detailed attribute comparison. No user key required.',
+    requiresKey: false,
+  },
+  {
+    id: 'anthropic/claude-3-5-sonnet',
+    name: 'Claude 3.5 Sonnet',
+    provider: 'anthropic',
+    badge: 'BYOK Required',
+    desc: 'Premier schema verification and tool synthesis. Requires user-scoped personal API key.',
+    requiresKey: true,
+  },
+  {
+    id: 'openai/gpt-4o',
+    name: 'GPT-4o',
+    provider: 'openai',
+    badge: 'BYOK Required',
+    desc: 'Omni-channel conversational intelligence with high flexibility. Requires user-scoped personal API key.',
+    requiresKey: true,
+  },
+];
 
 export interface UserSettings {
   // Delivery Address
@@ -59,7 +113,7 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
   state: 'CA',
   zipCode: '95131',
   developerModeEnabled: false,
-  aiModel: '',
+  aiModel: 'google/gemini-3.5-flash-lite',
   userApiKey: '',
   fulfillmentMode: 'PRICE_WATCHER_72H',
   purchasingRule: 'ALWAYS_CONFIRM',
@@ -93,18 +147,80 @@ export function UserSettingsDrawer({
   const [formData, setFormData] = useState<UserSettings>(initialSettings);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationError, setVerificationError] = useState<string | null>(null);
 
   useEffect(() => {
     setFormData({
       ...initialSettings,
+      aiModel: initialSettings.aiModel || 'google/gemini-3.5-flash-lite',
       developerModeEnabled: initialSettings.developerModeEnabled || showTechnicalDetails,
     });
+    setVerificationError(null);
   }, [initialSettings, isOpen, showTechnicalDetails]);
 
   if (!isOpen) return null;
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    setVerificationError(null);
+
+    const activeModelId = formData.aiModel || 'google/gemini-3.5-flash-lite';
+    const selectedModelObj = COMMERCE_MODELS.find((m) => m.id === activeModelId);
+    const isKeyRequired = selectedModelObj?.requiresKey ?? (!activeModelId.startsWith('google/'));
+    const hasKey = Boolean(formData.userApiKey && formData.userApiKey.trim().length > 0);
+
+    // If key is required for this model but not provided:
+    if (isKeyRequired && !hasKey) {
+      setVerificationError(
+        `An API key is required to use ${selectedModelObj?.name || 'this non-default model'}. Please enter a valid API key below, or select Gemini / Gemma.`
+      );
+      return;
+    }
+
+    // If a key was provided (either required or optional), verify it against the provider endpoint
+    if (hasKey) {
+      setIsVerifying(true);
+      try {
+        const provider =
+          selectedModelObj?.provider ||
+          (activeModelId.includes('anthropic')
+            ? 'anthropic'
+            : activeModelId.includes('openai')
+            ? 'openai'
+            : 'google');
+
+        const res = await fetch('/api/buyer/verify-llm-key', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider,
+            apiKey: formData.userApiKey?.trim(),
+            model: activeModelId,
+          }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data.valid) {
+          setVerificationError(
+            data.error ||
+              `The provided ${provider.toUpperCase()} API key could not be verified. Settings were not saved.`
+          );
+          setIsVerifying(false);
+          return;
+        }
+      } catch (err: any) {
+        setVerificationError(
+          `Could not connect to verification endpoint: ${err?.message || 'Network error'}`
+        );
+        setIsVerifying(false);
+        return;
+      }
+      setIsVerifying(false);
+    }
+
+    // Key is verified (or platform default model was chosen): proceed with saving
     onSave(formData);
     setShowTechnicalDetails(formData.developerModeEnabled);
     setSavedSuccess(true);
@@ -116,6 +232,7 @@ export function UserSettingsDrawer({
 
   const handleReset = () => {
     setFormData(DEFAULT_USER_SETTINGS);
+    setVerificationError(null);
   };
 
   return (
@@ -542,7 +659,7 @@ export function UserSettingsDrawer({
                           ...formData,
                           developerModeEnabled: checked,
                           aiModel: checked
-                            ? formData.aiModel || 'google/gemini-2.5-flash'
+                            ? formData.aiModel || 'google/gemini-3.5-flash-lite'
                             : '',
                         });
                         setShowTechnicalDetails(checked);
@@ -557,7 +674,7 @@ export function UserSettingsDrawer({
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-2">
                     <Sparkles className="w-4 h-4 text-cyan-500 shrink-0 mt-0.5" />
                     <span>
-                      Standard shoppers automatically use the platform deployment model (<code className="text-cyan-600 dark:text-cyan-400 font-mono">COMMERCE_AGENT_MODEL</code>). Toggle on to test alternative reasoning engines or supply custom tokens.
+                      Standard shoppers automatically use the platform deployment model (<code className="text-cyan-600 dark:text-cyan-400 font-mono">Gemini 3.5 Flash Lite</code>). Toggle on to select Gemma or supply custom personal API keys (BYOK).
                     </span>
                   </div>
                 ) : (
@@ -566,10 +683,10 @@ export function UserSettingsDrawer({
                     <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-700 dark:text-amber-300 space-y-1">
                       <div className="flex items-center gap-1.5 font-bold">
                         <Lock className="w-3.5 h-3.5 text-amber-500" />
-                        <span>User-Scoped Isolation Guarantee</span>
+                        <span>User-Scoped Isolation & Key Verification</span>
                       </div>
                       <p className="text-[10px] leading-relaxed text-slate-600 dark:text-slate-400">
-                        Your model preference and API key are strictly personal to your browser session and ephemeral requests. Keys are <strong>never</strong> saved to database, Redis, or platform logs, and never shared with other users.
+                        Default Google Gemini & Gemma use the pre-configured platform key. All other providers (Claude, GPT-4o) require personal API keys that are verified with the provider upon saving.
                       </p>
                     </div>
 
@@ -586,75 +703,50 @@ export function UserSettingsDrawer({
                       </label>
 
                       <div className="space-y-2">
-                        {[
-                          {
-                            id: 'google/gemini-2.5-flash',
-                            name: 'Gemini 2.5 Flash',
-                            badge: 'Recommended',
-                            desc: 'Ultra-fast sub-second tool execution with 1M context window.',
-                          },
-                          {
-                            id: 'google/gemini-3.5-flash-lite',
-                            name: 'Gemini 3.5 Flash Lite',
-                            badge: 'Flash Lite 3.5',
-                            desc: 'Instant low-latency evaluation for fast product queries.',
-                          },
-                          {
-                            id: 'google/gemma-4-26b-a4b-it',
-                            name: 'Gemma 4 26B',
-                            badge: 'Gemma 4 26B',
-                            desc: 'Open-weights dense reasoning optimized for deterministic ranking.',
-                          },
-                          {
-                            id: 'google/gemini-1.5-pro',
-                            name: 'Gemini 1.5 Pro',
-                            badge: 'Deep Multimodal',
-                            desc: 'Complex 2M token reasoning over huge multi-vendor catalogs.',
-                          },
-                          {
-                            id: 'anthropic/claude-3-5-sonnet',
-                            name: 'Claude 3.5 Sonnet',
-                            badge: 'Superior Synthesis',
-                            desc: 'Advanced schema verification and deterministic step synthesis.',
-                          },
-                          {
-                            id: 'openai/gpt-4o',
-                            name: 'GPT-4o',
-                            badge: 'Omni Reasoning',
-                            desc: 'Omni-channel reasoning with flexible tool use.',
-                          },
-                        ].map((m) => (
-                          <div
-                            key={m.id}
-                            onClick={() => setFormData({ ...formData, aiModel: m.id })}
-                            className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
-                              formData.aiModel === m.id
-                                ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/30 ring-1 ring-amber-500/40 shadow-xs'
-                                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
+                        {COMMERCE_MODELS.map((m) => {
+                          const isSelected = (formData.aiModel || 'google/gemini-3.5-flash-lite') === m.id;
+                          return (
+                            <div
+                              key={m.id}
+                              onClick={() => {
+                                setFormData({ ...formData, aiModel: m.id });
+                                setVerificationError(null);
+                              }}
+                              className={`p-2.5 rounded-xl border cursor-pointer transition-all ${
+                                isSelected
+                                  ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/30 ring-1 ring-amber-500/40 shadow-xs'
+                                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/40 dark:bg-[#050912]/40'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`w-2 h-2 rounded-full ${
+                                      isSelected
+                                        ? 'bg-amber-500 ring-4 ring-amber-500/20'
+                                        : 'bg-slate-300 dark:bg-slate-700'
+                                    }`}
+                                  />
+                                  <span className="text-xs font-bold text-slate-900 dark:text-white">
+                                    {m.name}
+                                  </span>
+                                </div>
                                 <span
-                                  className={`w-2 h-2 rounded-full ${
-                                    formData.aiModel === m.id
-                                      ? 'bg-amber-500 ring-4 ring-amber-500/20'
-                                      : 'bg-slate-300 dark:bg-slate-700'
+                                  className={`text-[9.5px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                                    m.requiresKey
+                                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30'
+                                      : 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30'
                                   }`}
-                                />
-                                <span className="text-xs font-bold text-slate-900 dark:text-white">
-                                  {m.name}
+                                >
+                                  {m.requiresKey ? '🔑 BYOK Key Required' : '⚡ Platform Managed'}
                                 </span>
                               </div>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-slate-200/80 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                                {m.badge}
-                              </span>
+                              <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
+                                {m.desc}
+                              </p>
                             </div>
-                            <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 pl-4">
-                              {m.desc}
-                            </p>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -663,17 +755,22 @@ export function UserSettingsDrawer({
                       <label className="text-[11px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-between">
                         <span className="flex items-center gap-1.5">
                           <Key className="w-3.5 h-3.5 text-amber-500" />
-                          <span>User-Scoped Personal API Key (BYOK)</span>
+                          <span>Personal API Key (BYOK)</span>
                         </span>
-                        <span className="text-[10px] text-slate-400">Optional</span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {COMMERCE_MODELS.find((m) => m.id === (formData.aiModel || 'google/gemini-3.5-flash-lite'))?.requiresKey
+                            ? 'Required for selected model'
+                            : 'Optional for Gemini/Gemma'}
+                        </span>
                       </label>
                       <div className="relative">
                         <input
                           type={showApiKey ? 'text' : 'password'}
                           value={formData.userApiKey || ''}
-                          onChange={(e) =>
-                            setFormData({ ...formData, userApiKey: e.target.value })
-                          }
+                          onChange={(e) => {
+                            setFormData({ ...formData, userApiKey: e.target.value });
+                            setVerificationError(null);
+                          }}
                           placeholder="sk-... or AIzaSy..."
                           className="w-full px-3 py-2 pr-9 bg-slate-50 dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-lg text-xs font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
                           autoComplete="off"
@@ -691,9 +788,22 @@ export function UserSettingsDrawer({
                         </button>
                       </div>
                       <p className="text-[10px] text-slate-500 dark:text-slate-400">
-                        Used strictly for your requests without consuming platform quota. Discarded when session ends.
+                        {COMMERCE_MODELS.find((m) => m.id === (formData.aiModel || 'google/gemini-3.5-flash-lite'))?.requiresKey
+                          ? 'This model requires a valid personal API key. Keys are actively verified with the provider upon saving and never shared.'
+                          : 'Gemini and Gemma models run out-of-the-box using the platform Google API key. You may optionally supply your own key.'}
                       </p>
                     </div>
+
+                    {/* Verification Error Alert */}
+                    {verificationError && (
+                      <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-800 dark:text-rose-300 text-xs flex items-start gap-2.5 animate-fade-in shadow-xs">
+                        <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <span className="font-bold block">Key Verification Failed</span>
+                          <p className="text-[11px] leading-relaxed opacity-95">{verificationError}</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -705,7 +815,8 @@ export function UserSettingsDrawer({
             <button
               type="button"
               onClick={handleReset}
-              className="px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium transition-colors flex items-center gap-1.5"
+              disabled={isVerifying}
+              className="px-3 py-2 rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium transition-colors flex items-center gap-1.5 disabled:opacity-50"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Defaults</span>
@@ -715,7 +826,8 @@ export function UserSettingsDrawer({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                disabled={isVerifying}
+                className="px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -723,9 +835,15 @@ export function UserSettingsDrawer({
               <button
                 type="submit"
                 form="settings-form"
-                className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold shadow-md shadow-cyan-500/20 transition-all flex items-center gap-1.5"
+                disabled={isVerifying}
+                className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 disabled:opacity-60 text-white text-xs font-bold shadow-md shadow-cyan-500/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
               >
-                {savedSuccess ? (
+                {isVerifying ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
+                    <span>Verifying Key...</span>
+                  </>
+                ) : savedSuccess ? (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                     <span>Saved!</span>

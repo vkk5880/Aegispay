@@ -64,7 +64,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/api/buyer/models', async () => {
     logger.debug('Retrieving available commerce AI models');
     const activeModel = resolveCommerceModel();
-    const defaultModel = 'google/gemini-2.5-flash';
+    const defaultModel = 'google/gemini-3.5-flash-lite';
     logger.info(`Active commerce AI model: ${activeModel}, available models count: ${AVAILABLE_COMMERCE_MODELS.length}`, {
       activeModel,
       defaultModel,
@@ -76,6 +76,104 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
       default_model: defaultModel,
       available_models: AVAILABLE_COMMERCE_MODELS,
     };
+  });
+
+  /**
+   * POST /api/buyer/verify-llm-key
+   * Actively verifies that user-supplied BYOK personal API key is valid against provider endpoint.
+   * If invalid, rejects saving so unauthenticated models cannot be activated.
+   */
+  fastify.post('/api/buyer/verify-llm-key', async (request, reply) => {
+    const VerifySchema = z.object({
+      provider: z.enum(['google', 'openai', 'anthropic', 'custom']),
+      apiKey: z.string().min(1, 'API key cannot be empty'),
+      model: z.string().optional(),
+    });
+
+    const parsed = VerifySchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        valid: false,
+        error: 'Invalid request: provider and apiKey are required',
+      });
+    }
+
+    const { provider, apiKey, model } = parsed.data;
+    const timer = logger.time(`Verify LLM Key [${provider}]`);
+
+    try {
+      if (provider === 'google') {
+        const testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}&pageSize=1`;
+        const res = await fetch(testUrl, { method: 'GET' });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = (errData as any)?.error?.message || `Google API returned HTTP ${res.status}`;
+          timer(`Google key check failed: ${errMsg}`);
+          return reply.status(400).send({
+            valid: false,
+            error: `Google Gemini API key invalid: ${errMsg}`,
+          });
+        }
+        timer('Google key valid');
+        return reply.send({ valid: true, provider: 'google', message: 'Google API key verified successfully' });
+      }
+
+      if (provider === 'openai') {
+        const res = await fetch('https://api.openai.com/v1/models', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${apiKey.trim()}`,
+          },
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = (errData as any)?.error?.message || `OpenAI returned HTTP ${res.status}`;
+          timer(`OpenAI key check failed: ${errMsg}`);
+          return reply.status(400).send({
+            valid: false,
+            error: `OpenAI API key invalid: ${errMsg}`,
+          });
+        }
+        timer('OpenAI key valid');
+        return reply.send({ valid: true, provider: 'openai', message: 'OpenAI API key verified successfully' });
+      }
+
+      if (provider === 'anthropic') {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey.trim(),
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'claude-3-5-sonnet-20241022',
+            max_tokens: 1,
+            messages: [{ role: 'user', content: 'ping' }],
+          }),
+        });
+
+        if (res.status === 401 || res.status === 403) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = (errData as any)?.error?.message || `Anthropic returned HTTP ${res.status}`;
+          timer(`Anthropic key check failed: ${errMsg}`);
+          return reply.status(400).send({
+            valid: false,
+            error: `Anthropic API key invalid: ${errMsg}`,
+          });
+        }
+        timer('Anthropic key valid');
+        return reply.send({ valid: true, provider: 'anthropic', message: 'Anthropic API key verified successfully' });
+      }
+
+      return reply.send({ valid: true, provider: 'custom', message: 'Custom key accepted' });
+    } catch (err: any) {
+      logger.error(`Exception verifying API key for ${provider}`, { error: err?.message });
+      return reply.status(500).send({
+        valid: false,
+        error: `Could not connect to ${provider} API server: ${err?.message}`,
+      });
+    }
   });
 
   /**
