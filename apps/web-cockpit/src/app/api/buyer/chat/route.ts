@@ -8,8 +8,9 @@ import {
 } from '@aegispay/shared-types';
 import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
+import { DEFAULT_50_SEARCH_PRODUCTS } from '@/lib/searchCatalog';
 
-async function searchChannel3Live(query: string, limit = 10): Promise<import('@aegispay/shared-types').ProductCardData[]> {
+async function searchChannel3Live(query: string, limit = 50): Promise<import('@aegispay/shared-types').ProductCardData[]> {
   const apiKey = process.env.CHANNEL3_API_KEY || '';
   const baseUrl = process.env.CHANNEL3_BASE_URL || 'https://api.trychannel3.com';
   const promoCode = process.env.CHANNEL3_PROMO_CODE || 'PAYPAL-HACKATHON-2026';
@@ -556,9 +557,22 @@ export async function POST(req: Request) {
     return respond(mockPayload);
   }
 
-  // Default DISCOVER - query live Channel3
-  const liveChannel3Products = await searchChannel3Live(body.message || 'headphones', 10);
-  const discoverProducts = liveChannel3Products.length > 0 ? liveChannel3Products : sampleProducts;
+  // Default DISCOVER - query live Channel3 (by default requesting 50 items)
+  const targetLimit = typeof body.limit === 'number' && body.limit > 0 ? body.limit : 50;
+  const liveChannel3Products = await searchChannel3Live(body.message || 'headphones', targetLimit);
+
+  // Fill up to targetLimit (50 items) with sample products and catalog to guarantee 50 items returned
+  const discoverProducts: import('@aegispay/shared-types').ProductCardData[] = [...liveChannel3Products];
+  if (discoverProducts.length < targetLimit) {
+    const existingIds = new Set(discoverProducts.map((p) => p.product_id));
+    for (const s of [...sampleProducts, ...DEFAULT_50_SEARCH_PRODUCTS]) {
+      if (!existingIds.has(s.product_id)) {
+        discoverProducts.push(s);
+        existingIds.add(s.product_id);
+      }
+      if (discoverProducts.length >= targetLimit) break;
+    }
+  }
 
   const discoverMarkdown = discoverProducts.length > 0
     ? `Here are the top matches I discovered from Channel3 with promo code \`PAYPAL-HACKATHON-2026\`:\n\n` +

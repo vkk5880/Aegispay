@@ -267,7 +267,7 @@ export function createSearchCatalogTool(
     execute: async (input: any) => {
       const stopTimer = logger.time('MastraTool:search_catalog');
       const args = input?.context || input;
-      const { query, category, max_price_usd, limit = 10 } = args;
+      const { query, category, max_price_usd, limit = 50 } = args;
       logger.info('Executing Mastra tool: search_catalog', sanitizeForLogging({ query, category, max_price_usd, limit }));
 
       try {

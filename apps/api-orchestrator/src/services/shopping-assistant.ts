@@ -745,7 +745,7 @@ export class ShoppingAssistantService {
         } else {
           const res = await this.channel3Client.search({
             query: query || undefined,
-            limit: inputData.limit || 10,
+            limit: inputData.limit || 50,
           });
           products = res.products.map(p => transformToProductCard(p));
         }
