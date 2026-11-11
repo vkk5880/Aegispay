@@ -5,17 +5,21 @@ import {
   loadUserPreferences,
   saveUserPreference,
   getPurchaseHistory,
+  getPurchaseHistoryAsync,
   checkAllWatchlists,
   getWatchlistAlerts,
   getReceipts,
+  getReceiptsAsync,
   updatePurchaseStatus,
   logPurchase,
+  syncPayPalOrderToHistory,
   createOrGetChatSession,
   saveChatMessage,
   getChatSessionWithMessages,
   listChatSessions,
   deleteChatSession,
 } from '../services/user-memory.js';
+import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import {
@@ -723,16 +727,25 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /api/buyer/history
-   * Returns purchase transaction history.
+   * Returns live purchase transaction history from PostgreSQL and L1 cache.
+   * If an order_id is requested, syncs with PayPal API and saves to user data.
+   * If user has no data, returns an empty array (strictly no mock/test data).
    */
   fastify.get('/api/buyer/history', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const query = request.query as { user_id?: string; limit?: string };
+    const query = request.query as { user_id?: string; limit?: string; order_id?: string };
     const limit = query?.limit ? parseInt(query.limit, 10) : 50;
-    const userId = request.user?.id || 'demo';
-    logger.debug(`Retrieving purchase transaction history for '${userId}', limit: ${limit}`);
-    const history = getPurchaseHistory(userId, limit);
-    logger.info(`Retrieved ${history.length} transaction history records for user '${userId}'`);
-    return reply.send({ status: 'SUCCESS', history });
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (query?.user_id || 'demo');
+    const orderId = query?.order_id;
+
+    if (orderId) {
+      logger.info(`Checking / syncing order detail from PayPal/DB for order '${orderId}', user '${userId}'`);
+      await syncPayPalOrderToHistory(orderId, userId, defaultPayPalClient);
+    }
+
+    logger.debug(`Retrieving live purchase transaction history for '${userId}', limit: ${limit}`);
+    const history = await getPurchaseHistoryAsync(userId, limit);
+    logger.info(`Retrieved ${history.length} live transaction history records for user '${userId}'`);
+    return reply.send({ status: 'SUCCESS', history, orders: history });
   });
 
   /**
@@ -760,13 +773,15 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
   /**
    * GET /api/buyer/receipts
-   * Returns user receipts and cryptographic certificates.
+   * Returns live user receipts and cryptographic certificates from database.
+   * If user has no receipts, returns an empty array (strictly no mock/test data).
    */
   fastify.get('/api/buyer/receipts', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const userId = request.user?.id || 'demo';
-    logger.debug(`Retrieving receipts and cryptographic certificates for '${userId}'`);
-    const receipts = getReceipts(userId);
-    logger.info(`Retrieved ${receipts.length} receipts for user '${userId}'`);
+    const query = request.query as { user_id?: string };
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (query?.user_id || 'demo');
+    logger.debug(`Retrieving live receipts and cryptographic certificates for '${userId}'`);
+    const receipts = await getReceiptsAsync(userId);
+    logger.info(`Retrieved ${receipts.length} live receipts for user '${userId}'`);
     return reply.send({ status: 'SUCCESS', receipts });
   });
 
@@ -777,7 +792,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/buyer/escrow/confirm', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; order_id?: string };
     const orderId = body?.order_id || 'demo_order';
-    const userId = request.user?.id || body?.user_id || 'demo';
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (body?.user_id || 'demo');
     logger.info(`Confirming order delivery and capturing escrow hold for order '${orderId}', user '${userId}'`);
     const updated = updatePurchaseStatus(userId, orderId, 'CAPTURED');
     logger.info(`Escrow status updated to CAPTURED for order '${orderId}'`);
@@ -791,7 +806,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/api/buyer/escrow/refund', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; order_id?: string };
     const orderId = body?.order_id || 'demo_order';
-    const userId = request.user?.id || body?.user_id || 'demo';
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (body?.user_id || 'demo');
     logger.info(`Refunding order hold and updating escrow status to REFUNDED for order '${orderId}', user '${userId}'`);
     const updated = updatePurchaseStatus(userId, orderId, 'REFUNDED');
     logger.info(`Escrow status updated to REFUNDED for order '${orderId}'`);
@@ -803,8 +818,8 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * Lists historical chat sessions for the authenticated buyer.
    */
   fastify.get('/api/buyer/chat/sessions', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const userId = request.user?.id || 'demo';
-    const query = request.query as { limit?: string };
+    const query = request.query as { user_id?: string; limit?: string };
+    const userId = (request.user?.id && request.user.id !== 'guest') ? request.user.id : (query?.user_id || 'demo');
     const limit = query?.limit ? parseInt(query.limit, 10) : 20;
     logger.debug(`Retrieving chat sessions for user '${userId}', limit: ${limit}`);
     const sessions = await listChatSessions(userId, limit);

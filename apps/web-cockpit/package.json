@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@aegispay/shared-types": "workspace:*",
+    "@aegispay/database": "workspace:*",
     "@assistant-ui/react": "^0.15.34",
     "@assistant-ui/react-markdown": "^0.14.25",
     "@bryntum/scheduler-trial": "^7.3.8",

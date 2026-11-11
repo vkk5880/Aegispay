@@ -193,7 +193,7 @@ test('custody enforcer Guardrail 3: Recovers mandate from PostgreSQL fallback on
     allowed_categories: ['electronics'],
   };
 
-  enforcer.setDbFallback(async (mandateId) => {
+  enforcer.setDbFallback(async (mandateId: string) => {
     if (mandateId === 'vch_pg_recovery_1') {
       return mockDbRecord;
     }

@@ -14,6 +14,7 @@ export async function GET(
     const res = await fetch(`${orchestratorUrl}/api/buyer/chat/sessions/${encodeURIComponent(sessionId)}`, {
       headers: {
         'authorization': req.headers.get('authorization') || '',
+        'x-session-token': req.headers.get('x-session-token') || '',
       },
       cache: 'no-store',
     });
@@ -21,62 +22,62 @@ export async function GET(
       const data = await res.json();
       return NextResponse.json(data);
     }
-  } catch (err) {
-    apiLogger.warn(`Upstream orchestrator unreachable for session ${sessionId}; using fallback`);
+  } catch (err: any) {
+    apiLogger.warn(`Upstream orchestrator unreachable for session ${sessionId}; attempting database query`, {
+      error: err?.message,
+    });
   }
 
-  // Graceful fallback with attached products for session
+  // Direct PostgreSQL query for session messages when orchestrator is unreachable
+  if (process.env.DATABASE_URL) {
+    try {
+      const { createDb, chatSessions, chatMessages, eq } = await import('@aegispay/database');
+      const db = createDb(process.env.DATABASE_URL);
+      const sessionRows = await db
+        .select()
+        .from(chatSessions)
+        .where(eq(chatSessions.id, sessionId))
+        .limit(1);
+
+      if (sessionRows && sessionRows.length > 0) {
+        const s = sessionRows[0];
+        const msgRows = await db
+          .select()
+          .from(chatMessages)
+          .where(eq(chatMessages.session_id, sessionId))
+          .orderBy(chatMessages.created_at);
+
+        return NextResponse.json({
+          status: 'SUCCESS',
+          session: {
+            id: s.id,
+            buyer_id: s.buyer_id,
+            title: s.title,
+            created_at: s.created_at ? new Date(s.created_at).toISOString() : new Date().toISOString(),
+            updated_at: s.updated_at ? new Date(s.updated_at).toISOString() : new Date().toISOString(),
+            message_count: msgRows.length,
+          },
+          messages: msgRows.map((m) => ({
+            id: m.id,
+            session_id: m.session_id,
+            role: m.role,
+            content: m.content,
+            action: m.action,
+            selected_product_ids: m.selected_product_ids,
+            attached_products: m.attached_products,
+            tool_calls: m.tool_calls,
+            created_at: m.created_at ? new Date(m.created_at).toISOString() : new Date().toISOString(),
+          })),
+        });
+      }
+    } catch (dbErr: any) {
+      apiLogger.warn('Direct database query for chat session detail failed', { error: dbErr?.message });
+    }
+  }
+
   return NextResponse.json({
     status: 'SUCCESS',
-    session: {
-      id: sessionId,
-      buyer_id: 'demo',
-      title: 'Studio Headphones & Audio Setup',
-      created_at: '2026-11-09T18:00:00.000Z',
-      updated_at: '2026-11-09T18:30:00.000Z',
-      message_count: 2,
-    },
-    messages: [
-      {
-        id: 'msg_01',
-        session_id: sessionId,
-        role: 'user',
-        content: 'Find me studio headphones under $300 with active noise cancellation',
-        created_at: '2026-11-09T18:00:00.000Z',
-      },
-      {
-        id: 'msg_02',
-        session_id: sessionId,
-        role: 'assistant',
-        content: 'I analyzed merchant catalogs across Best Buy, Target, and Sony. Here are the top algorithmic picks within your budget ceiling:',
-        action: 'DISCOVER',
-        attached_products: [
-          {
-            product_id: 'ch3_anc_headphone_01',
-            title: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
-            description: 'Industry-leading noise cancellation with two processors and 8 microphones.',
-            category_id: 'Electronics',
-            price_cents: 27900,
-            compare_at_price_cents: 34999,
-            commission_rebate_cents: 2790,
-            commission_rate: 0.1,
-            merchant_domain: 'bestbuy.com',
-            rating: 4.8,
-            review_count: 320,
-            free_shipping: true,
-            shipping_fee_cents: 0,
-            cleaned_image_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800',
-            merchant_credibility_score: 98,
-            stock_status: 'IN_STOCK',
-            specs: {
-              'Battery Life': '30 Hours',
-              'ANC': 'Dual Processor V1 + QN1',
-              'Connectivity': 'Bluetooth 5.2 + LDAC',
-            },
-          },
-        ],
-        created_at: '2026-11-09T18:01:00.000Z',
-      },
-    ],
+    session: null,
+    messages: [],
   });
 }

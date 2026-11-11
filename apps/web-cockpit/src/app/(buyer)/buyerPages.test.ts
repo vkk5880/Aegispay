@@ -30,7 +30,7 @@ function withMockRouter(children: React.ReactNode) {
   );
 }
 
-test('HistoryPage renders audit ledger, orders tab, and cryptographic proofs', () => {
+test('HistoryPage renders audit ledger headers and clean empty state when no orders exist', () => {
   const html = renderToStaticMarkup(React.createElement(HistoryPage));
 
   assert.ok(html.includes('Purchase History &amp; Audit Ledger') || html.includes('Purchase History & Audit Ledger'));
@@ -38,16 +38,37 @@ test('HistoryPage renders audit ledger, orders tab, and cryptographic proofs', (
   assert.ok(html.includes('RFC 8785 Canonical JSON'));
   assert.ok(html.includes('Orders &amp; Escrow Holds') || html.includes('Orders & Escrow Holds'));
   assert.ok(html.includes('Cryptographic Proofs &amp; Receipts') || html.includes('Cryptographic Proofs & Receipts'));
-  assert.ok(html.includes('Sony WH-1000XM5 Wireless Noise Canceling Headphones'));
-  assert.ok(html.includes('PayPal ID:'));
-  assert.ok(html.includes('Dispute Forensics'));
-});
-
-test('HistoryContent renders empty state when zero orders exist', () => {
-  const html = renderToStaticMarkup(React.createElement(HistoryContent, { initialItems: [], initialReceipts: [] }));
-
   assert.ok(html.includes('No Orders or Escrow Holds Found'));
   assert.ok(html.includes('Discover Products to Purchase'));
+});
+
+test('HistoryContent renders live order card, PayPal ID, tracking, and dispute forensics when orders exist', () => {
+  const liveOrder = {
+    order_id: 'ord_pp_live_123',
+    user_id: 'user_live@example.com',
+    title: 'Sony WH-1000XM5 Wireless Noise Canceling Headphones',
+    price_cents: 34800,
+    merchant_domain: 'bestbuy.com',
+    cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400',
+    score: 9.4,
+    tx_id: 'PAYID-LIVE12345678',
+    reservation_id: 'vch_live_1234',
+    escrow_status: 'HELD' as const,
+    timestamp: '2026-11-07T10:00:00.000Z',
+    receipt_number: 1042,
+    hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    carrier: 'FedEx Priority',
+    tracking_number: '789012345678',
+    fulfillment_status: 'shipped' as const,
+  };
+
+  const html = renderToStaticMarkup(React.createElement(HistoryContent, { initialItems: [liveOrder] }));
+
+  assert.ok(html.includes('Sony WH-1000XM5 Wireless Noise Canceling Headphones'));
+  assert.ok(html.includes('PayPal ID:'));
+  assert.ok(html.includes('PAYID-LIVE12345678'));
+  assert.ok(html.includes('Dispute Forensics'));
+  assert.ok(html.includes('FedEx Priority'));
 });
 
 test('SearchPage renders Suspense boundary fallback when server rendered outside App Router context', () => {

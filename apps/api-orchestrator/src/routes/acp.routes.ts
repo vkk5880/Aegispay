@@ -235,7 +235,7 @@ function toPublicCheckoutSession(session: StoredCheckoutSession) {
         'card.network_token',
         'wallet.paypal',
       ],
-      payment_handlers: ACP_STANDARD_PAYMENT_HANDLERS.map((h) => ({
+      payment_handlers: ACP_STANDARD_PAYMENT_HANDLERS.map((h: any) => ({
         id: h.id,
         name: h.name,
         display_name: h.display_name,
@@ -558,7 +558,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
     const requestedCapabilities = (request.body as any)?.capabilities;
     const discountsInput = (request.body as any)?.discounts;
 
-    const normalizedItems = items.map((item, idx) => {
+    const normalizedItems = items.map((item: any, idx: number) => {
       const unitPriceCents = item.unit_price_cents !== undefined ? item.unit_price_cents : 2500;
       const subtotalCents = unitPriceCents * item.quantity;
       return {
