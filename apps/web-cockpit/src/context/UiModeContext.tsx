@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 
 export interface UiModeContextType {
   /**
@@ -15,13 +15,12 @@ export interface UiModeContextType {
 
   /**
    * When true, displays advanced technical details, metrics, and developer inspection logs.
-   * In strict production environment, this is always false.
+   * In strict production environment, this is always false unless NEXT_PUBLIC_DEV_TOOLS === 'true'.
    */
   showTechnicalDetails: boolean;
 
   /**
-   * Toggle or set technical details visibility.
-   * Has no effect in strict production environment.
+   * Toggle or set technical details visibility (Dev Mode).
    */
   setShowTechnicalDetails: (enabled: boolean) => void;
   toggleTechnicalDetails: () => void;
@@ -39,6 +38,7 @@ const isTestEnv =
           typeof arg === 'string' &&
           (arg.includes('.test.') || arg.includes('--test') || arg.includes('test'))
       )));
+
 const isProdEnv =
   typeof process !== 'undefined' &&
   process.env.NODE_ENV === 'production' &&
@@ -65,32 +65,34 @@ export function UiModeProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isProdEnv) return;
     try {
-      const saved = localStorage.getItem('aegispay_dev_mode');
-      if (saved !== null) {
-        setShowTechState(saved === 'true');
+      const savedDev = localStorage.getItem('aegispay_dev_mode');
+      if (savedDev !== null) {
+        setShowTechState(savedDev === 'true');
       }
     } catch {}
     setMounted(true);
   }, []);
 
-  const setShowTechnicalDetails = (enabled: boolean) => {
+  const setShowTechnicalDetails = useCallback((enabled: boolean) => {
     if (isProdEnv) return;
     setShowTechState(enabled);
     try {
       localStorage.setItem('aegispay_dev_mode', String(enabled));
     } catch {}
-  };
+  }, []);
 
-  const toggleTechnicalDetails = () => {
+  const toggleTechnicalDetails = useCallback(() => {
     setShowTechnicalDetails(!showTechnicalDetails);
-  };
+  }, [showTechnicalDetails, setShowTechnicalDetails]);
+
+  const effectiveShowTechnicalDetails = isProdEnv ? false : showTechnicalDetails;
 
   return (
     <UiModeContext.Provider
       value={{
         isProduction: isProdEnv,
         isDevEnvironment: !isProdEnv,
-        showTechnicalDetails: isProdEnv ? false : showTechnicalDetails,
+        showTechnicalDetails: effectiveShowTechnicalDetails,
         setShowTechnicalDetails,
         toggleTechnicalDetails,
       }}

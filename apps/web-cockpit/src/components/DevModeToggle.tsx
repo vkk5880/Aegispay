@@ -2,13 +2,13 @@
 
 import React from 'react';
 import { useUiMode } from '@/context/UiModeContext';
-import { Terminal, Eye, EyeOff } from 'lucide-react';
+import { Terminal } from 'lucide-react';
 
 export function DevModeToggle() {
   const { isProduction, isDevEnvironment, showTechnicalDetails, toggleTechnicalDetails } =
     useUiMode();
 
-  // In strict production, technical details and dev toggles are completely hidden
+  // In strict production, technical details and dev toggles are completely hidden unless dev environment enabled
   if (isProduction || !isDevEnvironment) {
     return null;
   }
@@ -26,8 +26,8 @@ export function DevModeToggle() {
       }`}
     >
       <Terminal className={`w-4 h-4 sm:w-4.5 sm:h-4.5 xl:w-5 xl:h-5 ${showTechnicalDetails ? 'text-amber-600 dark:text-amber-400' : 'text-slate-400'}`} />
-      
-      {/* Floating tooltip on hover (native title removed to prevent duplicate tooltip) */}
+
+      {/* Floating tooltip on hover */}
       <span className="absolute -bottom-9 left-1/2 -translate-x-1/2 px-2.5 py-1 rounded-lg bg-slate-900/95 dark:bg-slate-100/95 backdrop-blur-md text-white dark:text-slate-900 text-xs font-mono whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl z-50 border border-white/10 dark:border-black/10">
         {showTechnicalDetails ? 'Dev Mode: ON' : 'Dev Mode: OFF'}
       </span>

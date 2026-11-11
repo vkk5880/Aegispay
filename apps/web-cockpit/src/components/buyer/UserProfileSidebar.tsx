@@ -14,12 +14,9 @@ import {
   CheckCircle2,
   AlertCircle,
   Sparkles,
-  ToggleLeft,
-  ToggleRight,
   ExternalLink,
   Sliders,
   Mail,
-  Zap,
 } from 'lucide-react';
 
 interface UserProfileSidebarProps {
@@ -32,9 +29,6 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
     user,
     isLoggedIn,
     isAuthorized,
-    isTestUserMode,
-    canToggleTestUser,
-    setTestUserMode,
     loginWithPayPal,
     authorizePayment,
     logout,
@@ -68,7 +62,7 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                   User Profile & PayPal Account
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Manage your identity, test user status & payment authorization
+                  Manage your PayPal Sandbox identity & Vault v3 authorization
                 </p>
               </div>
             </div>
@@ -112,19 +106,13 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                     </div>
 
                     <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                      {user.isTestUser ? (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[10px] font-mono font-bold">
-                          Test User (Sandbox)
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-[10px] font-mono font-bold">
-                          PayPal Verified
-                        </span>
-                      )}
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-[10px] font-mono font-bold">
+                        PayPal Sandbox Connected
+                      </span>
 
                       {isAuthorized ? (
                         <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-mono font-bold">
-                          Payment: Authorized
+                          Vault v3: Authorized
                         </span>
                       ) : (
                         <span className="px-2 py-0.5 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-700 dark:text-rose-400 text-[10px] font-mono font-bold">
@@ -140,7 +128,7 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                   <div className="flex justify-between text-slate-500 dark:text-slate-400">
                     <span>Payment Status:</span>
                     <span className={isAuthorized ? 'text-emerald-600 dark:text-emerald-400 font-bold' : 'text-amber-600 dark:text-amber-400 font-bold'}>
-                      {isAuthorized ? 'Authorized (1-Prompt Active)' : 'Pending Authorization'}
+                      {isAuthorized ? 'Authorized (Vault Token Active)' : 'Pending Authorization'}
                     </span>
                   </div>
                   {user.vaultSetupTokenId && (
@@ -148,6 +136,14 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                       <span>Vault Token:</span>
                       <span className="text-slate-700 dark:text-slate-300 truncate max-w-[180px]">
                         {user.vaultSetupTokenId}
+                      </span>
+                    </div>
+                  )}
+                  {user.mandateId && (
+                    <div className="flex justify-between text-slate-500 dark:text-slate-400">
+                      <span>Mandate ID:</span>
+                      <span className="text-slate-700 dark:text-slate-300 truncate max-w-[180px]">
+                        {user.mandateId}
                       </span>
                     </div>
                   )}
@@ -164,7 +160,7 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                     Not Logged In
                   </h4>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Connect your PayPal account to synchronize orders, cart items, and savings.
+                    Connect your PayPal Sandbox account to synchronize orders, cart items, and spend allowance.
                   </p>
                 </div>
               </div>
@@ -182,7 +178,7 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                   className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-700 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-sm shadow-lg shadow-cyan-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <LogIn className="w-4 h-4" />
-                  <span>Login with PayPal</span>
+                  <span>Login with PayPal Sandbox</span>
                 </button>
               ) : !isAuthorized ? (
                 /* Primary Button 2: Authorize Payment */
@@ -194,13 +190,13 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
                   className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-sm shadow-lg shadow-amber-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-98"
                 >
                   <CreditCard className="w-4 h-4" />
-                  <span>Authorize Payment</span>
+                  <span>Authorize Sandbox Spend Allowance</span>
                 </button>
               ) : (
                 /* Logged in and authorized status banner */
                 <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-                  <span>PayPal Payment & Spending Allowance Active!</span>
+                  <span>PayPal Sandbox Payment & Vault v3 Active!</span>
                 </div>
               )}
 
@@ -217,53 +213,7 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
               )}
             </div>
 
-            {/* 3. Non-Production Mode: Enable Test User Card */}
-            {canToggleTestUser && (
-              <div className="border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-transparent rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                    <span className="text-xs font-bold text-slate-900 dark:text-white">
-                      Enable Test User
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setTestUserMode(!isTestUserMode)}
-                    className="cursor-pointer text-cyan-600 dark:text-cyan-400 transition-transform active:scale-90"
-                    aria-label="Toggle Test User Mode"
-                  >
-                    {isTestUserMode ? (
-                      <ToggleRight className="w-7 h-7 text-cyan-500" />
-                    ) : (
-                      <ToggleLeft className="w-7 h-7 text-slate-400" />
-                    )}
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                  {isTestUserMode ? (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                      ✓ Test User is active: Bypasses live PayPal popups and automatically marks payment as authorized with sandbox credentials.
-                    </span>
-                  ) : (
-                    <span>
-                      When enabled, bypasses live PayPal authorization with simulated sandbox credentials. When disabled, behaves exactly like production.
-                    </span>
-                  )}
-                </p>
-
-                {isTestUserMode && (
-                  <div className="bg-white/80 dark:bg-[#070e1c]/80 rounded-xl p-2.5 text-[11px] font-mono space-y-1 border border-cyan-500/20">
-                    <div className="text-slate-500">Name: <span className="text-slate-900 dark:text-white font-bold">Alex Mercer</span></div>
-                    <div className="text-slate-500">Email: <span className="text-slate-900 dark:text-white">alex.mercer@sandbox.paypal.com</span></div>
-                    <div className="text-emerald-600 dark:text-emerald-400 font-bold">Status: Auto-Authorized (No Popup)</div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* 4. Link to Shopping & Delivery Settings */}
+            {/* 3. Link to Shopping & Delivery Settings */}
             {onOpenSettings && (
               <div className="pt-2">
                 <button
@@ -286,7 +236,7 @@ export function UserProfileSidebar({ onOpenSettings, isOpen }: UserProfileSideba
 
           {/* Footer */}
           <div className="p-4 border-t border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-[#050912] text-center text-[11px] font-mono text-slate-500">
-            AegisPay • Secure Identity & Vault v3 Protected
+            AegisPay • PayPal Sandbox & Vault v3 Protected
           </div>
         </div>
       </div>

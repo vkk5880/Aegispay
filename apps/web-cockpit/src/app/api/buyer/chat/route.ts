@@ -397,6 +397,16 @@ export async function POST(req: Request) {
   }
 
   if (action === 'BUY') {
+    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_DEV_TOOLS !== 'true') {
+      return NextResponse.json(
+        {
+          error: 'Upstream payment orchestrator unavailable. Mock checkout is strictly prohibited in production.',
+          code: 'ERR_FAIL_CLOSED_PRODUCTION_REQUIRED',
+        },
+        { status: 503 }
+      );
+    }
+
     const matched = selectedProductIds.length > 0 ? resolveProducts(selectedProductIds) : [];
     const buyProducts = matched.length > 0 ? matched : [sampleProducts[0], sampleProducts[1]];
 

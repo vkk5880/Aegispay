@@ -113,7 +113,7 @@ export class Channel3Client {
 
   constructor(apiKey?: string, baseUrl?: string, promoCode?: string) {
     this.apiKey = apiKey || process.env.CHANNEL3_API_KEY || '';
-    this.baseUrl = baseUrl || process.env.CHANNEL3_BASE_URL || 'https://api.channel3.ai';
+    this.baseUrl = baseUrl || process.env.CHANNEL3_BASE_URL || 'https://api.trychannel3.com';
     this.promoCode = promoCode || process.env.CHANNEL3_PROMO_CODE || 'PAYPAL-HACKATHON-2026';
 
     if (this.apiKey && this.apiKey !== 'your_channel3_api_key_here') {

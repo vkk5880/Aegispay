@@ -42,15 +42,15 @@ export function SpendAllowanceHeader({
   const auth = useAuth();
 
   const isUserLoggedIn = auth.isLoggedIn;
-  const isPaymentAuthorized = isConfigured || auth.isAuthorized || auth.isTestUserMode;
-  const isTestUser = auth.isTestUserMode || Boolean(auth.user?.isTestUser);
+  // Security rule: Payment is authorized only if the user is actively logged in and authorized with PayPal.
+  const isPaymentAuthorized = auth.isLoggedIn && auth.isAuthorized;
 
   const availableCents = Math.max(0, maxBudgetCents - spentCents);
   const spentPercent = Math.min(100, Math.round((spentCents / (maxBudgetCents || 1)) * 100));
 
   return (
     <div className="w-full">
-      {/* Onboarding Banner if Unconfigured or Identity Only (Skipped if Test User is active or payment authorized) */}
+      {/* Onboarding Banner if Unconfigured or Identity Only (Skipped if payment is authorized) */}
       {!isPaymentAuthorized && (
         <div className="mb-4 p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent border border-amber-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fade-in">
           <div className="flex items-center gap-3">
@@ -61,7 +61,7 @@ export function SpendAllowanceHeader({
               <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                 <span>
                   {!isUserLoggedIn
-                    ? 'Login with PayPal to Enable Smart Shopping & Spend Protection'
+                    ? 'Login with PayPal Sandbox to Enable Smart Shopping & Spend Protection'
                     : 'Authorize Payment to Enable 1-Prompt Autonomous Purchases'}
                 </span>
                 {isUserLoggedIn && (
@@ -72,7 +72,7 @@ export function SpendAllowanceHeader({
               </h4>
               <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                 {!isUserLoggedIn
-                  ? 'Connect your PayPal account to synchronize orders across devices and enable budget protection.'
+                  ? 'Connect your PayPal Sandbox account to synchronize orders across devices and enable budget protection.'
                   : showTechnicalDetails
                   ? 'Identity connected. Authorize an Ed25519 spend mandate with PayPal Vault v3 to enable headless 1-prompt purchases.'
                   : 'Identity connected. Authorize your budget to let your shopping assistant complete purchases with one prompt.'}
@@ -92,7 +92,7 @@ export function SpendAllowanceHeader({
                 onConnectPayPal();
               }}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-700 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-600/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-              title={!isUserLoggedIn ? 'Login with PayPal' : 'Authorize Payment'}
+              title={!isUserLoggedIn ? 'Login with PayPal Sandbox' : 'Authorize Payment'}
             >
               <CreditCard className="w-3.5 h-3.5" />
               <span>{!isUserLoggedIn ? 'Login with PayPal' : 'Authorize Payment'}</span>
@@ -114,9 +114,16 @@ export function SpendAllowanceHeader({
                 <Lock className="w-5 h-5" />
               </div>
               <div>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
-                  {showTechnicalDetails ? 'Max Spend Allowance' : 'Spending Limit'}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 block font-semibold">
+                    {showTechnicalDetails ? 'Max Spend Allowance' : 'Spending Limit'}
+                  </span>
+                  {showTechnicalDetails && (
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                      SANDBOX
+                    </span>
+                  )}
+                </div>
                 <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
                   {formatCents(maxBudgetCents)}
                 </span>

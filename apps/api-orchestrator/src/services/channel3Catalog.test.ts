@@ -9,7 +9,7 @@ test('Channel3Client: provides promo code PAYPAL-HACKATHON-2026 in default heade
   assert.equal(headers['x-promo-code'], 'PAYPAL-HACKATHON-2026');
   assert.equal(headers['Content-Type'], 'application/json');
   assert.equal(client.getPromoCode(), 'PAYPAL-HACKATHON-2026');
-  assert.equal(client.getBaseUrl(), 'https://api.channel3.ai');
+  assert.equal(client.getBaseUrl(), 'https://api.trychannel3.com');
 });
 
 test('Channel3Client: supports custom promo code and authorization header when apiKey is supplied', () => {
@@ -97,7 +97,7 @@ test('Channel3Client search: live fetch sends promo code and multi-modal payload
   }) as any;
 
   try {
-    const liveClient = new Channel3Client('live_key_abc123');
+    const liveClient = new Channel3Client('live_key_abc123', 'https://api.channel3.ai');
     const result = await liveClient.search({
       query: 'noise cancelling headphones',
       image_url: 'https://inspiration.photos/clean_setup.png',

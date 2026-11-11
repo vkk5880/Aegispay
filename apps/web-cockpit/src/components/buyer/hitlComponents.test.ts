@@ -309,7 +309,7 @@ test('PayPalV6SdkMount renders session timer, funding sources, and hold amount',
   assert.ok(html.includes('PayPal'));
   assert.ok(html.includes('Venmo'));
   assert.ok(html.includes('Pay Later'));
-  assert.ok(html.includes('Authorize with PayPal'));
+  assert.ok(html.includes('Connect PayPal Sandbox to Authorize') || html.includes('Authorize with PayPal'));
   assert.ok(html.includes('APIMatic Context Security'));
   assert.ok(html.includes('15-MIN EPHEMERAL GRANTED'));
 });

@@ -14,10 +14,13 @@ import {
   ExternalLink,
   Store,
   Layers,
+  LogIn,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import type { KnapsackOptimizationData } from './KnapsackSplitVisualizer';
 import { generateBundlingExplanation } from './UnifiedCartDrawer';
+import { useAuth } from '@/context/AuthContext';
+import { useUiMode } from '@/context/UiModeContext';
 
 export interface PurchaseConfirmationCardProps {
   cart: KnapsackOptimizationData;
@@ -33,11 +36,21 @@ export interface PurchaseConfirmationCardProps {
 
 export function PurchaseConfirmationCard({
   cart,
-  vaultPaymentTokenId = 'vlt_token_paypal_live_9a7d2',
+  vaultPaymentTokenId,
   zipCode = '94016',
   onConfirmPurchase,
   onViewFullCart,
 }: PurchaseConfirmationCardProps) {
+  const { showTechnicalDetails } = useUiMode();
+  const {
+    user,
+    isLoggedIn,
+    isAuthorized,
+    loginWithPayPal,
+    authorizePayment,
+    recordPurchaseSpend,
+  } = useAuth();
+
   const [status, setStatus] = useState<'IDLE' | 'AUTHORIZING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
 
@@ -51,7 +64,19 @@ export function PurchaseConfirmationCard({
   const shippingFeeCents = cart.total_shipping_cents;
   const netTotalCents = grossSubtotalCents - platformSubsidyCents + shippingFeeCents + estimatedTaxCents;
 
+  const effectiveTokenId = vaultPaymentTokenId || user?.vaultSetupTokenId;
+  const isVaultReady = isAuthorized && Boolean(effectiveTokenId);
+
   const handleConfirmPurchase = async () => {
+    if (!isLoggedIn) {
+      await loginWithPayPal();
+      return;
+    }
+    if (!isAuthorized) {
+      await authorizePayment();
+      return;
+    }
+
     setStatus('AUTHORIZING');
     try {
       // Simulate/trigger fast 1-click authorization via vaulted PayPal token
@@ -60,6 +85,7 @@ export function PurchaseConfirmationCard({
       const generatedOrderId = `PP-ORD-VLT-${Date.now().toString().slice(-6)}`;
       setConfirmedOrderId(generatedOrderId);
       setStatus('SUCCESS');
+      recordPurchaseSpend(netTotalCents);
 
       if (onConfirmPurchase) {
         onConfirmPurchase({
@@ -86,9 +112,15 @@ export function PurchaseConfirmationCard({
               <h3 className="font-bold text-slate-900 dark:text-white text-sm">
                 Pre-Purchase Confirmation Order
               </h3>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-semibold">
-                Vault v3 Token Ready
-              </span>
+              {isVaultReady ? (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-semibold">
+                  Vault v3 Token Ready
+                </span>
+              ) : (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-semibold">
+                  {!isLoggedIn ? 'Login Required' : 'Authorization Required'}
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
               Multi-merchant knapsack allocation pre-cleared with 2PC inventory holds
@@ -138,64 +170,56 @@ export function PurchaseConfirmationCard({
                 <span className="text-[10px] text-slate-500">{m.items.length} items</span>
               </div>
 
-              <div className="pt-2 space-y-1">
-                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 text-[11px]">
-                  <Calendar className="w-3 h-3 text-cyan-500 shrink-0" />
-                  <span className="truncate">{m.delivery_window || '2-3 Business Days'}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500">Shipping:</span>
-                  {m.shipping_waived ? (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                      $0.00 (Waived)
+              <div className="py-2 space-y-1">
+                {m.items.map((it) => (
+                  <div key={it.product_id} className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-600 dark:text-slate-300 truncate max-w-[170px]">
+                      {it.quantity}x {it.title}
                     </span>
-                  ) : (
-                    <span className="font-mono text-slate-700 dark:text-slate-300">
-                      {formatCents(m.shipping_fee_cents)}
+                    <span className="font-mono text-slate-900 dark:text-white font-semibold">
+                      {formatCents(it.unit_price_cents * it.quantity)}
                     </span>
-                  )}
-                </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-1.5 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
+                  <Truck className="w-3 h-3" />
+                  {m.shipping_waived ? 'Waived Shipping' : formatCents(m.shipping_fee_cents)}
+                </span>
+                <span>{m.delivery_window || 'Express'}</span>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Cost Summary Breakdown Table */}
-      <div className="mt-4 p-3.5 rounded-xl bg-white dark:bg-[#070e1c] border border-slate-200 dark:border-slate-800 space-y-2 text-xs">
-        <div className="flex justify-between items-center">
-          <span className="text-slate-600 dark:text-slate-400">Retail Subtotal</span>
-          <span className="font-mono text-slate-900 dark:text-white font-medium">
-            {formatCents(grossSubtotalCents)}
-          </span>
+      {/* Financial Breakdown Table */}
+      <div className="mt-4 p-3.5 rounded-xl bg-slate-50 dark:bg-[#070d18] border border-slate-200 dark:border-slate-800/80 space-y-2 text-xs font-mono">
+        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+          <span>Gross Retail Subtotal</span>
+          <span>{formatCents(grossSubtotalCents)}</span>
         </div>
 
-        <div className="flex justify-between items-center">
-          <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1 font-medium">
+        <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
+          <span className="flex items-center gap-1">
             <Percent className="w-3 h-3" />
-            Platform Subsidy (Rebates Passed to You)
+            <span>Decoupled Platform Subsidy</span>
           </span>
-          <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
-            -{formatCents(platformSubsidyCents)}
-          </span>
+          <span>-{formatCents(platformSubsidyCents)}</span>
         </div>
 
-        <div className="flex justify-between items-center">
-          <span className="text-slate-600 dark:text-slate-400">
-            Estimated Tax (ZIP: {zipCode})
-          </span>
-          <span className="font-mono text-slate-900 dark:text-white">
-            {formatCents(estimatedTaxCents)}
-          </span>
+        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+          <span>Estimated Sales Tax (8.25%)</span>
+          <span>{formatCents(estimatedTaxCents)}</span>
         </div>
 
-        <div className="flex justify-between items-center">
-          <span className="text-slate-600 dark:text-slate-400">Shipping</span>
-          <span className="font-mono text-slate-900 dark:text-white">
+        <div className="flex justify-between text-slate-600 dark:text-slate-400">
+          <span>Consolidated Shipping</span>
+          <span>
             {shippingFeeCents === 0 ? (
-              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">
-                $0.00 Waived
-              </span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-semibold">$0.00 (Waived)</span>
             ) : (
               formatCents(shippingFeeCents)
             )}
@@ -239,17 +263,36 @@ export function PurchaseConfirmationCard({
               disabled={status === 'AUTHORIZING'}
               className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98 disabled:opacity-50"
             >
-              <CreditCard className="w-4 h-4" />
               {status === 'AUTHORIZING' ? (
-                <span>Authorizing with Vaulted PayPal...</span>
+                <>
+                  <CreditCard className="w-4 h-4 animate-spin" />
+                  <span>Authorizing with Vaulted PayPal...</span>
+                </>
+              ) : !isLoggedIn ? (
+                <>
+                  <LogIn className="w-4 h-4" />
+                  <span>Login with PayPal to Authorize • {formatCents(netTotalCents)}</span>
+                </>
+              ) : !isVaultReady ? (
+                <>
+                  <CreditCard className="w-4 h-4" />
+                  <span>Authorize Payment Allowance • {formatCents(netTotalCents)}</span>
+                </>
               ) : (
-                <span>Confirm Purchase with Vaulted PayPal • {formatCents(netTotalCents)}</span>
+                <>
+                  <CreditCard className="w-4 h-4" />
+                  <span>Confirm Purchase with Vaulted PayPal • {formatCents(netTotalCents)}</span>
+                </>
               )}
             </button>
 
             <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500 font-mono text-center">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Pre-authorized token: {vaultPaymentTokenId} • Zero Upfront Risk</span>
+              <span>
+                {isVaultReady
+                  ? `Pre-authorized token: ${effectiveTokenId || 'Active'} • Zero Upfront Risk`
+                  : 'Requires PayPal Login & Vault v3 Authorization'}
+              </span>
             </div>
           </div>
         )}

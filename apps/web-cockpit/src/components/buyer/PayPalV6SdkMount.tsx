@@ -5,6 +5,8 @@ import { webLogger as logger } from '@/lib/logger';
 import { CreditCard, ShieldCheck, CheckCircle2, Clock, AlertCircle, RefreshCw, ExternalLink, Zap, UserCheck } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransmuter';
+import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 
 export interface PayPalV6SdkMountProps {
   orderAmountCents: number;
@@ -39,6 +41,9 @@ export function PayPalV6SdkMount({
   clientId,
   clientToken,
 }: PayPalV6SdkMountProps) {
+  const { isProduction, showTechnicalDetails } = useUiMode();
+  const { isLoggedIn, isAuthorized, authorizePayment } = useAuth();
+
   const [secondsRemaining, setSecondsRemaining] = useState<number>(15 * 60); // 15 min session window
   const [sdkStatus, setSdkStatus] = useState<SdkMountStatus>('IDLE');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -139,6 +144,7 @@ export function PayPalV6SdkMount({
       const sdkInstance = await paypalGlobal.createInstance({
         clientId: clientId || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || 'sb',
         clientToken: clientToken,
+        environment: 'sandbox',
         components: ['paypal-payments', 'venmo-payments', 'fastlane'],
         pageType: 'checkout',
       });
@@ -207,6 +213,19 @@ export function PayPalV6SdkMount({
       orderIntent,
       options,
     });
+
+    if (!isLoggedIn) {
+      logger.warn('[PayPalV6Sdk:Authorize] PayPal Sandbox Account Required: User not logged in');
+      setErrorMessage('PayPal Sandbox Account Required: Please connect your PayPal Sandbox account in the header before authorizing payment.');
+      setSdkStatus('ERROR');
+      return;
+    }
+
+    if (!isAuthorized) {
+      logger.info('[PayPalV6Sdk:Authorize] Authorizing user account via PayPal Sandbox');
+      await authorizePayment();
+    }
+
     setActiveFundingSource(funding);
     setSdkStatus('AUTHORIZING');
     setErrorMessage(null);
@@ -592,6 +611,8 @@ export function PayPalV6SdkMount({
                 </div>
                 {sdkStatus === 'AUTHORIZING'
                   ? 'Authorizing with PayPal SDK v6...'
+                  : !isLoggedIn
+                  ? 'Connect PayPal Sandbox to Authorize'
                   : `Authorize with ${activeFundingSource === 'venmo' ? 'Venmo' : activeFundingSource === 'paylater' ? 'PayPal Pay Later' : 'PayPal'}`}
               </button>
             ) : null}

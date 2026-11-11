@@ -34,17 +34,24 @@ export default function BuyerPortalPage() {
     user,
     isLoggedIn,
     isAuthorized,
-    isTestUserMode,
     loginWithPayPal,
     authorizePayment,
     openProfileSidebar,
+    spentCents,
+    recordPurchaseSpend,
   } = useAuth();
   const [activeMandate, setActiveMandate] = useState<SessionMandate | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
   const [shouldRunTrace, setShouldRunTrace] = useState<boolean>(false);
   const [externalBudgetCents, setExternalBudgetCents] = useState<number>(50000);
-  const [spentCents, setSpentCents] = useState<number>(8500);
+
+  // Clear active mandate when Dev Mode is turned OFF so no old signed tokens linger
+  useEffect(() => {
+    if (!showTechnicalDetails) {
+      setActiveMandate(null);
+    }
+  }, [showTechnicalDetails]);
 
   // Cart Drawer state
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
@@ -261,15 +268,7 @@ export default function BuyerPortalPage() {
       merchantDomain: product.merchant_domain,
     });
     showNotification(`Pre-purchase reservation hold initiated for ${product.title}`);
-    setSpentCents((prev) => {
-      const nextSpent = prev + netPrice;
-      logger.debug('[BuyerPage:SpentUpdate] Spend allowance updated after selection', {
-        previousSpent: prev,
-        addedCents: netPrice,
-        newSpent: nextSpent,
-      });
-      return nextSpent;
-    });
+    recordPurchaseSpend(netPrice);
     setIsCartOpen(true);
   };
 
@@ -316,9 +315,9 @@ export default function BuyerPortalPage() {
       <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         {/* Persistent Spend Allowance Header Bar */}
         <SpendAllowanceHeader
-          maxBudgetCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+          maxBudgetCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
           spentCents={spentCents}
-          isConfigured={!!activeMandate || isAuthorized || isTestUserMode}
+          isConfigured={isAuthorized || (showTechnicalDetails && !!activeMandate)}
           onOpenSettings={() => {
             logger.info('[BuyerPage:SettingsDrawer] Opening user settings drawer from spend header');
             setIsSettingsOpen(true);
@@ -339,7 +338,7 @@ export default function BuyerPortalPage() {
         {/* Main Consumer Shopping Concierge Chat */}
         <section className="space-y-6">
           <ConversationalAgentChat
-            budgetCapCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+            budgetCapCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
             zipCode={userSettings.zipCode}
             developerModeEnabled={userSettings.developerModeEnabled}
             selectedModel={userSettings.aiModel}
@@ -355,7 +354,7 @@ export default function BuyerPortalPage() {
                 orderId: result.orderId,
                 authorizedCents: result.authorizedCents,
               });
-              setSpentCents((prev) => prev + result.authorizedCents);
+              recordPurchaseSpend(result.authorizedCents);
               showNotification(`1-Click Vaulted Order ${result.orderId} Authorized!`);
             }}
             onSelectProductForBuy={handleSelectProductForBuy}

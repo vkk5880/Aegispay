@@ -87,9 +87,6 @@ export function UserSettingsDrawer({
     user,
     isLoggedIn,
     isAuthorized,
-    isTestUserMode,
-    canToggleTestUser,
-    setTestUserMode,
     loginWithPayPal,
     authorizePayment,
   } = useAuth();
@@ -175,15 +172,9 @@ export function UserSettingsDrawer({
                       <span className="truncate">{user.email}</span>
                     </div>
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                      {user.isTestUser ? (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[9px] font-mono font-bold">
-                          Test User
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-[9px] font-mono font-bold">
-                          PayPal Verified
-                        </span>
-                      )}
+                      <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 text-[9px] font-mono font-bold">
+                        PayPal Sandbox Connected
+                      </span>
                       <span
                         className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
                           isAuthorized
@@ -227,30 +218,6 @@ export function UserSettingsDrawer({
                   <CreditCard className="w-3.5 h-3.5" />
                   <span>Authorize Payment</span>
                 </button>
-              )}
-
-              {/* Non-production: Enable Test User switch */}
-              {canToggleTestUser && (
-                <div className="pt-2 border-t border-slate-200 dark:border-white/5 flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-cyan-500" />
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      Enable Test User
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setTestUserMode(!isTestUserMode)}
-                    className="cursor-pointer text-cyan-600 dark:text-cyan-400 active:scale-90 transition-transform"
-                    aria-label="Toggle Test User"
-                  >
-                    {isTestUserMode ? (
-                      <ToggleRight className="w-6 h-6 text-cyan-500" />
-                    ) : (
-                      <ToggleLeft className="w-6 h-6 text-slate-400" />
-                    )}
-                  </button>
-                </div>
               )}
             </div>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useUiMode } from './UiModeContext';
 import { webLogger as logger } from '@/lib/logger';
 
@@ -8,53 +8,44 @@ export interface UserProfile {
   name: string;
   email: string;
   avatarUrl?: string;
-  isTestUser: boolean;
   isAuthorized: boolean;
   vaultSetupTokenId?: string;
   mandateId?: string;
+  spentCents?: number;
+  authorizedAt?: number;
 }
 
 export interface AuthContextType {
   user: UserProfile | null;
   isLoggedIn: boolean;
   isAuthorized: boolean;
-  isTestUserMode: boolean;
-  canToggleTestUser: boolean;
-  setTestUserMode: (enabled: boolean) => void;
-  toggleTestUserMode: () => void;
-  loginWithPayPal: () => Promise<void>;
+  loginWithPayPal: (account?: { name?: string; email?: string }) => Promise<void>;
   authorizePayment: () => Promise<void>;
   logout: () => void;
   isProfileSidebarOpen: boolean;
   setIsProfileSidebarOpen: (open: boolean) => void;
   openProfileSidebar: () => void;
   closeProfileSidebar: () => void;
+
+  // Authorization Persistence & Spend Tracking
+  spentCents: number;
+  recordPurchaseSpend: (amountCents: number) => void;
+  resetSessionSpend: () => void;
 }
 
-const TEST_USER_PROFILE: UserProfile = {
-  name: 'Alex Mercer (Test Buyer)',
-  email: 'alex.mercer@sandbox.paypal.com',
-  isTestUser: true,
-  isAuthorized: true,
-  vaultSetupTokenId: 'vault_tok_sandbox_test_user_77',
-  mandateId: 'vch_test_buyer_authorized',
+export const DEFAULT_SANDBOX_USER: UserProfile = {
+  name: 'PayPal Sandbox Buyer',
+  email: 'sb-buyer@business.example.com',
+  isAuthorized: false,
+  spentCents: 0,
 };
 
-const DEFAULT_LIVE_USER: UserProfile = {
-  name: 'Jordan Lee',
-  email: 'jordan.lee@example.com',
-  isTestUser: false,
-  isAuthorized: false,
-};
+const STORAGE_KEY = 'aegispay_user_session';
 
 const defaultAuthContext: AuthContextType = {
   user: null,
   isLoggedIn: false,
   isAuthorized: false,
-  isTestUserMode: false,
-  canToggleTestUser: true,
-  setTestUserMode: () => {},
-  toggleTestUserMode: () => {},
   loginWithPayPal: async () => {},
   authorizePayment: async () => {},
   logout: () => {},
@@ -62,158 +53,133 @@ const defaultAuthContext: AuthContextType = {
   setIsProfileSidebarOpen: () => {},
   openProfileSidebar: () => {},
   closeProfileSidebar: () => {},
+
+  spentCents: 0,
+  recordPurchaseSpend: () => {},
+  resetSessionSpend: () => {},
 };
 
 const AuthContext = createContext<AuthContextType>(defaultAuthContext);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const { isProduction, isDevEnvironment, showTechnicalDetails } = useUiMode();
-  const canToggleTestUser = !isProduction && isDevEnvironment && showTechnicalDetails;
-
-  const [isTestUserMode, setIsTestUserModeState] = useState<boolean>(false);
+  const { showTechnicalDetails } = useUiMode();
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [spentCents, setSpentCentsState] = useState<number>(0);
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState<boolean>(false);
   const [mounted, setMounted] = useState<boolean>(false);
 
-  // When Dev Mode is OFF, revert test user mode to behave cleanly like production
-  useEffect(() => {
-    if (!showTechnicalDetails && isTestUserMode) {
-      logger.info('[AuthContext] Dev Mode is OFF: Disabling test user mode to match production behavior');
-      setIsTestUserModeState(false);
-      setUser(null);
-      try {
-        localStorage.removeItem('aegispay_test_user_enabled');
-        localStorage.removeItem('aegispay_user_session');
-      } catch {}
-    }
-  }, [showTechnicalDetails, isTestUserMode]);
-
-  // Initialize from localStorage or default state
+  // Load saved session on initial mount
   useEffect(() => {
     try {
-      if (canToggleTestUser) {
-        const savedTestMode = localStorage.getItem('aegispay_test_user_enabled');
-        if (savedTestMode === 'true') {
-          setIsTestUserModeState(true);
-          setUser(TEST_USER_PROFILE);
-          logger.info('[AuthContext:Init] Test user mode activated from storage', {
-            name: TEST_USER_PROFILE.name,
-            email: TEST_USER_PROFILE.email,
-          });
-          setMounted(true);
-          return;
-        }
-      }
+      // Clean up legacy mock/test-user storage artifacts
+      localStorage.removeItem('aegispay_test_user_enabled');
+      localStorage.removeItem('aegispay_test_user_session');
+      localStorage.removeItem('aegispay_mock_test_mode');
 
-      // Check for saved standard session
-      const savedSession = localStorage.getItem('aegispay_user_session');
-      if (savedSession) {
-        const parsed = JSON.parse(savedSession);
+      const savedRaw = localStorage.getItem(STORAGE_KEY);
+      if (savedRaw) {
+        const parsed = JSON.parse(savedRaw);
         if (parsed && typeof parsed.name === 'string') {
           setUser(parsed);
-          logger.info('[AuthContext:Init] User session restored from storage', {
+          setSpentCentsState(typeof parsed.spentCents === 'number' ? parsed.spentCents : 0);
+          logger.info('[AuthContext:SessionRestored]', {
             name: parsed.name,
             email: parsed.email,
             isAuthorized: parsed.isAuthorized,
+            spentCents: parsed.spentCents || 0,
           });
         }
       }
     } catch (e) {
-      logger.warn('[AuthContext:Init] Failed to parse saved auth storage', { error: String(e) });
+      logger.warn('[AuthContext:Init] Failed to load session from storage', {
+        error: String(e),
+      });
     }
     setMounted(true);
-  }, [canToggleTestUser]);
+  }, []);
 
-  const setTestUserMode = useCallback(
-    (enabled: boolean) => {
-      if (!canToggleTestUser) {
-        logger.warn('[AuthContext:TestMode] Cannot toggle test user in strict production');
-        return;
-      }
-      setIsTestUserModeState(enabled);
+  const loginWithPayPal = useCallback(
+    async (account?: { name?: string; email?: string }) => {
+      logger.info('[AuthContext:Login] Initiating PayPal Sandbox Login', { account });
+      const loggedInUser: UserProfile = {
+        name: account?.name || DEFAULT_SANDBOX_USER.name,
+        email: account?.email || DEFAULT_SANDBOX_USER.email,
+        isAuthorized: false,
+        spentCents: 0,
+      };
+
+      setUser(loggedInUser);
+      setSpentCentsState(0);
       try {
-        localStorage.setItem('aegispay_test_user_enabled', String(enabled));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(loggedInUser));
       } catch {}
 
-      if (enabled) {
-        setUser(TEST_USER_PROFILE);
-        try {
-          localStorage.setItem('aegispay_user_session', JSON.stringify(TEST_USER_PROFILE));
-        } catch {}
-        logger.info('[AuthContext:TestMode] Enabled test user — pre-authorized bypass active', {
-          name: TEST_USER_PROFILE.name,
-          email: TEST_USER_PROFILE.email,
-        });
-      } else {
-        // Switch back to unauthenticated or standard state
-        setUser(null);
-        try {
-          localStorage.removeItem('aegispay_user_session');
-        } catch {}
-        logger.info('[AuthContext:TestMode] Disabled test user — operating in clean production-like mode');
-      }
+      logger.info('[AuthContext:Login] User logged in with PayPal Sandbox', {
+        name: loggedInUser.name,
+        email: loggedInUser.email,
+      });
     },
-    [canToggleTestUser]
+    []
   );
 
-  const toggleTestUserMode = useCallback(() => {
-    setTestUserMode(!isTestUserMode);
-  }, [isTestUserMode, setTestUserMode]);
-
-  const loginWithPayPal = useCallback(async () => {
-    logger.info('[AuthContext:Login] Initiating Login with PayPal');
-    if (isTestUserMode) {
-      setUser(TEST_USER_PROFILE);
-      return;
-    }
-
-    // Standard Login: Authenticates user identity, but leaves payment un-authorized
-    const loggedInUser: UserProfile = {
-      ...DEFAULT_LIVE_USER,
-      isTestUser: false,
-      isAuthorized: false,
-    };
-    setUser(loggedInUser);
-    try {
-      localStorage.setItem('aegispay_user_session', JSON.stringify(loggedInUser));
-    } catch {}
-    logger.info('[AuthContext:Login] User logged in with PayPal', {
-      name: loggedInUser.name,
-      email: loggedInUser.email,
-      isAuthorized: false,
-    });
-  }, [isTestUserMode]);
-
   const authorizePayment = useCallback(async () => {
-    logger.info('[AuthContext:Authorize] Authorizing PayPal Payment / Spend Allowance');
-    if (!user) {
-      // If not logged in yet, prompt login first
-      await loginWithPayPal();
-    }
+    logger.info('[AuthContext:Authorize] Authorizing PayPal Sandbox Vault v3 Spend Allowance');
+    const currentUser = user || DEFAULT_SANDBOX_USER;
 
     const authorizedUser: UserProfile = {
-      ...(user || DEFAULT_LIVE_USER),
+      ...currentUser,
       isAuthorized: true,
-      vaultSetupTokenId: `vault_tok_${Date.now()}`,
-      mandateId: `vch_${Date.now()}`,
+      vaultSetupTokenId: `vault_tok_sandbox_${Date.now()}`,
+      mandateId: `vch_sandbox_mandate_${Date.now()}`,
+      authorizedAt: Date.now(),
+      spentCents: currentUser.spentCents || 0,
     };
+
     setUser(authorizedUser);
     try {
-      localStorage.setItem('aegispay_user_session', JSON.stringify(authorizedUser));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(authorizedUser));
     } catch {}
-    logger.info('[AuthContext:Authorize] PayPal Payment authorized successfully', {
+
+    logger.info('[AuthContext:Authorize] PayPal Sandbox Payment authorized and saved to account', {
       name: authorizedUser.name,
       vaultSetupTokenId: authorizedUser.vaultSetupTokenId,
+      mandateId: authorizedUser.mandateId,
     });
-  }, [user, loginWithPayPal]);
+  }, [user]);
+
+  const recordPurchaseSpend = useCallback((amountCents: number) => {
+    setSpentCentsState((prev) => {
+      const nextSpent = prev + amountCents;
+      setUser((current) => {
+        if (!current) return current;
+        const updated = { ...current, spentCents: nextSpent };
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+      return nextSpent;
+    });
+  }, []);
+
+  const resetSessionSpend = useCallback(() => {
+    setSpentCentsState(0);
+    setUser((current) => {
+      if (!current) return current;
+      const updated = { ...current, spentCents: 0 };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  }, []);
 
   const logout = useCallback(() => {
-    logger.info('[AuthContext:Logout] User logging out');
+    logger.info('[AuthContext:Logout] User logging out of PayPal account');
     setUser(null);
-    setIsTestUserModeState(false);
+    setSpentCentsState(0);
     try {
-      localStorage.removeItem('aegispay_user_session');
-      localStorage.removeItem('aegispay_test_user_enabled');
+      localStorage.removeItem(STORAGE_KEY);
     } catch {}
   }, []);
 
@@ -226,7 +192,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isLoggedIn = !!user;
-  const isAuthorized = Boolean(user?.isAuthorized);
+  // Security invariant: Authorization is ONLY valid if the user IS currently logged in!
+  const isAuthorized = isLoggedIn && Boolean(user?.isAuthorized);
 
   return (
     <AuthContext.Provider
@@ -234,10 +201,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         isLoggedIn,
         isAuthorized,
-        isTestUserMode,
-        canToggleTestUser,
-        setTestUserMode,
-        toggleTestUserMode,
         loginWithPayPal,
         authorizePayment,
         logout,
@@ -245,6 +208,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsProfileSidebarOpen,
         openProfileSidebar,
         closeProfileSidebar,
+
+        spentCents,
+        recordPurchaseSpend,
+        resetSessionSpend,
       }}
     >
       {children}

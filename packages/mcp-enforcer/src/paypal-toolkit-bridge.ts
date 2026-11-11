@@ -1,7 +1,20 @@
-import { PayPalMCPToolkit, type Tool, type PayPalAPI } from '@paypal/agent-toolkit/mcp';
+import type { PayPalMCPToolkit, Tool, PayPalAPI } from '@paypal/agent-toolkit/mcp';
+import { createRequire } from 'node:module';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import type { SpendMandate } from '@aegispay/shared-types';
 import { verifySessionMandateSignature } from './ed25519-verifier.js';
+
+const require = createRequire(import.meta.url);
+let cachedToolkitClass: any = null;
+
+function getPayPalMCPToolkitClass(): any {
+  if (!cachedToolkitClass) {
+    // Lazy-load the heavy @paypal/agent-toolkit/mcp package only when instantiated
+    const mod = require('@paypal/agent-toolkit/mcp');
+    cachedToolkitClass = mod.PayPalMCPToolkit || mod.default?.PayPalMCPToolkit || mod.default;
+  }
+  return cachedToolkitClass;
+}
 
 const logger = createLogger('MCP:Enforcer:ToolkitBridge', { stream: 'stderr' });
 import {
@@ -105,7 +118,8 @@ export class PayPalToolkitBridge {
       actionModulesCount: Object.keys(this.actions).length,
     });
 
-    this.toolkit = new PayPalMCPToolkit({
+    const ToolkitClass = getPayPalMCPToolkitClass();
+    this.toolkit = new ToolkitClass({
       accessToken: options.accessToken || process.env.PAYPAL_ACCESS_TOKEN || 'SANDBOX_MOCK_TOKEN',
       configuration: {
         actions: this.actions,
