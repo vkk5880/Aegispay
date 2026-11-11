@@ -89,6 +89,8 @@ export interface ConversationalAgentChatProps {
   developerModeEnabled?: boolean;
   selectedModel?: string;
   userApiKey?: string;
+  cartItemCount?: number;
+  cartSubtotalCents?: number;
 }
 
 export function ConversationalAgentChat({
@@ -102,6 +104,8 @@ export function ConversationalAgentChat({
   developerModeEnabled: devProp = false,
   selectedModel = 'google/gemini-2.5-flash',
   userApiKey,
+  cartItemCount = 0,
+  cartSubtotalCents = 0,
 }: ConversationalAgentChatProps) {
   const { showTechnicalDetails } = useUiMode();
   const developerModeEnabled = devProp || showTechnicalDetails;
@@ -118,9 +122,43 @@ export function ConversationalAgentChat({
   // Split-screen Cockpit state
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
 
-  const sessionIdRef = useRef<string>(`sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+  // Load saved message history from localStorage if available
+  const [savedMessages] = useState<any[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem('aegispay_saved_chat_messages');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            logger.info('[BuyerChat:Storage] Restored saved chat history from localStorage', {
+              messageCount: parsed.length,
+            });
+            return parsed;
+          }
+        }
+      } catch (err: any) {
+        logger.warn('[BuyerChat:Storage] Failed to read saved chat messages', { error: err?.message });
+      }
+    }
+    return [];
+  });
+
+  const sessionIdRef = useRef<string>(
+    typeof window !== 'undefined' && localStorage.getItem('aegispay_current_chat_session_id')
+      ? (localStorage.getItem('aegispay_current_chat_session_id') as string)
+      : `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
+  );
+
   const activeTurnProductsRef = useRef<ActiveTurnProduct[]>([]);
   const viewportEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('aegispay_current_chat_session_id', sessionIdRef.current);
+      } catch {}
+    }
+  }, []);
 
   // Auto-open side panel when 2 or more products are selected for comparison
   useEffect(() => {
@@ -177,6 +215,7 @@ export function ConversationalAgentChat({
     developerModeEnabled,
     selectedModel,
     userApiKey,
+    initialMessages: savedMessages,
     onTurnProductsReceived: (products) => {
       logger.info('[BuyerChat:TurnProducts] Grounded turn products bound to context', { count: products.length });
       activeTurnProductsRef.current = products.map((p, idx) => ({
@@ -224,11 +263,37 @@ export function ConversationalAgentChat({
     setIsSubmitting(true);
     try {
       runtime.thread.append(messageText);
+
+      // Persist user turn to localStorage
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('aegispay_saved_chat_messages');
+          const currentList: any[] = raw ? JSON.parse(raw) : [];
+          currentList.push({
+            role: 'user',
+            content: [{ type: 'text', text: messageText }],
+          });
+          localStorage.setItem('aegispay_saved_chat_messages', JSON.stringify(currentList));
+        } catch {}
+      }
     } catch (err: any) {
       logger.warn('[BuyerChat:Send] Failed to append message directly to thread', { error: err?.message });
     } finally {
       setIsSubmitting(false);
       if (!textToSend) setInputMessage('');
+    }
+  };
+
+  const handleNewChat = () => {
+    logger.info('[BuyerChat:NewChat] Resetting chat session and starting new conversation');
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('aegispay_saved_chat_messages');
+        const newSession = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        localStorage.setItem('aegispay_current_chat_session_id', newSession);
+        sessionIdRef.current = newSession;
+      } catch {}
+      window.location.reload();
     }
   };
 
@@ -341,8 +406,20 @@ export function ConversationalAgentChat({
                 </div>
               </div>
 
-              {/* Action Buttons: Toggle Cockpit Side Panel */}
+              {/* Action Buttons: New Chat, Toggle Arena, Consolidated Multi-Vendor Cart */}
               <div className="flex items-center gap-2">
+                {/* New Chat Reset Button */}
+                <button
+                  type="button"
+                  onClick={handleNewChat}
+                  className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-600 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  title="Start a new chat session (clears chat history)"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">New Chat</span>
+                </button>
+
+                {/* Side-by-Side Arena Toggle */}
                 <button
                   type="button"
                   onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
@@ -364,14 +441,28 @@ export function ConversationalAgentChat({
                   )}
                 </button>
 
+                {/* Consolidated Cart Button */}
                 {onOpenCart && (
                   <button
                     type="button"
                     onClick={onOpenCart}
-                    className="p-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-cyan-500 border border-slate-200 dark:border-slate-700 transition-colors"
-                    title="Open Unified Cart"
+                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs text-xs font-semibold"
+                    title="Open Unified Multi-Store Cart"
                   >
-                    <ShoppingBag className="w-4 h-4" />
+                    <ShoppingBag className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                    <span>Cart</span>
+                    {cartItemCount > 0 ? (
+                      <span className="px-1.5 py-0.2 rounded-full bg-emerald-600 text-white text-[10px] font-mono font-bold flex items-center gap-1">
+                        <span>{cartItemCount}</span>
+                        {cartSubtotalCents > 0 && (
+                          <span className="hidden md:inline font-normal opacity-90">
+                            • {formatCents(cartSubtotalCents)}
+                          </span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-400 font-normal font-mono">(0)</span>
+                    )}
                   </button>
                 )}
               </div>

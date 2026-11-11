@@ -26,9 +26,19 @@ import {
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 
 export default function BuyerPortalPage() {
   const { showTechnicalDetails } = useUiMode();
+  const {
+    user,
+    isLoggedIn,
+    isAuthorized,
+    isTestUserMode,
+    loginWithPayPal,
+    authorizePayment,
+    openProfileSidebar,
+  } = useAuth();
   const [activeMandate, setActiveMandate] = useState<SessionMandate | null>(null);
   const [notification, setNotification] = useState<string | null>(null);
   const [isSolvingIntent, setIsSolvingIntent] = useState<boolean>(false);
@@ -287,18 +297,6 @@ export default function BuyerPortalPage() {
           </div>
 
           <div className="flex items-center gap-3 font-mono text-xs">
-            <button
-              onClick={() => {
-                logger.info('[BuyerPage:CartDrawer] Opening multi-vendor cart drawer from top bar', { cartItemCount });
-                setIsCartOpen(true);
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-700 dark:text-cyan-300 font-bold hover:bg-cyan-500/25 transition-all cursor-pointer"
-            >
-              <ShoppingBag className="w-3.5 h-3.5 text-cyan-500" />
-              <span>
-                {showTechnicalDetails ? 'Multi-Vendor Cart' : 'Multi-Store Cart'} ({cartItemCount})
-              </span>
-            </button>
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-emerald-700 dark:text-emerald-400 font-medium">
               {showTechnicalDetails ? 'Atomic Spend Enforcer Active' : 'Budget Protection Active'}
@@ -320,19 +318,21 @@ export default function BuyerPortalPage() {
         <SpendAllowanceHeader
           maxBudgetCents={activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
           spentCents={spentCents}
-          isConfigured={!!activeMandate}
-          cartItemCount={cartItemCount}
+          isConfigured={!!activeMandate || isAuthorized || isTestUserMode}
           onOpenSettings={() => {
             logger.info('[BuyerPage:SettingsDrawer] Opening user settings drawer from spend header');
             setIsSettingsOpen(true);
           }}
-          onOpenCart={() => {
-            logger.info('[BuyerPage:CartDrawer] Opening cart drawer from spend header');
-            setIsCartOpen(true);
-          }}
-          onConnectPayPal={() => {
-            logger.info('[BuyerPage:PayPal] Connect PayPal Vault v3 pre-authorization clicked');
-            showNotification('Connecting to Vault v3 pre-authorization...');
+          onConnectPayPal={async () => {
+            if (!isLoggedIn) {
+              await loginWithPayPal();
+              showNotification('Logged in with PayPal! Next: Authorize Payment');
+            } else if (!isAuthorized) {
+              await authorizePayment();
+              showNotification('PayPal Payment & Spend Allowance Authorized!');
+            } else {
+              openProfileSidebar();
+            }
           }}
         />
 
@@ -344,6 +344,8 @@ export default function BuyerPortalPage() {
             developerModeEnabled={userSettings.developerModeEnabled}
             selectedModel={userSettings.aiModel}
             userApiKey={userSettings.userApiKey}
+            cartItemCount={cartItemCount}
+            cartSubtotalCents={optimizationData.net_buyer_expenditure_cents}
             onOpenCart={() => {
               logger.info('[BuyerPage:CartDrawer] Opening cart drawer from chat recommendation');
               setIsCartOpen(true);

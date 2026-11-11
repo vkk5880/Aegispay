@@ -2,7 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { UiModeProvider } from '@/context/UiModeContext';
+import { AuthProvider } from '@/context/AuthContext';
 import { Navbar } from '@/components/Navbar';
+import { UserProfileSidebar } from '@/components/buyer/UserProfileSidebar';
 
 export const metadata: Metadata = {
   title: 'AegisPay — Smart Shopping Assistant & Savings',
@@ -41,10 +43,13 @@ export default function RootLayout({
       <body className="bg-slate-50 dark:bg-[#060b14] text-slate-900 dark:text-slate-100 antialiased min-h-screen flex flex-col transition-colors duration-200">
         <ThemeProvider>
           <UiModeProvider>
-            <Navbar />
-            <div className="flex-1 flex flex-col">
-              {children}
-            </div>
+            <AuthProvider>
+              <Navbar />
+              <div className="flex-1 flex flex-col">
+                {children}
+              </div>
+              <UserProfileSidebar />
+            </AuthProvider>
           </UiModeProvider>
         </ThemeProvider>
       </body>

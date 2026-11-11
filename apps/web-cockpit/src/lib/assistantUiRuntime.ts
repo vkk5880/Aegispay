@@ -174,6 +174,7 @@ export interface ShoppingAssistantRuntimeOptions {
   onCartReceived?: (cart: any) => void;
   onComparisonReceived?: (comparison: ComparisonMatrix) => void;
   onError?: (err: Error) => void;
+  initialMessages?: any[];
 }
 
 /**
@@ -359,19 +360,24 @@ export function useShoppingAssistantRuntime(options: ShoppingAssistantRuntimeOpt
     options.userApiKey,
   ]);
 
+  const defaultGreeting = [
+    {
+      role: 'assistant' as const,
+      content: [
+        {
+          type: 'text' as const,
+          text: options.developerModeEnabled
+            ? 'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.'
+            : 'Hello! I am your AegisPay Shopping Assistant. I can discover products across verified stores, compare features side-by-side, calculate instant cashback savings, and verify live stock before you purchase.',
+        },
+      ],
+    },
+  ];
+
   return useLocalRuntime(adapter, {
-    initialMessages: [
-      {
-        role: 'assistant',
-        content: [
-          {
-            type: 'text',
-            text: options.developerModeEnabled
-              ? 'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.'
-              : 'Hello! I am your AegisPay Shopping Assistant. I can discover products across verified stores, compare features side-by-side, calculate instant cashback savings, and verify live stock before you purchase.',
-          },
-        ],
-      },
-    ],
+    initialMessages:
+      options.initialMessages && options.initialMessages.length > 0
+        ? options.initialMessages
+        : defaultGreeting,
   });
 }
