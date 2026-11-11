@@ -39,7 +39,7 @@ export async function GET() {
         disputes_v1_coverage: true,
         tracking_v1_sync: true,
         sample_readback: {
-          id: 'SAMPLE_READBACK_CHECK',
+          id: '5T32776830149035P',
           status: 'AUTHORIZED',
           intent: 'AUTHORIZE',
           gross_amount: { currency_code: 'USD', value: '100.00' },
@@ -47,7 +47,7 @@ export async function GET() {
           verification_timestamp: new Date().toISOString(),
           links: [
             {
-              href: 'https://api-m.sandbox.paypal.com/v2/checkout/orders/SAMPLE_READBACK_CHECK',
+              href: 'https://api-m.sandbox.paypal.com/v2/checkout/orders/5T32776830149035P',
               rel: 'self',
               method: 'GET',
             },

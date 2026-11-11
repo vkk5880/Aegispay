@@ -37,7 +37,7 @@ export const integrationsVerifyRoutes: FastifyPluginAsync = async (fastify) => {
       // Read-back on sample order to verify REST ledger pipeline
       try {
         logger.debug('[GET /api/integrations/verify] Performing PayPal sample read-back check');
-        paypalReadbackSample = await defaultPayPalClient.getOrder('SAMPLE_READBACK_CHECK');
+        paypalReadbackSample = await defaultPayPalClient.getOrder('5T32776830149035P');
         logger.info('[GET /api/integrations/verify] PayPal sample read-back check succeeded', {
           sample: sanitizeForLogging(paypalReadbackSample),
         });
