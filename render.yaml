@@ -68,6 +68,8 @@ services:
         sync: false
       - key: NEXT_PUBLIC_AG_GRID_LICENSE_KEY
         sync: false
+      - key: NEXT_PUBLIC_DEV_TOOLS
+        value: "true"
 
   # 2. Fastify Financial Orchestrator + Proxy MCP Enforcer Gateway
   - type: web

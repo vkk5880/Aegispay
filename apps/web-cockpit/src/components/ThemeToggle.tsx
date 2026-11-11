@@ -33,10 +33,9 @@ export function ThemeToggle() {
         onClick={() => setIsOpen(!isOpen)}
         aria-label="Toggle theme selector"
         aria-expanded={isOpen}
-        title={`Current theme: ${theme} (${resolvedTheme})`}
-        className="w-8 h-8 rounded-xl flex items-center justify-center border border-slate-200/80 dark:border-white/10 bg-slate-100 hover:bg-slate-200 dark:bg-[#060b14] dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 transition-all cursor-pointer shadow-xs active:scale-95"
+        className="w-8 h-8 sm:w-9 sm:h-9 xl:w-10 xl:h-10 rounded-xl flex items-center justify-center border border-slate-200/80 dark:border-white/10 bg-slate-100 hover:bg-slate-200 dark:bg-[#060b14] dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 transition-all cursor-pointer shadow-xs active:scale-95"
       >
-        <ActiveIcon className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+        <ActiveIcon className="w-4 h-4 sm:w-4.5 sm:h-4.5 xl:w-5 xl:h-5 text-cyan-600 dark:text-cyan-400" />
       </button>
 
       {/* Floating Theme Selection Menu */}
