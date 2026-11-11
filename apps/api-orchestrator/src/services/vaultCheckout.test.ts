@@ -22,7 +22,7 @@ test('Vault v3 Setup Token Creation: Mints setup token with usage_type MERCHANT 
   assert.ok(session.setup_token_id);
   assert.equal(session.customer_id, 'cust_buyer_001');
   assert.equal(session.mandate_id, 'mandate_spend_100');
-  assert.ok(['CREATED', 'PAYER_ACTION_REQUIRED'].includes(session.status));
+  assert.equal(session.status, 'CREATED');
   assert.ok(session.approve_url);
   assert.ok(session.created_at);
 });
