@@ -1,8 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useUiMode } from './UiModeContext';
 import { webLogger as logger } from '@/lib/logger';
+import { PayPalRealSandboxAuthModal } from '@/components/buyer/PayPalRealSandboxAuthModal';
 
 export interface UserProfile {
   name: string;
@@ -10,6 +11,7 @@ export interface UserProfile {
   avatarUrl?: string;
   isAuthorized: boolean;
   vaultSetupTokenId?: string;
+  paymentTokenId?: string;
   mandateId?: string;
   spentCents?: number;
   authorizedAt?: number;
@@ -27,6 +29,12 @@ export interface AuthContextType {
   openProfileSidebar: () => void;
   closeProfileSidebar: () => void;
 
+  // Real PayPal Sandbox Modal Controls
+  isAuthModalOpen: boolean;
+  authModalMode: 'login' | 'authorize';
+  openAuthModal: (mode?: 'login' | 'authorize') => void;
+  closeAuthModal: () => void;
+
   // Authorization Persistence & Spend Tracking
   spentCents: number;
   recordPurchaseSpend: (amountCents: number) => void;
@@ -35,7 +43,7 @@ export interface AuthContextType {
 
 export const DEFAULT_SANDBOX_USER: UserProfile = {
   name: 'PayPal Sandbox Buyer',
-  email: 'sb-buyer@business.example.com',
+  email: 'sb-buyer@personal.example.com',
   isAuthorized: false,
   spentCents: 0,
 };
@@ -54,6 +62,11 @@ const defaultAuthContext: AuthContextType = {
   openProfileSidebar: () => {},
   closeProfileSidebar: () => {},
 
+  isAuthModalOpen: false,
+  authModalMode: 'login',
+  openAuthModal: () => {},
+  closeAuthModal: () => {},
+
   spentCents: 0,
   recordPurchaseSpend: () => {},
   resetSessionSpend: () => {},
@@ -66,6 +79,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [spentCents, setSpentCentsState] = useState<number>(0);
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState<boolean>(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'authorize'>('login');
   const [mounted, setMounted] = useState<boolean>(false);
 
   // Load saved session on initial mount
@@ -98,41 +113,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setMounted(true);
   }, []);
 
+  const openAuthModal = useCallback((mode: 'login' | 'authorize' = 'login') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  }, []);
+
+  const closeAuthModal = useCallback(() => {
+    setIsAuthModalOpen(false);
+  }, []);
+
   const loginWithPayPal = useCallback(
     async (account?: { name?: string; email?: string }) => {
-      logger.info('[AuthContext:Login] Initiating PayPal Sandbox Login', { account });
+      if (!account) {
+        // Trigger the real PayPal Sandbox Auth Modal
+        logger.info('[AuthContext:Login] Opening real PayPal Sandbox Auth Modal');
+        openAuthModal('login');
+        return;
+      }
+
+      logger.info('[AuthContext:Login] Establishing verified PayPal Sandbox account session', { account });
       const loggedInUser: UserProfile = {
-        name: account?.name || DEFAULT_SANDBOX_USER.name,
-        email: account?.email || DEFAULT_SANDBOX_USER.email,
-        isAuthorized: false,
-        spentCents: 0,
+        name: account.name || DEFAULT_SANDBOX_USER.name,
+        email: account.email || DEFAULT_SANDBOX_USER.email,
+        isAuthorized: user?.isAuthorized || false,
+        vaultSetupTokenId: user?.vaultSetupTokenId,
+        paymentTokenId: user?.paymentTokenId,
+        spentCents: user?.spentCents || 0,
       };
 
       setUser(loggedInUser);
-      setSpentCentsState(0);
+      setSpentCentsState(loggedInUser.spentCents || 0);
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(loggedInUser));
       } catch {}
 
-      logger.info('[AuthContext:Login] User logged in with PayPal Sandbox', {
+      logger.info('[AuthContext:Login] User session saved to storage', {
         name: loggedInUser.name,
         email: loggedInUser.email,
+        isAuthorized: loggedInUser.isAuthorized,
       });
     },
-    []
+    [openAuthModal, user]
   );
 
   const authorizePayment = useCallback(async () => {
     logger.info('[AuthContext:Authorize] Authorizing PayPal Sandbox Vault v3 Spend Allowance');
-    const currentUser = user || DEFAULT_SANDBOX_USER;
+    
+    if (!user) {
+      // Must be logged in first
+      openAuthModal('login');
+      return;
+    }
 
+    if (!user.isAuthorized) {
+      // If we don't have active authorization, open modal in authorize mode
+      openAuthModal('authorize');
+      return;
+    }
+
+    // Refresh active authorization
     const authorizedUser: UserProfile = {
-      ...currentUser,
+      ...user,
       isAuthorized: true,
-      vaultSetupTokenId: `vault_tok_sandbox_${Date.now()}`,
-      mandateId: `vch_sandbox_mandate_${Date.now()}`,
+      vaultSetupTokenId: user.vaultSetupTokenId || `vault_tok_sandbox_${Date.now()}`,
+      mandateId: user.mandateId || `vch_sandbox_mandate_${Date.now()}`,
       authorizedAt: Date.now(),
-      spentCents: currentUser.spentCents || 0,
+      spentCents: user.spentCents || 0,
     };
 
     setUser(authorizedUser);
@@ -145,7 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       vaultSetupTokenId: authorizedUser.vaultSetupTokenId,
       mandateId: authorizedUser.mandateId,
     });
-  }, [user]);
+  }, [user, openAuthModal]);
 
   const recordPurchaseSpend = useCallback((amountCents: number) => {
     setSpentCentsState((prev) => {
@@ -209,12 +255,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         openProfileSidebar,
         closeProfileSidebar,
 
+        isAuthModalOpen,
+        authModalMode,
+        openAuthModal,
+        closeAuthModal,
+
         spentCents,
         recordPurchaseSpend,
         resetSessionSpend,
       }}
     >
       {children}
+      <PayPalRealSandboxAuthModal
+        isOpen={isAuthModalOpen}
+        onClose={closeAuthModal}
+        defaultMode={authModalMode}
+      />
     </AuthContext.Provider>
   );
 }

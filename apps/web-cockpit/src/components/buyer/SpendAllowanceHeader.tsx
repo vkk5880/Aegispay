@@ -45,8 +45,15 @@ export function SpendAllowanceHeader({
   // Security rule: Payment is authorized only if the user is actively logged in and authorized with PayPal.
   const isPaymentAuthorized = auth.isLoggedIn && auth.isAuthorized;
 
-  const availableCents = Math.max(0, maxBudgetCents - spentCents);
-  const spentPercent = Math.min(100, Math.round((spentCents / (maxBudgetCents || 1)) * 100));
+  const displayMaxBudgetCents = isPaymentAuthorized
+    ? maxBudgetCents
+    : showTechnicalDetails
+    ? maxBudgetCents
+    : 0;
+  const availableCents = Math.max(0, displayMaxBudgetCents - spentCents);
+  const spentPercent = isPaymentAuthorized
+    ? Math.min(100, Math.round((spentCents / (displayMaxBudgetCents || 1)) * 100))
+    : 0;
 
   return (
     <div className="w-full">
@@ -123,9 +130,18 @@ export function SpendAllowanceHeader({
                       SANDBOX
                     </span>
                   )}
+                  {isPaymentAuthorized && !showTechnicalDetails && (
+                    <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                      ACTIVE
+                    </span>
+                  )}
                 </div>
                 <span className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
-                  {formatCents(maxBudgetCents)}
+                  {isPaymentAuthorized
+                    ? formatCents(maxBudgetCents)
+                    : showTechnicalDetails
+                    ? formatCents(maxBudgetCents)
+                    : 'Not Configured'}
                 </span>
               </div>
             </div>
@@ -148,7 +164,9 @@ export function SpendAllowanceHeader({
                 {showTechnicalDetails ? 'Available Balance' : 'Remaining Budget'}
               </span>
               <span className="text-base sm:text-lg font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
-                {formatCents(availableCents)}
+                {isPaymentAuthorized || showTechnicalDetails
+                  ? formatCents(availableCents)
+                  : '--'}
               </span>
             </div>
           </div>

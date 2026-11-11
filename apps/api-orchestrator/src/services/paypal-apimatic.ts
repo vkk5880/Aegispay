@@ -488,8 +488,7 @@ export class PayPalApimaticClient {
     }
 
     if (!this.config.clientId || !this.config.clientSecret) {
-      // Allow fallback / mock token for tests/dev without live credentials
-      return 'mock_access_token_sandbox';
+      throw new Error('ERR_PAYPAL_CREDENTIALS_MISSING: Live or Sandbox PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET are strictly required.');
     }
 
     if (this.tokenRefreshPromise) {
@@ -547,8 +546,8 @@ export class PayPalApimaticClient {
     }
 
     const accessToken = await this.getAccessToken();
-    if (accessToken === 'mock_access_token_sandbox') {
-      return 'mock_client_token_15min';
+    if (!accessToken) {
+      throw new Error('ERR_PAYPAL_ACCESS_TOKEN_UNAVAILABLE: Could not retrieve access token from PayPal Sandbox.');
     }
 
     if (this.clientTokenRefreshPromise) {
@@ -1312,17 +1311,6 @@ export class PayPalApimaticClient {
       );
       return response.result;
     } catch (err: any) {
-      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-        const mockTokenId = `vault_setup_mock_${Date.now()}`;
-        return {
-          id: mockTokenId,
-          status: 'CREATED',
-          customer: params.customer,
-          links: [
-            { href: `https://api-m.sandbox.paypal.com/v3/vault/setup-tokens/${mockTokenId}`, rel: 'approve', method: 'GET' },
-          ],
-        };
-      }
       throw err;
     }
   }
@@ -1354,13 +1342,6 @@ export class PayPalApimaticClient {
       );
       return response.result;
     } catch (err: any) {
-      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-        return {
-          id: `mock_payment_token_${Date.now()}`,
-          status: 'VAULTED',
-          customer: params.customer,
-        };
-      }
       throw err;
     }
   }
@@ -1427,62 +1408,18 @@ export class PayPalApimaticClient {
    * Satisfies Table 1b.1 Unknown Outcomes re-read contract.
    */
   async getSetupToken(setupTokenId: string) {
-    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || setupTokenId.startsWith('vault_setup_') || setupTokenId.startsWith('vlt_st_') || setupTokenId.startsWith('mock_')) {
-      return {
-        id: setupTokenId,
-        status: 'CREATED',
-        payment_source: {
-          paypal: {
-            usage_type: 'PLATFORM',
-          },
-        },
-      };
-    }
-
-    try {
-      const response = await this.executeWithRetry(() =>
-        this.vaultController.getSetupToken(setupTokenId)
-      );
-      return response.result;
-    } catch (err: any) {
-      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || setupTokenId.startsWith('vault_setup_') || setupTokenId.startsWith('vlt_st_') || setupTokenId.startsWith('mock_')) {
-        return {
-          id: setupTokenId,
-          status: 'CREATED',
-        };
-      }
-      throw err;
-    }
+    return (await this.executeWithRetry(() =>
+      this.vaultController.getSetupToken(setupTokenId)
+    )).result;
   }
 
   /**
    * Vault v3: Get Payment Token details (GET /v3/vault/payment-tokens/{id})
    */
   async getPaymentToken(paymentTokenId: string) {
-    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || paymentTokenId.startsWith('pm_tok_') || paymentTokenId.startsWith('vault_tok_') || paymentTokenId.startsWith('mock_')) {
-      return {
-        id: paymentTokenId,
-        customer: { id: 'cust_default' },
-        links: [
-          { href: `${this.getBaseUrl()}/v3/vault/payment-tokens/${paymentTokenId}`, rel: 'self', method: 'GET' },
-        ],
-      } as any;
-    }
-
-    try {
-      const response = await this.executeWithRetry(() =>
-        this.vaultController.getPaymentToken(paymentTokenId)
-      );
-      return response.result;
-    } catch (err: any) {
-      if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || paymentTokenId.startsWith('pm_tok_') || paymentTokenId.startsWith('vault_tok_') || paymentTokenId.startsWith('mock_')) {
-        return {
-          id: paymentTokenId,
-          customer: { id: 'cust_default' },
-        } as any;
-      }
-      throw err;
-    }
+    return (await this.executeWithRetry(() =>
+      this.vaultController.getPaymentToken(paymentTokenId)
+    )).result;
   }
 
   /**
