@@ -658,14 +658,14 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
       logger.warn('Watchlist add rejected: title or target_price_cents missing', { body });
       return reply.status(400).send({ error: 'INVALID_REQUEST', message: 'title and target_price_cents are required.' });
     }
-    const userId = request.user?.id || body.user_id || 'demo';
+    const userId = request.user?.id || body.user_id || 'sb-buyer@personal.example.com';
     logger.info(`Adding product to price-drop watchlist for user '${userId}': '${body.title}'`, {
       userId,
       title: body.title,
       targetPriceCents: body.target_price_cents,
       currentPriceCents: body.current_price_cents,
     });
-    const item = addToWatchlist(userId, body);
+    const item = await addToWatchlist(userId, body);
     return reply.send({ status: 'SUCCESS', watchlist_item: item });
   });
 
@@ -674,9 +674,10 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * Fetches the user's price-drop watchlist.
    */
   fastify.get('/api/buyer/watchlist', { preHandler: [authenticateUser] }, async (request, reply) => {
-    const userId = request.user?.id || 'demo';
+    const query = request.query as { user_id?: string };
+    const userId = request.user?.id || query?.user_id || 'sb-buyer@personal.example.com';
     logger.debug(`Retrieving price-drop watchlist for user '${userId}'`);
-    const items = getWatchlist(userId);
+    const items = await getWatchlist(userId);
     logger.info(`Retrieved ${items.length} watchlist items for user '${userId}'`);
     return reply.send({ status: 'SUCCESS', watchlist: items });
   });
@@ -688,9 +689,9 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.delete('/api/buyer/watchlist', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string; title?: string; item_id?: string };
     const id = body?.item_id || body?.title || '';
-    const userId = request.user?.id || body?.user_id || 'demo';
+    const userId = request.user?.id || body?.user_id || 'sb-buyer@personal.example.com';
     logger.info(`Removing watchlist item '${id}' for user '${userId}'`);
-    const removed = removeFromWatchlist(userId, id);
+    const removed = await removeFromWatchlist(userId, id);
     return reply.send({ status: 'SUCCESS', removed });
   });
 
@@ -740,8 +741,10 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * Scans all user watchlists and checks for price drop alerts.
    */
   fastify.post('/api/buyer/watchlist/check', async (request, reply) => {
-    logger.info('Executing scheduled/manual price drop check across all user watchlists');
-    const report = await checkAllWatchlists();
+    const body = request.body as { user_id?: string } | undefined;
+    const userId = body?.user_id;
+    logger.info('Executing scheduled/manual price drop check across watchlists', { userId });
+    const report = await checkAllWatchlists(undefined, userId);
     logger.info('Watchlist scan completed successfully', { reportSummary: report });
     return reply.send({ status: 'SUCCESS', report });
   });

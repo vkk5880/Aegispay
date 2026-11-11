@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Scale,
   CheckCircle2,
+  Bookmark,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
@@ -24,6 +25,7 @@ export interface ProductCardProps {
   onAskAi?: (product: ProductCardData) => void;
   onAddToCart?: (product: ProductCardData) => void;
   onInstantBuy?: (product: ProductCardData) => void;
+  onSaveWatchlist?: (product: ProductCardData) => void;
   className?: string;
 }
 
@@ -35,11 +37,13 @@ export function ProductCard({
   onAskAi,
   onAddToCart,
   onInstantBuy,
+  onSaveWatchlist,
   className = '',
 }: ProductCardProps) {
   const { showTechnicalDetails } = useUiMode();
   const [added, setAdded] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
 
   // Optional Variant Options (Sizes / Colors / Models)
   const variants: string[] =
@@ -60,6 +64,41 @@ export function ProductCard({
       onAddToCart(selectedVariant ? { ...product, title: `${product.title} (${selectedVariant})` } : product);
       setAdded(true);
       setTimeout(() => setAdded(false), 2000);
+    }
+  };
+
+  const handleSave = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onSaveWatchlist) {
+      onSaveWatchlist(product);
+      setIsSaved(true);
+      return;
+    }
+    try {
+      setIsSaved(true);
+      const userSession = typeof window !== 'undefined' ? localStorage.getItem('aegispay_user_session') : null;
+      const parsedUser = userSession ? JSON.parse(userSession) : null;
+      const userId = parsedUser?.email || parsedUser?.name || 'sb-buyer@personal.example.com';
+      const targetPriceCents =
+        product.compare_at_price_cents && product.compare_at_price_cents > product.price_cents
+          ? product.price_cents
+          : Math.round(product.price_cents * 0.9);
+
+      await fetch('/api/buyer/watchlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          title: product.title,
+          current_price_cents: product.price_cents,
+          target_price_cents: targetPriceCents,
+          source: product.merchant_domain || 'web',
+          link: product.cleaned_url || '',
+          query: product.title,
+        }),
+      });
+    } catch {
+      // Best-effort local feedback
     }
   };
 
@@ -325,6 +364,20 @@ export function ProductCard({
               Buy Now
             </button>
           )}
+
+          <button
+            type="button"
+            onClick={handleSave}
+            aria-label={isSaved ? `Saved ${product.title || 'item'} to Watchlist` : `Save ${product.title || 'item'} to Watchlist`}
+            title={isSaved ? 'Saved in Watchlist / Saved Items' : 'Save item to Watchlist / Saved Items'}
+            className={`p-1.5 rounded-lg border transition-all cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none active:scale-95 shadow-2xs ${
+              isSaved
+                ? 'bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border-cyan-500/60 font-bold'
+                : 'bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-500 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 border-slate-200 dark:border-white/10'
+            }`}
+          >
+            <Bookmark className={`w-3.5 h-3.5 ${isSaved ? 'fill-current text-cyan-600 dark:text-cyan-400' : ''}`} />
+          </button>
         </div>
       </div>
     </div>

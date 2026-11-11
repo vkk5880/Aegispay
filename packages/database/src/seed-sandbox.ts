@@ -5,6 +5,7 @@ import {
   escrowOrders,
   purchaseUnitHolds,
   disputeArbitrations,
+  buyerWatchlist,
 } from './schema.js';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 

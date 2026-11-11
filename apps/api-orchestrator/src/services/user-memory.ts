@@ -18,7 +18,7 @@ import {
   createLogger,
   sanitizeForLogging,
 } from '@aegispay/shared-types';
-import { createDb, userMemoriesTable, chatSessions, chatMessages, eq, desc } from '@aegispay/database';
+import { createDb, userMemoriesTable, chatSessions, chatMessages, buyerWatchlist, eq, desc, sql } from '@aegispay/database';
 
 const logger = createLogger('API:Services:Financial').child('UserMemory');
 
@@ -305,13 +305,50 @@ export interface WatchlistItem {
 }
 
 const watchlistStore = new Map<string, WatchlistItem[]>();
+let watchlistTableInitialized = false;
+
+/**
+ * Ensures buyer_watchlist PostgreSQL table and indexes exist.
+ */
+export async function ensureWatchlistTable(db: ReturnType<typeof createDb>): Promise<void> {
+  if (watchlistTableInitialized) return;
+  try {
+    if (typeof (db as any).execute === 'function') {
+      await (db as any).execute(sql`
+        CREATE TABLE IF NOT EXISTS buyer_watchlist (
+          id VARCHAR(64) PRIMARY KEY,
+          user_id VARCHAR(64) NOT NULL,
+          title VARCHAR(255) NOT NULL,
+          current_price_cents INTEGER NOT NULL CHECK (current_price_cents >= 0),
+          target_price_cents INTEGER NOT NULL CHECK (target_price_cents > 0),
+          source VARCHAR(128) NOT NULL DEFAULT 'web',
+          link TEXT NOT NULL DEFAULT '',
+          query TEXT NOT NULL DEFAULT '',
+          triggered BOOLEAN NOT NULL DEFAULT FALSE,
+          last_checked TIMESTAMP WITH TIME ZONE,
+          created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_buyer_watchlist_user_id ON buyer_watchlist(user_id);
+        CREATE INDEX IF NOT EXISTS idx_buyer_watchlist_triggered ON buyer_watchlist(triggered);
+      `);
+    }
+    watchlistTableInitialized = true;
+  } catch (err: any) {
+    logger.warn('Failed or already ensured buyer_watchlist table in PostgreSQL', {
+      error: err?.message,
+    });
+  }
+}
 
 /**
  * Adds or updates a product in the user's price-drop watchlist.
+ * Persists to PostgreSQL buyer_watchlist and syncs L1 in-memory cache.
  */
-export function addToWatchlist(
-  userId: string = 'demo',
+export async function addToWatchlist(
+  userId: string = 'sb-buyer@personal.example.com',
   item: {
+    id?: string;
     title: string;
     current_price_cents: number;
     target_price_cents: number;
@@ -319,68 +356,178 @@ export function addToWatchlist(
     link?: string;
     query?: string;
   }
-): WatchlistItem {
+): Promise<WatchlistItem> {
   const safeId = sanitizeUserId(userId);
+  const currentCents = Math.round(Number(item.current_price_cents) || 0);
+  const targetCents = Math.round(Number(item.target_price_cents) || 0);
+  const nowIso = new Date().toISOString();
+
   logger.info('Adding item to price-drop watchlist', {
     userId: safeId,
     title: item.title,
-    currentPriceCents: item.current_price_cents,
-    targetPriceCents: item.target_price_cents,
+    currentPriceCents: currentCents,
+    targetPriceCents: targetCents,
     source: item.source,
   });
 
-  const items = watchlistStore.get(safeId) || [];
-  
   const entry: WatchlistItem = {
-    id: `wch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    id: item.id || `wch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     user_id: safeId,
     title: item.title,
-    current_price_cents: item.current_price_cents,
-    target_price_cents: item.target_price_cents,
-    source: item.source,
+    current_price_cents: currentCents,
+    target_price_cents: targetCents,
+    source: item.source || 'web',
     link: item.link || '',
     query: item.query || item.title,
-    added_at: new Date().toISOString(),
-    triggered: false,
+    added_at: nowIso,
+    last_checked: nowIso,
+    triggered: currentCents > 0 && currentCents <= targetCents,
   };
 
-  const existingIdx = items.findIndex(i => i.title.toLowerCase() === item.title.toLowerCase());
+  // L1 In-Memory sync
+  const items = watchlistStore.get(safeId) || [];
+  const existingIdx = items.findIndex(
+    (i) => i.id === entry.id || i.title.toLowerCase() === item.title.toLowerCase()
+  );
   if (existingIdx >= 0) {
-    logger.info('Updating existing watchlist item in-place', { userId: safeId, id: entry.id, title: item.title });
-    items[existingIdx] = entry;
+    logger.info('Updating existing watchlist item in-place in L1 cache', { userId: safeId, id: entry.id, title: item.title });
+    items[existingIdx] = { ...items[existingIdx], ...entry };
   } else {
-    logger.info('Inserting new watchlist item entry', { userId: safeId, id: entry.id, title: item.title });
-    items.push(entry);
+    logger.info('Inserting new watchlist item entry into L1 cache', { userId: safeId, id: entry.id, title: item.title });
+    items.unshift(entry);
   }
   watchlistStore.set(safeId, items);
+
+  // L2 PostgreSQL Persist
+  try {
+    const db = getUserMemoryDb();
+    if (db && typeof (db as any).insert === 'function') {
+      await ensureWatchlistTable(db);
+      await db
+        .insert(buyerWatchlist)
+        .values({
+          id: entry.id,
+          user_id: safeId,
+          title: entry.title,
+          current_price_cents: entry.current_price_cents,
+          target_price_cents: entry.target_price_cents,
+          source: entry.source,
+          link: entry.link,
+          query: entry.query,
+          triggered: entry.triggered,
+          created_at: new Date(entry.added_at),
+          updated_at: new Date(),
+        })
+        .onConflictDoUpdate({
+          target: buyerWatchlist.id,
+          set: {
+            title: entry.title,
+            current_price_cents: entry.current_price_cents,
+            target_price_cents: entry.target_price_cents,
+            source: entry.source,
+            link: entry.link,
+            query: entry.query,
+            triggered: entry.triggered,
+            updated_at: new Date(),
+          },
+        });
+      logger.info('Successfully persisted watchlist item to PostgreSQL database', {
+        userId: safeId,
+        id: entry.id,
+        title: entry.title,
+      });
+    }
+  } catch (err: any) {
+    logger.warn('Failed persisting watchlist item to PostgreSQL; retaining in memory', {
+      error: err?.message,
+      userId: safeId,
+      id: entry.id,
+    });
+  }
+
   return entry;
 }
 
 /**
  * Retrieves the full price-drop watchlist for a user.
+ * Queries PostgreSQL buyer_watchlist, falling back to L1 cache.
  */
-export function getWatchlist(userId: string = 'demo'): WatchlistItem[] {
+export async function getWatchlist(userId: string = 'sb-buyer@personal.example.com'): Promise<WatchlistItem[]> {
   const safeId = sanitizeUserId(userId);
+  try {
+    const db = getUserMemoryDb();
+    if (db && typeof (db as any).select === 'function') {
+      await ensureWatchlistTable(db);
+      const rows = await db
+        .select()
+        .from(buyerWatchlist)
+        .where(eq(buyerWatchlist.user_id, safeId))
+        .orderBy(desc(buyerWatchlist.created_at));
+
+      if (Array.isArray(rows)) {
+        const mapped: WatchlistItem[] = rows.map((r: any) => ({
+          id: r.id,
+          user_id: r.user_id,
+          title: r.title,
+          current_price_cents: r.current_price_cents,
+          target_price_cents: r.target_price_cents,
+          source: r.source,
+          link: r.link || '',
+          query: r.query || r.title,
+          added_at: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at || new Date().toISOString()),
+          last_checked: r.last_checked ? (r.last_checked instanceof Date ? r.last_checked.toISOString() : String(r.last_checked)) : undefined,
+          triggered: Boolean(r.triggered),
+        }));
+        watchlistStore.set(safeId, mapped);
+        logger.debug('Retrieved user price-drop watchlist from PostgreSQL', { userId: safeId, itemCount: mapped.length });
+        return mapped;
+      }
+    }
+  } catch (err: any) {
+    logger.warn('PostgreSQL watchlist retrieval failed; falling back to L1 in-memory cache', {
+      error: err?.message,
+      userId: safeId,
+    });
+  }
+
   const items = watchlistStore.get(safeId) || [];
-  logger.debug('Retrieved user price-drop watchlist', { userId: safeId, itemCount: items.length });
+  logger.debug('Retrieved user price-drop watchlist from L1 cache', { userId: safeId, itemCount: items.length });
   return items;
 }
 
 /**
  * Removes an item from the user's watchlist by title or ID.
+ * Deletes from PostgreSQL buyer_watchlist and syncs L1 cache.
  */
-export function removeFromWatchlist(userId: string = 'demo', identifier: string): boolean {
+export async function removeFromWatchlist(userId: string = 'sb-buyer@personal.example.com', identifier: string): Promise<boolean> {
   const safeId = sanitizeUserId(userId);
   logger.info('Removing item from price-drop watchlist', { userId: safeId, identifier });
+  let removed = false;
+
   const items = watchlistStore.get(safeId) || [];
   const filtered = items.filter(i => i.id !== identifier && i.title.toLowerCase() !== identifier.toLowerCase());
   if (filtered.length !== items.length) {
     watchlistStore.set(safeId, filtered);
-    logger.info('Successfully removed item from price-drop watchlist', { userId: safeId, identifier, remainingCount: filtered.length });
-    return true;
+    removed = true;
   }
-  logger.warn('Watchlist removal identifier not found', { userId: safeId, identifier });
-  return false;
+
+  try {
+    const db = getUserMemoryDb();
+    if (db && typeof (db as any).delete === 'function') {
+      await ensureWatchlistTable(db);
+      await db
+        .delete(buyerWatchlist)
+        .where(
+          sql`${buyerWatchlist.user_id} = ${safeId} AND (${buyerWatchlist.id} = ${identifier} OR LOWER(${buyerWatchlist.title}) = LOWER(${identifier}))`
+        );
+      removed = true;
+      logger.info('Successfully removed item from PostgreSQL buyer_watchlist', { userId: safeId, identifier });
+    }
+  } catch (err: any) {
+    logger.warn('PostgreSQL watchlist removal failed', { error: err?.message, userId: safeId, identifier });
+  }
+
+  return removed;
 }
 
 /**
@@ -473,22 +620,33 @@ export interface WatchlistCheckReport {
 }
 
 /**
- * Scans all active watchlist items across all registered users.
+ * Scans active watchlist items across registered users (or a specific target user).
  * Re-evaluates each item against target price, logs alerts, and marks triggered.
  */
 export async function checkAllWatchlists(
-  priceFetcher?: (query: string, item: WatchlistItem) => Promise<number | null>
+  priceFetcher?: (query: string, item: WatchlistItem) => Promise<number | null>,
+  targetUserId?: string
 ): Promise<WatchlistCheckReport> {
   const now = new Date().toISOString();
   const triggeredAlerts: WatchlistAlert[] = [];
   let scannedItems = 0;
 
-  logger.info('Starting price fetcher check cycle across all registered user watchlists', {
+  if (targetUserId) {
+    // Ensure user watchlist loaded from PostgreSQL if available
+    await getWatchlist(targetUserId);
+  }
+
+  logger.info('Starting price fetcher check cycle across user watchlists', {
     totalUsers: watchlistStore.size,
+    targetUserId: targetUserId || 'all',
     hasCustomPriceFetcher: Boolean(priceFetcher),
   });
 
-  for (const [userId, items] of watchlistStore.entries()) {
+  const userEntries = targetUserId
+    ? [[sanitizeUserId(targetUserId), watchlistStore.get(sanitizeUserId(targetUserId)) || []] as [string, WatchlistItem[]]]
+    : Array.from(watchlistStore.entries());
+
+  for (const [userId, items] of userEntries) {
     logger.debug('Scanning watchlists for user', { userId, itemCount: items.length });
     for (const item of items) {
       if (item.triggered) {
@@ -538,13 +696,30 @@ export async function checkAllWatchlists(
           timestamp: now,
         });
         triggeredAlerts.push(alert);
+
+        // Update in PostgreSQL
+        try {
+          const db = getUserMemoryDb();
+          if (db && typeof (db as any).update === 'function') {
+            await db
+              .update(buyerWatchlist)
+              .set({
+                triggered: true,
+                last_checked: new Date(now),
+                updated_at: new Date(),
+              })
+              .where(eq(buyerWatchlist.id, item.id));
+          }
+        } catch (err: any) {
+          logger.warn('Failed updating triggered status in PostgreSQL', { error: err?.message, itemId: item.id });
+        }
       }
     }
     watchlistStore.set(userId, items);
   }
 
   const report: WatchlistCheckReport = {
-    scanned_users: watchlistStore.size,
+    scanned_users: userEntries.length,
     scanned_items: scannedItems,
     triggered_alerts: triggeredAlerts,
     timestamp: now,

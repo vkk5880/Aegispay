@@ -2,45 +2,6 @@ import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
-const MOCK_WATCHLIST_ITEMS = [
-  {
-    id: 'wch_1730810400_a1',
-    user_id: 'demo',
-    title: 'Sony WH-1000XM5 Wireless Headphones (Midnight Silver)',
-    current_price_cents: 34800,
-    target_price_cents: 32000,
-    source: 'bestbuy.com',
-    link: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400',
-    added_at: '2026-11-06T10:00:00.000Z',
-    last_checked: '2026-11-07T08:00:00.000Z',
-    triggered: false,
-  },
-  {
-    id: 'wch_1730810400_a2',
-    user_id: 'demo',
-    title: 'Precision Felt & Walnut Desk Organizer Pad',
-    current_price_cents: 8500,
-    target_price_cents: 7500,
-    source: 'nordstrom.com',
-    link: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400',
-    added_at: '2026-11-05T10:00:00.000Z',
-    last_checked: '2026-11-07T08:00:00.000Z',
-    triggered: true,
-  },
-  {
-    id: 'wch_1730810400_a3',
-    user_id: 'demo',
-    title: 'Anker Magnetic Wireless Charging Stand 3-in-1',
-    current_price_cents: 12900,
-    target_price_cents: 11000,
-    source: 'target.com',
-    link: 'https://images.unsplash.com/photo-1586953208448-b95a79798f07?w=400',
-    added_at: '2026-11-04T10:00:00.000Z',
-    last_checked: '2026-11-07T08:00:00.000Z',
-    triggered: false,
-  },
-];
-
 export async function GET(req: Request) {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
@@ -54,13 +15,14 @@ export async function GET(req: Request) {
         return NextResponse.json(await res.json());
       }
     } catch (err: any) {
-      apiLogger.warn('Upstream orchestrator unreachable for watchlist; using fallback', { error: err?.message });
+      apiLogger.warn('Upstream orchestrator unreachable for watchlist; using live empty state', { error: err?.message });
     }
   }
 
+  // Live default: return clean empty list for the user; zero mock/test data
   return NextResponse.json({
     status: 'SUCCESS',
-    watchlist: MOCK_WATCHLIST_ITEMS,
+    watchlist: [],
   });
 }
 
@@ -82,17 +44,22 @@ export async function POST(req: Request) {
     }
   }
 
+  const currentCents = Math.round(Number(body.current_price_cents) || 0);
+  const targetCents = Math.round(Number(body.target_price_cents) || 0);
+  const nowIso = new Date().toISOString();
+
   const newItem = {
     id: `wch_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    user_id: body.user_id || 'demo',
+    user_id: body.user_id || 'sb-buyer@personal.example.com',
     title: body.title,
-    current_price_cents: body.current_price_cents,
-    target_price_cents: body.target_price_cents,
+    current_price_cents: currentCents,
+    target_price_cents: targetCents,
     source: body.source || 'web',
     link: body.link || '',
-    query: body.query || '',
-    added_at: new Date().toISOString(),
-    triggered: false,
+    query: body.query || body.title,
+    added_at: nowIso,
+    last_checked: nowIso,
+    triggered: currentCents > 0 && currentCents <= targetCents,
   };
 
   return NextResponse.json({
@@ -114,7 +81,9 @@ export async function DELETE(req: Request) {
       if (res.ok) {
         return NextResponse.json(await res.json());
       }
-    } catch {}
+    } catch (err: any) {
+      apiLogger.warn('Upstream orchestrator unreachable for watchlist DELETE', { error: err?.message });
+    }
   }
 
   return NextResponse.json({

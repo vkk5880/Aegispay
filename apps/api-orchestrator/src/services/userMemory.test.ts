@@ -22,6 +22,10 @@ import {
   checkWatchlistItem,
   clearDynamicBuyerProfilesStore,
   setUserMemoryDb,
+  addToWatchlist,
+  getWatchlist,
+  removeFromWatchlist,
+  checkAllWatchlists,
 } from './user-memory.js';
 
 describe('Phase 1: Dynamic Multi-Domain AI Buyer Memory Engine', () => {
@@ -383,4 +387,149 @@ describe('Phase A: Durable PostgreSQL Persistence for Dynamic AI Memory', () => 
     assert.equal(mockDbRecords.get(userId).purchaseVelocity.lifetime_spend_cents, 37000);
   });
 });
+
+describe('Phase B: Durable PostgreSQL Watchlist Persistence & Retrieval', () => {
+  const mockWatchlistRows = new Map<string, any>();
+  let lastInsertedItem: any = null;
+  let lastDeletedQuery: any = null;
+  let lastUpdatedItem: any = null;
+
+  const testWatchlistMockDb = {
+    execute: async () => {},
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          orderBy: async () => {
+            return Array.from(mockWatchlistRows.values());
+          },
+        }),
+      }),
+    }),
+    insert: () => ({
+      values: (valuesObj: any) => ({
+        onConflictDoUpdate: async () => {
+          lastInsertedItem = valuesObj;
+          mockWatchlistRows.set(valuesObj.id, valuesObj);
+          return { rowCount: 1 };
+        },
+      }),
+    }),
+    delete: () => ({
+      where: async (whereClause: any) => {
+        lastDeletedQuery = whereClause;
+        mockWatchlistRows.clear();
+        return { rowCount: 1 };
+      },
+    }),
+    update: () => ({
+      set: (updateObj: any) => ({
+        where: async () => {
+          lastUpdatedItem = updateObj;
+          return { rowCount: 1 };
+        },
+      }),
+    }),
+  };
+
+  beforeEach(() => {
+    mockWatchlistRows.clear();
+    lastInsertedItem = null;
+    lastDeletedQuery = null;
+    lastUpdatedItem = null;
+    setUserMemoryDb(testWatchlistMockDb as any);
+  });
+
+  afterEach(() => {
+    mockWatchlistRows.clear();
+    lastInsertedItem = null;
+    lastDeletedQuery = null;
+    lastUpdatedItem = null;
+    setUserMemoryDb(null);
+  });
+
+  it('addToWatchlist persists new item to PostgreSQL with onConflictDoUpdate', async () => {
+    const userId = 'usr_watchlist_buyer';
+    const item = await addToWatchlist(userId, {
+      title: 'Sony WH-1000XM5 Wireless Noise-Canceling Headphones',
+      current_price_cents: 39900,
+      target_price_cents: 34900,
+      source: 'bestbuy.com',
+      link: 'https://bestbuy.com/item/1',
+      query: 'Sony WH-1000XM5',
+    });
+
+    assert.ok(item.id.startsWith('wch_'));
+    assert.equal(item.user_id, userId);
+    assert.equal(item.title, 'Sony WH-1000XM5 Wireless Noise-Canceling Headphones');
+    assert.equal(item.current_price_cents, 39900);
+    assert.equal(item.target_price_cents, 34900);
+    assert.equal(item.triggered, false);
+
+    assert.ok(lastInsertedItem, 'PostgreSQL insert was invoked');
+    assert.equal(lastInsertedItem.id, item.id);
+    assert.equal(lastInsertedItem.user_id, userId);
+    assert.equal(lastInsertedItem.title, item.title);
+  });
+
+  it('getWatchlist retrieves rows from PostgreSQL and maps them cleanly', async () => {
+    const userId = 'usr_watchlist_buyer';
+    mockWatchlistRows.set('wl_db_1', {
+      id: 'wl_db_1',
+      user_id: userId,
+      title: 'Apple AirPods Pro 2',
+      current_price_cents: 24900,
+      target_price_cents: 19900,
+      source: 'apple.com',
+      link: 'https://apple.com/airpods',
+      query: 'AirPods Pro 2',
+      triggered: false,
+      last_checked: new Date(),
+      created_at: new Date('2026-11-11T12:00:00.000Z'),
+      updated_at: new Date('2026-11-11T12:00:00.000Z'),
+    });
+
+    const items = await getWatchlist(userId);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].id, 'wl_db_1');
+    assert.equal(items[0].title, 'Apple AirPods Pro 2');
+    assert.equal(items[0].current_price_cents, 24900);
+    assert.equal(items[0].target_price_cents, 19900);
+  });
+
+  it('removeFromWatchlist deletes item from PostgreSQL and updates store', async () => {
+    const userId = 'usr_watchlist_buyer';
+    mockWatchlistRows.set('wl_to_delete', {
+      id: 'wl_to_delete',
+      user_id: userId,
+      title: 'Keychron Q1 Pro',
+      current_price_cents: 19900,
+      target_price_cents: 17900,
+      source: 'keychron.com',
+    });
+
+    const removed = await removeFromWatchlist(userId, 'wl_to_delete');
+    assert.equal(removed, true);
+    assert.ok(lastDeletedQuery, 'PostgreSQL delete was executed');
+  });
+
+  it('checkAllWatchlists triggers price alerts and updates PostgreSQL status', async () => {
+    const userId = 'usr_scan_buyer';
+    await addToWatchlist(userId, {
+      title: 'Bose QuietComfort 45',
+      current_price_cents: 27900,
+      target_price_cents: 24900,
+      source: 'bose.com',
+    });
+
+    // Provide priceFetcher that returns price dropped below target ($229)
+    const report = await checkAllWatchlists(async () => 22900, userId);
+    assert.equal(report.scanned_users, 1);
+    assert.ok(report.triggered_alerts.length >= 1);
+    assert.equal(report.triggered_alerts[0].title, 'Bose QuietComfort 45');
+    assert.equal(report.triggered_alerts[0].found_price_cents, 22900);
+    assert.ok(lastUpdatedItem, 'PostgreSQL update was triggered for price drop');
+    assert.equal(lastUpdatedItem.triggered, true);
+  });
+});
+
 

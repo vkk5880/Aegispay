@@ -88,17 +88,50 @@ test('ShareContent renders empty state when comparison data is unavailable', () 
   assert.ok(html.includes('Search &amp; Compare Products') || html.includes('Search & Compare Products'));
 });
 
-test('WatchlistPage renders price-drop watchlist with auto-buy triggers and add modal', () => {
+test('WatchlistPage renders price-drop watchlist with live controls and add modal', () => {
   const html = renderToStaticMarkup(React.createElement(WatchlistPage));
 
   assert.ok(html.includes('Price-Drop Watchlist'));
-  assert.ok(html.includes('Autonomous Price-Drop Watchlist &amp; 72h Escrow Auto-Buy') || html.includes('Autonomous Price-Drop Watchlist & 72h Escrow Auto-Buy'));
+  assert.ok(html.includes('Autonomous Price-Drop Watchlist &amp; 72h Escrow Auto-Buy') || html.includes('Autonomous Price-Drop Watchlist & 72h Escrow Auto-Buy') || html.includes('Price-Drop Watchlist &amp; Instant Deal Alerts') || html.includes('Price-Drop Watchlist & Instant Deal Alerts'));
+  assert.ok(html.includes('Add Item'));
+  assert.ok(html.includes('Trigger Price Check') || html.includes('Check Prices Now'));
+  assert.ok(html.includes('Your Watchlist is Empty'));
+  assert.ok(html.includes('Add First Item'));
+  assert.ok(html.includes('Browse Catalog'));
+});
+
+test('WatchlistContent renders price-drop items with auto-buy triggers and potential savings', () => {
+  const testItems = [
+    {
+      id: 'wch_live_1',
+      user_id: 'usr_buyer_1',
+      title: 'Sony WH-1000XM5 Wireless Headphones (Midnight Silver)',
+      current_price_cents: 34800,
+      target_price_cents: 32000,
+      source: 'bestbuy.com',
+      added_at: '2026-11-11T00:00:00.000Z',
+      triggered: false,
+    },
+    {
+      id: 'wch_live_2',
+      user_id: 'usr_buyer_1',
+      title: 'Apple AirPods Pro 2 with USB-C Case',
+      current_price_cents: 18900,
+      target_price_cents: 18900,
+      source: 'target.com',
+      added_at: '2026-11-11T00:00:00.000Z',
+      triggered: true,
+    },
+  ];
+
+  const html = renderToStaticMarkup(React.createElement(WatchlistContent, { initialItems: testItems }));
+
+  assert.ok(html.includes('Price-Drop Watchlist'));
   assert.ok(html.includes('Sony WH-1000XM5 Wireless Headphones (Midnight Silver)'));
   assert.ok(html.includes('Apple AirPods Pro 2 with USB-C Case'));
   assert.ok(html.includes('Target Price Drop Triggered!'));
-  assert.ok(html.includes('Auto-Buy Now'));
-  assert.ok(html.includes('Trigger Price Check'));
-  assert.ok(html.includes('Add Item'));
+  assert.ok(html.includes('Auto-Buy Now') || html.includes('Buy at Target Price'));
+  assert.ok(html.includes('Potential Savings'));
 });
 
 test('WatchlistContent renders empty state when zero items are watched', () => {
