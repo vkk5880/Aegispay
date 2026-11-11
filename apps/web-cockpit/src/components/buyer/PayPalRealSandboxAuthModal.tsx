@@ -18,9 +18,14 @@ import {
   Sliders,
   DollarSign,
   Check,
+  Search,
+  Store,
+  Plus,
+  Filter,
+  ShieldAlert,
 } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
-import { useAuth, UserProfile } from '@/context/AuthContext';
+import { useAuth, UserProfile, DEFAULT_ALLOWED_CATEGORIES, DEFAULT_ALLOWED_MERCHANTS } from '@/context/AuthContext';
 import { webLogger as logger } from '@/lib/logger';
 import { getClientOrigin } from '@/lib/origin';
 
@@ -31,6 +36,17 @@ export interface PayPalRealSandboxAuthModalProps {
 }
 
 const PRESET_AMOUNTS = [100, 250, 500, 1000, 2000];
+
+export const AVAILABLE_CATEGORIES = [
+  { id: 'audio', label: 'Audio & Acoustics', icon: '🎧' },
+  { id: 'workspace', label: 'Workspace & Ergonomics', icon: '🖥️' },
+  { id: 'electronics', label: 'Electronics & Computing', icon: '💻' },
+  { id: 'peripherals', label: 'Peripherals & Cables', icon: '⌨️' },
+  { id: 'office', label: 'Office & Stationery', icon: '📎' },
+  { id: 'home', label: 'Home & Living', icon: '🏠' },
+  { id: 'apparel', label: 'Apparel & Footwear', icon: '👕' },
+  { id: 'general', label: 'General Merchandise', icon: '📦' },
+];
 
 export function PayPalRealSandboxAuthModal({
   isOpen,
@@ -55,6 +71,14 @@ export function PayPalRealSandboxAuthModal({
   const [preauthAmount, setPreauthAmount] = useState<number>(500);
   const [preauthAmountInput, setPreauthAmountInput] = useState<string>('500');
 
+  // Security controls: Allowed Categories and Allowed Merchant Whitelist
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(DEFAULT_ALLOWED_CATEGORIES);
+  const [whitelistMode, setWhitelistMode] = useState<boolean>(true);
+  const [selectedMerchants, setSelectedMerchants] = useState<string[]>(DEFAULT_ALLOWED_MERCHANTS);
+  const [merchantSearchQuery, setMerchantSearchQuery] = useState<string>('');
+  const [availableMerchants, setAvailableMerchants] = useState<any[]>([]);
+  const [isSearchingMerchants, setIsSearchingMerchants] = useState<boolean>(false);
+
   // Reset inputs when opened
   useEffect(() => {
     if (isOpen) {
@@ -69,8 +93,49 @@ export function PayPalRealSandboxAuthModal({
         setEmailInput(user.email);
         setNameInput(user.name);
       }
+      if (user?.allowedCategories && user.allowedCategories.length > 0) {
+        setSelectedCategories(user.allowedCategories);
+      } else {
+        setSelectedCategories(DEFAULT_ALLOWED_CATEGORIES);
+      }
+      if (user?.allowedMerchants && user.allowedMerchants.length > 0) {
+        const isAll = user.allowedMerchants.includes('*');
+        setWhitelistMode(!isAll);
+        setSelectedMerchants(isAll ? DEFAULT_ALLOWED_MERCHANTS : user.allowedMerchants);
+      } else {
+        setWhitelistMode(true);
+        setSelectedMerchants(DEFAULT_ALLOWED_MERCHANTS);
+      }
     }
   }, [isOpen, user, defaultMode]);
+
+  // Load / Search available merchants from API
+  useEffect(() => {
+    if (!isOpen) return;
+    let isCancelled = false;
+    const fetchMerchants = async () => {
+      setIsSearchingMerchants(true);
+      try {
+        const q = merchantSearchQuery.trim();
+        const res = await fetch(`/api/buyer/merchants?query=${encodeURIComponent(q)}&limit=15`);
+        if (!res.ok) throw new Error('Failed to query merchants');
+        const data = await res.json();
+        if (!isCancelled && Array.isArray(data.merchants)) {
+          setAvailableMerchants(data.merchants);
+        }
+      } catch (err) {
+        logger.warn('[PayPalAuthModal:Merchants] Failed to fetch merchants', { error: String(err) });
+      } finally {
+        if (!isCancelled) setIsSearchingMerchants(false);
+      }
+    };
+
+    const timer = setTimeout(fetchMerchants, 200);
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [isOpen, merchantSearchQuery]);
 
   // Handle toggling pre-authorization switch
   const handleTogglePreauth = () => {
@@ -123,15 +188,24 @@ export function PayPalRealSandboxAuthModal({
           popupWindowRef.close();
         }
 
-        // Update local session via login callback
+        // Update local session via login callback with configured categories & merchants
+        const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
+        const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
+
         await loginWithPayPal({
           name: payload.user?.name || user?.name || 'PayPal Sandbox Buyer',
           email: payload.user?.email || user?.email || emailInput,
+          allowedCategories: effectiveCats,
+          allowedMerchants: effectiveMerchants,
         });
 
-        // If pre-authorization was selected, authorize with chosen amount
+        // If pre-authorization was selected, authorize with chosen amount and security policy
         if (enablePreauth && preauthAmount > 0) {
-          await authorizePayment(Math.round(preauthAmount * 100));
+          await authorizePayment(
+            Math.round(preauthAmount * 100),
+            effectiveCats,
+            effectiveMerchants
+          );
         }
 
         // Close login prompt and refresh UI
@@ -220,9 +294,20 @@ export function PayPalRealSandboxAuthModal({
               const verifyData = await verifyRes.json();
               if (verifyData.isAuthorized) {
                 setStatusMessage('Authorization confirmed via PayPal Sandbox API!');
-                await loginWithPayPal(verifyData.user);
+                const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
+                const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
+
+                await loginWithPayPal({
+                  ...verifyData.user,
+                  allowedCategories: effectiveCats,
+                  allowedMerchants: effectiveMerchants,
+                });
                 if (enablePreauth && preauthAmount > 0) {
-                  await authorizePayment(Math.round(preauthAmount * 100));
+                  await authorizePayment(
+                    Math.round(preauthAmount * 100),
+                    effectiveCats,
+                    effectiveMerchants
+                  );
                 }
                 onClose();
                 setTimeout(() => {
@@ -277,12 +362,23 @@ export function PayPalRealSandboxAuthModal({
         throw new Error(data.message || 'Failed to authenticate PayPal Sandbox account');
       }
 
+      const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
+      const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
+
       logger.info('[PayPalAuthModal:DirectLogin] Direct login successful', data.user);
-      await loginWithPayPal(data.user);
+      await loginWithPayPal({
+        ...data.user,
+        allowedCategories: effectiveCats,
+        allowedMerchants: effectiveMerchants,
+      });
 
       if (enablePreauth && preauthAmount > 0) {
         setStatusMessage(`Account logged in! Authorizing $${preauthAmount} spend allowance...`);
-        await authorizePayment(Math.round(preauthAmount * 100));
+        await authorizePayment(
+          Math.round(preauthAmount * 100),
+          effectiveCats,
+          effectiveMerchants
+        );
         setStatusMessage('Payment & spend allowance authorized successfully!');
       } else {
         setStatusMessage('Logged in with PayPal Sandbox Account!');
@@ -496,6 +592,257 @@ export function PayPalRealSandboxAuthModal({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* =========================================================================
+              SECURITY & SPEND MANDATE CONTROLS: CATEGORIES & MERCHANT WHITELIST
+             ========================================================================= */}
+          <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-indigo-50/60 via-white to-purple-50/40 dark:from-[#0c142c]/60 dark:via-[#090f20]/80 dark:to-[#060a16] border border-indigo-200/80 dark:border-indigo-500/20 shadow-xs space-y-5">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-100 dark:border-slate-800/80">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                  <ShieldCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Security & Hardware Spend Mandate</span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                      WebCrypto Ed25519
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Enforce browser-signed cryptographic limits, authorized categories, and store whitelisting.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Cryptographic Browser-Signed Token Badge */}
+            <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-500/30 flex items-center gap-3 text-xs">
+              <Lock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+              <div className="text-slate-700 dark:text-slate-300">
+                <strong className="text-slate-900 dark:text-white">Browser-Signed Token Active:</strong> Purchases are locked by in-browser WebCrypto Ed25519 keys, preventing prompt injection attacks or rogue agent actions from exceeding your policy.
+              </div>
+            </div>
+
+            {/* Section A: Authorized Categories */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                  <Filter className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Authorized Product Categories:</span>
+                  <span className="text-[11px] font-mono font-normal text-slate-500">
+                    ({selectedCategories.length} allowed)
+                  </span>
+                </label>
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategories(AVAILABLE_CATEGORIES.map((c) => c.id))}
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-medium text-[11px]"
+                  >
+                    Select All
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-700">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategories([])}
+                    className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:underline cursor-pointer font-medium text-[11px]"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+
+              {/* Category Chips Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {AVAILABLE_CATEGORIES.map((cat) => {
+                  const isSelected = selectedCategories.includes(cat.id);
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategories((prev) =>
+                          isSelected ? prev.filter((id) => id !== cat.id) : [...prev, cat.id]
+                        );
+                      }}
+                      className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-medium transition-all text-left cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/50 text-indigo-900 dark:text-indigo-200 shadow-xs'
+                          : 'bg-white/80 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                      }`}
+                    >
+                      <span className="text-sm shrink-0">{cat.icon}</span>
+                      <span className="truncate">{cat.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Section B: Allowed Merchants Whitelist ("Allow Only Merchant") */}
+            <div className="space-y-3 pt-2 border-t border-indigo-100 dark:border-slate-800/80">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Store className="w-3.5 h-3.5 text-indigo-500" />
+                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Allowed Stores Whitelist:
+                  </label>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20">
+                    {whitelistMode ? `${selectedMerchants.length} Stores Whitelisted` : 'All Stores Allowed'}
+                  </span>
+                </div>
+
+                {/* Whitelist Mode Toggle */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {whitelistMode ? 'Restricted to Selected Stores' : 'Allow All Stores'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setWhitelistMode((prev) => !prev)}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      whitelistMode ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                    role="switch"
+                    aria-checked={whitelistMode}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        whitelistMode ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {whitelistMode && (
+                <div className="space-y-3 animate-fade-in">
+                  {/* Selected Store Badges */}
+                  <div className="flex flex-wrap gap-1.5 p-2.5 rounded-xl bg-white dark:bg-[#070e1a] border border-slate-200 dark:border-slate-800 min-h-[42px] items-center">
+                    {selectedMerchants.length === 0 ? (
+                      <span className="text-xs text-rose-500 italic flex items-center gap-1.5">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        No stores selected! Add at least one merchant to allow purchases.
+                      </span>
+                    ) : (
+                      selectedMerchants.map((domain) => (
+                        <span
+                          key={domain}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80"
+                        >
+                          <span>{domain}</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMerchants((prev) => prev.filter((d) => d !== domain))}
+                            className="hover:text-rose-500 cursor-pointer"
+                            title="Remove from allowed list"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))
+                    )}
+                  </div>
+
+                  {/* Merchant Search & Add Input */}
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={merchantSearchQuery}
+                      onChange={(e) => setMerchantSearchQuery(e.target.value)}
+                      placeholder="Search stores from Channel3 catalog (e.g. Best Buy, Amazon, Apple, Nordic Workspaces...)"
+                      className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#070d18] text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    {isSearchingMerchants && (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 absolute right-3 top-2.5" />
+                    )}
+                  </div>
+
+                  {/* Store Suggestions & Quick Presets */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500">
+                      <span>Available Partner Stores:</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const tech = ['bestbuy.com', 'amazon.com', 'apple.com', 'newegg.com'];
+                            setSelectedMerchants((prev) => Array.from(new Set([...prev, ...tech])));
+                          }}
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-medium"
+                        >
+                          + Top Tech
+                        </button>
+                        <span>•</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const audioWorkspace = ['audio-gear-direct.com', 'nordic-workspaces.io', 'bhphotovideo.com'];
+                            setSelectedMerchants((prev) => Array.from(new Set([...prev, ...audioWorkspace])));
+                          }}
+                          className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-medium"
+                        >
+                          + Audio & Workspace
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Available Merchants Scrollable Grid */}
+                    <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                      {availableMerchants.map((m) => {
+                        const isAllowed = selectedMerchants.includes(m.domain);
+                        return (
+                          <div
+                            key={m.domain}
+                            className="flex items-center justify-between p-2 rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 text-xs hover:border-indigo-400 transition-colors"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {/* Store Logo / Icon */}
+                              <img
+                                src={m.logo_url}
+                                alt={m.name}
+                                className="w-6 h-6 rounded-md object-cover bg-slate-100 dark:bg-slate-800 shrink-0"
+                                onError={(e) => {
+                                  (e.target as HTMLElement).style.display = 'none';
+                                }}
+                              />
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-900 dark:text-white truncate">
+                                  {m.name}
+                                </div>
+                                <div className="text-[10px] font-mono text-slate-500 truncate">
+                                  {m.domain}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedMerchants((prev) =>
+                                  isAllowed ? prev.filter((d) => d !== m.domain) : [...prev, m.domain]
+                                );
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer ${
+                                isAllowed
+                                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 hover:bg-rose-500/15 hover:text-rose-600 hover:border-rose-500/30'
+                                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                              }`}
+                            >
+                              {isAllowed ? '✓ Allowed' : '+ Allow'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* =========================================================================

@@ -19,6 +19,8 @@ export interface UserProfile {
   mandateSignatureHex?: string;
   publicKeyHex?: string;
   mandateExpiresAt?: string;
+  allowedCategories?: string[];
+  allowedMerchants?: string[];
 }
 
 export interface AuthContextType {
@@ -27,8 +29,21 @@ export interface AuthContextType {
   isAuthorized: boolean;
   isTrackingMode: boolean;
   trackingToken: string | null;
-  loginWithPayPal: (account?: { name?: string; email?: string }) => Promise<void>;
-  authorizePayment: (budgetCapCents?: number) => Promise<void>;
+  loginWithPayPal: (account?: {
+    name?: string;
+    email?: string;
+    allowedCategories?: string[];
+    allowedMerchants?: string[];
+  }) => Promise<void>;
+  authorizePayment: (
+    budgetCapCents?: number,
+    allowedCategories?: string[],
+    allowedMerchants?: string[]
+  ) => Promise<void>;
+  updateSpendSecuritySettings: (
+    allowedCategories: string[],
+    allowedMerchants: string[]
+  ) => Promise<void>;
   revokePaymentAuthorization: () => void;
   logout: () => void;
   isProfileSidebarOpen: boolean;
@@ -48,11 +63,36 @@ export interface AuthContextType {
   resetSessionSpend: () => void;
 }
 
+export const DEFAULT_ALLOWED_CATEGORIES = [
+  'audio',
+  'workspace',
+  'electronics',
+  'peripherals',
+  'office',
+  'home',
+  'apparel',
+  'general',
+];
+
+export const DEFAULT_ALLOWED_MERCHANTS = [
+  'bestbuy.com',
+  'audio-gear-direct.com',
+  'nordic-workspaces.io',
+  'amazon.com',
+  'apple.com',
+  'bhphotovideo.com',
+  'newegg.com',
+  'target.com',
+  'walmart.com',
+];
+
 export const DEFAULT_SANDBOX_USER: UserProfile = {
   name: 'PayPal Sandbox Buyer',
   email: 'sb-buyer@personal.example.com',
   isAuthorized: false,
   spentCents: 0,
+  allowedCategories: DEFAULT_ALLOWED_CATEGORIES,
+  allowedMerchants: DEFAULT_ALLOWED_MERCHANTS,
 };
 
 const STORAGE_KEY = 'aegispay_user_session';
@@ -68,9 +108,18 @@ async function mintWebCryptoEd25519Mandate(params: {
   userId: string;
   mandateId: string;
   budgetCapCents: number;
+  allowedCategoryIds?: string[];
+  allowedMerchants?: string[];
 }): Promise<{ publicKeyHex: string; signatureHex: string; expiresAt: string }> {
   const expiresAt = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   const subtle = typeof window !== 'undefined' ? window.crypto?.subtle : (globalThis as any).crypto?.subtle;
+
+  const cats = params.allowedCategoryIds && params.allowedCategoryIds.length > 0
+    ? params.allowedCategoryIds
+    : DEFAULT_ALLOWED_CATEGORIES;
+  const merchants = params.allowedMerchants && params.allowedMerchants.length > 0
+    ? params.allowedMerchants
+    : DEFAULT_ALLOWED_MERCHANTS;
 
   if (subtle && typeof subtle.generateKey === 'function') {
     try {
@@ -84,7 +133,8 @@ async function mintWebCryptoEd25519Mandate(params: {
         max_total_spend_cents: params.budgetCapCents,
         max_single_merchant_cents: params.budgetCapCents,
         currency_code: 'USD',
-        allowed_category_ids: ['general', 'electronics', 'apparel', 'home'],
+        allowed_category_ids: cats,
+        allowed_merchant_domains: merchants,
         expires_at: expiresAt,
         status: 'ACTIVE',
         public_key_hex: publicKeyHex,
@@ -114,6 +164,7 @@ const defaultAuthContext: AuthContextType = {
   trackingToken: null,
   loginWithPayPal: async () => {},
   authorizePayment: async () => {},
+  updateSpendSecuritySettings: async () => {},
   revokePaymentAuthorization: () => {},
   logout: () => {},
   isProfileSidebarOpen: false,
@@ -196,7 +247,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loginWithPayPal = useCallback(
-    async (account?: { name?: string; email?: string }) => {
+    async (account?: {
+      name?: string;
+      email?: string;
+      allowedCategories?: string[];
+      allowedMerchants?: string[];
+    }) => {
       if (!account) {
         // Trigger the real PayPal Sandbox Auth Modal
         logger.info('[AuthContext:Login] Opening real PayPal Sandbox Auth Modal');
@@ -212,6 +268,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         vaultSetupTokenId: user?.vaultSetupTokenId,
         paymentTokenId: user?.paymentTokenId,
         spentCents: user?.spentCents || 0,
+        allowedCategories: account.allowedCategories || user?.allowedCategories || DEFAULT_ALLOWED_CATEGORIES,
+        allowedMerchants: account.allowedMerchants || user?.allowedMerchants || DEFAULT_ALLOWED_MERCHANTS,
       };
 
       setUser(loggedInUser);
@@ -224,15 +282,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         name: loggedInUser.name,
         email: loggedInUser.email,
         isAuthorized: loggedInUser.isAuthorized,
+        allowedCategoriesCount: loggedInUser.allowedCategories?.length,
+        allowedMerchantsCount: loggedInUser.allowedMerchants?.length,
       });
     },
     [openAuthModal, user]
   );
 
   const authorizePayment = useCallback(
-    async (budgetCapCents: number = 25000) => {
+    async (
+      budgetCapCents: number = 25000,
+      allowedCategories?: string[],
+      allowedMerchants?: string[]
+    ) => {
       logger.info('[AuthContext:Authorize] Authorizing PayPal Sandbox Vault v3 Spend Allowance with WebCrypto Ed25519', {
         budgetCapCents,
+        allowedCategories,
+        allowedMerchants,
       });
 
       const activeUser = user || {
@@ -242,11 +308,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         spentCents: 0,
       };
 
+      const finalCategories = allowedCategories && allowedCategories.length > 0
+        ? allowedCategories
+        : activeUser.allowedCategories || DEFAULT_ALLOWED_CATEGORIES;
+      const finalMerchants = allowedMerchants && allowedMerchants.length > 0
+        ? allowedMerchants
+        : activeUser.allowedMerchants || DEFAULT_ALLOWED_MERCHANTS;
+
       const mandateId = `vch_mandate_${Date.now()}`;
       const { publicKeyHex, signatureHex, expiresAt } = await mintWebCryptoEd25519Mandate({
         userId: activeUser.email || 'sb-buyer@personal.example.com',
         mandateId,
         budgetCapCents,
+        allowedCategoryIds: finalCategories,
+        allowedMerchants: finalMerchants,
       });
 
       const authorizedUser: UserProfile = {
@@ -261,6 +336,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         mandateExpiresAt: expiresAt,
         authorizedAt: Date.now(),
         spentCents: activeUser.spentCents || 0,
+        allowedCategories: finalCategories,
+        allowedMerchants: finalMerchants,
       };
 
       setUser(authorizedUser);
@@ -273,7 +350,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         mandateId,
         budgetCapCents,
         publicKeyPrefix: publicKeyHex.slice(0, 8),
+        allowedCategoriesCount: finalCategories.length,
+        allowedMerchantsCount: finalMerchants.length,
       });
+    },
+    [user]
+  );
+
+  const updateSpendSecuritySettings = useCallback(
+    async (allowedCategories: string[], allowedMerchants: string[]) => {
+      logger.info('[AuthContext:UpdateSecurity] Updating allowed categories and allowed merchants policy', {
+        categoriesCount: allowedCategories.length,
+        merchantsCount: allowedMerchants.length,
+      });
+
+      if (!user) return;
+
+      let updatedUser: UserProfile = {
+        ...user,
+        allowedCategories,
+        allowedMerchants,
+      };
+
+      // If already authorized, re-sign the WebCrypto Ed25519 spend mandate with new policy
+      if (user.isAuthorized) {
+        const cap = user.budgetCapCents || 50000;
+        const mandateId = `vch_mandate_${Date.now()}`;
+        const { publicKeyHex, signatureHex, expiresAt } = await mintWebCryptoEd25519Mandate({
+          userId: user.email,
+          mandateId,
+          budgetCapCents: cap,
+          allowedCategoryIds: allowedCategories,
+          allowedMerchants,
+        });
+
+        updatedUser = {
+          ...updatedUser,
+          mandateId,
+          mandateSignatureHex: signatureHex,
+          publicKeyHex,
+          mandateExpiresAt: expiresAt,
+        };
+      }
+
+      setUser(updatedUser);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedUser));
+      } catch {}
+
+      logger.info('[AuthContext:UpdateSecurity] Security policy updated successfully');
     },
     [user]
   );
@@ -357,6 +482,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         trackingToken,
         loginWithPayPal,
         authorizePayment,
+        updateSpendSecuritySettings,
         revokePaymentAuthorization,
         logout,
         isProfileSidebarOpen,

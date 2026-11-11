@@ -514,6 +514,66 @@ export async function POST(req: Request) {
     const matched = selectedProductIds.length > 0 ? resolveProducts(selectedProductIds) : [];
     const buyProducts = matched.length > 0 ? matched : [sampleProducts[0], sampleProducts[1]];
 
+    // Security Gate: Verify Allowed Categories & Allowed Merchants Whitelist
+    const rawAllowedCats = body.allowed_category_ids || (req.headers.get('x-allowed-categories') ? req.headers.get('x-allowed-categories')?.split(',') : null);
+    const rawAllowedMerchants = body.allowed_merchants || (req.headers.get('x-allowed-merchants') ? req.headers.get('x-allowed-merchants')?.split(',') : null);
+
+    if (rawAllowedCats && Array.isArray(rawAllowedCats) && rawAllowedCats.length > 0 && !rawAllowedCats.includes('*')) {
+      const unauthorizedCategoryProduct = buyProducts.find((p) => {
+        if (!p.category_id) return false;
+        return !rawAllowedCats.some(
+          (c: string) => c.trim().toLowerCase() === p.category_id.toLowerCase() || p.category_id.toLowerCase().includes(c.trim().toLowerCase())
+        );
+      });
+
+      if (unauthorizedCategoryProduct) {
+        apiLogger.warn('[BuyerChat:Security] Purchase rejected: Category not authorized', {
+          categoryId: unauthorizedCategoryProduct.category_id,
+          allowedCategories: rawAllowedCats,
+        });
+        const blockedPayload: ChatResponsePayload = {
+          action: 'CHAT',
+          markdown: `### ⛔ Purchase Blocked: Category Not Authorized\n\nYour active spend mandate does not permit purchases in category **"${unauthorizedCategoryProduct.category_id}"** for item **${unauthorizedCategoryProduct.title}**.\n\n- **Authorized Categories:** \`${rawAllowedCats.join(', ')}\`\n- **Item Category:** \`${unauthorizedCategoryProduct.category_id}\`\n\n> 🛡️ *To allow this purchase, please update your Authorized Categories in Settings or during PayPal Sandbox Login.*`,
+          products: [unauthorizedCategoryProduct],
+          thought_trace: [
+            `Security Enforcer: Evaluated product category "${unauthorizedCategoryProduct.category_id}" against mandate policy`,
+            `Policy Violation: Category "${unauthorizedCategoryProduct.category_id}" is not in authorized category list [${rawAllowedCats.join(', ')}]`,
+            `Atomic Spend Enforcer: Failed closed to prevent policy bypass (ERR_CATEGORY_NOT_AUTHORIZED)`,
+          ],
+        };
+        return respond(blockedPayload);
+      }
+    }
+
+    if (rawAllowedMerchants && Array.isArray(rawAllowedMerchants) && rawAllowedMerchants.length > 0 && !rawAllowedMerchants.includes('*')) {
+      const unauthorizedMerchantProduct = buyProducts.find((p) => {
+        if (!p.merchant_domain) return false;
+        const pDomain = p.merchant_domain.toLowerCase().replace(/^www\./, '');
+        return !rawAllowedMerchants.some((m: string) => {
+          const mDomain = m.trim().toLowerCase().replace(/^www\./, '');
+          return pDomain === mDomain || pDomain.includes(mDomain) || mDomain.includes(pDomain);
+        });
+      });
+
+      if (unauthorizedMerchantProduct) {
+        apiLogger.warn('[BuyerChat:Security] Purchase rejected: Merchant not in whitelist', {
+          merchantDomain: unauthorizedMerchantProduct.merchant_domain,
+          allowedMerchants: rawAllowedMerchants,
+        });
+        const blockedPayload: ChatResponsePayload = {
+          action: 'CHAT',
+          markdown: `### ⛔ Purchase Blocked: Store Not in Authorized Whitelist\n\nStore **\`${unauthorizedMerchantProduct.merchant_domain}\`** is not in your authorized merchant whitelist for item **${unauthorizedMerchantProduct.title}**.\n\n- **Allowed Stores Whitelist:** \`${rawAllowedMerchants.join(', ')}\`\n- **Attempted Store:** \`${unauthorizedMerchantProduct.merchant_domain}\`\n\n> 🛡️ *To allow purchasing from this store, add \`${unauthorizedMerchantProduct.merchant_domain}\` to your Authorized Store Whitelist in Settings or during PayPal Sandbox Login.*`,
+          products: [unauthorizedMerchantProduct],
+          thought_trace: [
+            `Security Enforcer: Evaluated merchant domain "${unauthorizedMerchantProduct.merchant_domain}" against whitelist`,
+            `Policy Violation: Merchant "${unauthorizedMerchantProduct.merchant_domain}" is not in authorized whitelist [${rawAllowedMerchants.join(', ')}]`,
+            `Atomic Spend Enforcer: Failed closed to prevent policy bypass (ERR_MERCHANT_NOT_AUTHORIZED)`,
+          ],
+        };
+        return respond(blockedPayload);
+      }
+    }
+
     const grossSubtotalCents = buyProducts.reduce((acc, p) => acc + p.price_cents, 0);
     const rebateCents = buyProducts.reduce((acc, p) => acc + (p.commission_rebate_cents || 0), 0);
     const shippingSavedCents = buyProducts.length > 1 ? 2500 : 0;

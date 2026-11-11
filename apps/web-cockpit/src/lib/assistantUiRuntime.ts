@@ -170,6 +170,8 @@ export interface ShoppingAssistantRuntimeOptions {
   developerModeEnabled?: boolean;
   selectedModel?: string;
   userApiKey?: string;
+  allowedCategories?: string[];
+  allowedMerchants?: string[];
   onTurnProductsReceived?: (products: ProductCardData[]) => void;
   onCartReceived?: (cart: any) => void;
   onComparisonReceived?: (comparison: ComparisonMatrix) => void;
@@ -219,6 +221,8 @@ export function createDataStreamChatAdapter(options: ShoppingAssistantRuntimeOpt
         active_turn_products: activeTurnProducts,
         budget_cap_cents: options.budgetCapCents,
         zip_code: options.zipCode,
+        allowed_category_ids: options.allowedCategories,
+        allowed_merchants: options.allowedMerchants,
         stream: true,
       };
 
@@ -231,6 +235,14 @@ export function createDataStreamChatAdapter(options: ShoppingAssistantRuntimeOpt
 
       if (options.developerModeEnabled && options.userApiKey && options.userApiKey.trim()) {
         headers['x-user-llm-api-key'] = options.userApiKey.trim();
+      }
+
+      if (options.allowedCategories && options.allowedCategories.length > 0) {
+        headers['x-allowed-categories'] = options.allowedCategories.join(',');
+      }
+
+      if (options.allowedMerchants && options.allowedMerchants.length > 0) {
+        headers['x-allowed-merchants'] = options.allowedMerchants.join(',');
       }
 
       logger.info('[AssistantUi:Run] Dispatching streaming chat request', {

@@ -53,6 +53,7 @@ export function PurchaseConfirmationCard({
 
   const [status, setStatus] = useState<'IDLE' | 'AUTHORIZING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
+  const [securityPolicyError, setSecurityPolicyError] = useState<string | null>(null);
 
   const merchants = cart.assigned_merchants || [];
   const explanation = generateBundlingExplanation(cart);
@@ -68,6 +69,7 @@ export function PurchaseConfirmationCard({
   const isVaultReady = isAuthorized && Boolean(effectiveTokenId);
 
   const handleConfirmPurchase = async () => {
+    setSecurityPolicyError(null);
     if (!isLoggedIn) {
       await loginWithPayPal();
       return;
@@ -75,6 +77,46 @@ export function PurchaseConfirmationCard({
     if (!isAuthorized) {
       await authorizePayment();
       return;
+    }
+
+    // 1. Verify Allowed Merchants Whitelist
+    const allowedMerchants = user?.allowedMerchants;
+    if (allowedMerchants && allowedMerchants.length > 0 && !allowedMerchants.includes('*')) {
+      const unauthorizedMerchant = merchants.find((m) => {
+        const mDomain = m.merchant_domain.toLowerCase().replace(/^www\./, '');
+        return !allowedMerchants.some((allowed) => {
+          const aDomain = allowed.trim().toLowerCase().replace(/^www\./, '');
+          return mDomain === aDomain || mDomain.includes(aDomain) || aDomain.includes(mDomain);
+        });
+      });
+
+      if (unauthorizedMerchant) {
+        setSecurityPolicyError(
+          `Store "${unauthorizedMerchant.merchant_domain}" is not in your authorized store whitelist (${allowedMerchants.join(', ')}). Please update your allowed merchant list in Settings or Login.`
+        );
+        return;
+      }
+    }
+
+    // 2. Verify Allowed Categories
+    const allowedCats = user?.allowedCategories;
+    if (allowedCats && allowedCats.length > 0 && !allowedCats.includes('*')) {
+      for (const m of merchants) {
+        for (const it of m.items) {
+          const itCat = (it as any).category_id;
+          if (itCat) {
+            const isAllowed = allowedCats.some(
+              (c) => c.toLowerCase() === itCat.toLowerCase() || itCat.toLowerCase().includes(c.toLowerCase())
+            );
+            if (!isAllowed) {
+              setSecurityPolicyError(
+                `Category "${itCat}" for item "${it.title}" is not permitted under your active spend mandate. Allowed categories: ${allowedCats.join(', ')}.`
+              );
+              return;
+            }
+          }
+        }
+      }
     }
 
     setStatus('AUTHORIZING');
@@ -139,6 +181,23 @@ export function PurchaseConfirmationCard({
           </button>
         )}
       </div>
+
+      {/* Security Mandate Policy Block Error */}
+      {securityPolicyError && (
+        <div className="mt-4 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs flex items-center justify-between gap-3 animate-fade-in font-medium">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>{securityPolicyError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSecurityPolicyError(null)}
+            className="text-rose-500 hover:text-rose-700 dark:hover:text-rose-200 cursor-pointer shrink-0 font-bold"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Explainable Bundling Rationale Box */}
       <div className="mt-4 p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/25 space-y-1">

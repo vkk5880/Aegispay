@@ -259,6 +259,34 @@ export default function BuyerPortalPage() {
   };
 
   const handleSelectProductForBuy = (product: ProductCardData) => {
+    // 1. Verify Allowed Merchants Whitelist
+    const allowedMerchants = user?.allowedMerchants;
+    if (allowedMerchants && allowedMerchants.length > 0 && !allowedMerchants.includes('*')) {
+      const pDomain = (product.merchant_domain || '').toLowerCase().replace(/^www\./, '');
+      const isAllowed = allowedMerchants.some((m) => {
+        const mDomain = m.trim().toLowerCase().replace(/^www\./, '');
+        return pDomain === mDomain || pDomain.includes(mDomain) || mDomain.includes(pDomain);
+      });
+      if (!isAllowed) {
+        showNotification(`⛔ Store "${product.merchant_domain}" is not in your authorized merchant whitelist.`);
+        return;
+      }
+    }
+
+    // 2. Verify Allowed Categories
+    const allowedCats = user?.allowedCategories;
+    if (allowedCats && allowedCats.length > 0 && !allowedCats.includes('*')) {
+      if (product.category_id) {
+        const isAllowed = allowedCats.some(
+          (c) => c.toLowerCase() === product.category_id.toLowerCase() || product.category_id.toLowerCase().includes(c.toLowerCase())
+        );
+        if (!isAllowed) {
+          showNotification(`⛔ Category "${product.category_id}" is not permitted under your active spend mandate.`);
+          return;
+        }
+      }
+    }
+
     const netPrice = product.price_cents - (product.commission_rebate_cents || 0);
     logger.info('[BuyerPage:Buy] Product selected for purchase', {
       productId: product.product_id,
@@ -529,6 +557,8 @@ export default function BuyerPortalPage() {
                   m.items.map((i) => i.product_id)
                 ),
                 budget_cap_cents: totalCents + 5000,
+                allowed_category_ids: user?.allowedCategories,
+                allowed_merchants: user?.allowedMerchants,
               }),
             });
           } catch (err: any) {

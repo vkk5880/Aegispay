@@ -272,6 +272,7 @@ export const SpendMandateSchema = z.object({
   }).int('cumulative_spent_cents must be an integer; floats are strictly rejected').nonnegative('cumulative_spent_cents must be non-negative').default(0),
   currency_code: z.string().trim().length(3, 'currency_code must be 3 characters').toUpperCase().default('USD'),
   allowed_category_ids: z.array(z.string().trim().min(1).max(64)),
+  allowed_merchant_domains: z.array(z.string().trim().min(1).max(128)).optional(),
   public_key_hex: z.string().trim().min(32, 'public_key_hex too short').max(128).regex(/^[0-9a-fA-F]+$/, 'public_key_hex must be valid hex'),
   ed25519_signature_hex: z.string().trim().min(64, 'ed25519_signature_hex too short').regex(/^[0-9a-fA-F]+$/, 'ed25519_signature_hex must be valid hex'),
   expires_at: z.union([z.date(), z.string().datetime()]).transform(v => typeof v === 'string' ? new Date(v) : v),
@@ -630,6 +631,8 @@ export const ConversationalChatPayloadSchema = z.object({
   provider: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   user_api_key: z.string().max(256).optional(),
+  allowed_category_ids: z.array(z.string()).optional(),
+  allowed_merchants: z.array(z.string()).optional(),
   stream: z.boolean().optional(),
 });
 

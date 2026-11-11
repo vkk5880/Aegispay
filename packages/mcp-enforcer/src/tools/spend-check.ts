@@ -149,6 +149,39 @@ export async function handleSpendCheck(rawArgs: unknown): Promise<SpendCheckOutp
         logger.debug('Category authorization passed', { category_id: args.category_id });
       }
 
+      // 3b. Allowed merchants whitelist check
+      const allowedMerchants = (args.mandate as any).allowed_merchant_domains;
+      if (args.merchant_domain && Array.isArray(allowedMerchants) && allowedMerchants.length > 0) {
+        logger.debug('Checking merchant authorization against allowed merchants list', {
+          requested_merchant: args.merchant_domain,
+          allowed_merchants: allowedMerchants,
+        });
+        const isWildcard = allowedMerchants.includes('*');
+        const isAllowed =
+          isWildcard ||
+          allowedMerchants.some((m: string) => {
+            const reqNorm = args.merchant_domain.toLowerCase().replace(/^www\./, '');
+            const mNorm = m.toLowerCase().replace(/^www\./, '');
+            return reqNorm === mNorm || reqNorm.includes(mNorm) || mNorm.includes(reqNorm);
+          });
+
+        if (!isAllowed) {
+          logger.warn('Spend check rejected: merchant domain not allowed by mandate policy', {
+            requested_merchant: args.merchant_domain,
+            allowed_merchants: allowedMerchants,
+          });
+          return {
+            allowed: false,
+            status: 'REJECTED',
+            mandate_id: args.mandate_token,
+            requested_cents: args.requested_cents,
+            reason: `ERR_MERCHANT_NOT_AUTHORIZED: Merchant ${args.merchant_domain} is not in allowed merchants list`,
+            error_code: 'ERR_MERCHANT_NOT_AUTHORIZED',
+          };
+        }
+        logger.debug('Merchant authorization passed', { merchant_domain: args.merchant_domain });
+      }
+
       // 4. Mandate expiration check
       if (args.mandate.expires_at) {
         const expDate = new Date(args.mandate.expires_at);
