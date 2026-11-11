@@ -596,3 +596,56 @@ test('Upgrade B: ChatInputBar renders multi-chip input bar visualizer and quick 
   assert.ok(html.includes('Can I buy all within $100 budget?'));
 });
 
+test('PurchaseConfirmationCard: renders compact user-view ready prompt with Cancel button and small item images', async () => {
+  const React = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const { PurchaseConfirmationCard } = await import('./PurchaseConfirmationCard.js');
+
+  const mockCart: any = {
+    gross_subtotal_cents: 28000,
+    total_commission_rebate_cents: 2800,
+    total_shipping_cents: 0,
+    total_shipping_saved_cents: 0,
+    total_tax_cents: 2310,
+    net_buyer_expenditure_cents: 27510,
+    budget_cap_cents: 50000,
+    is_within_budget: true,
+    assigned_merchants: [
+      {
+        merchant_domain: 'audio-gear-direct.com',
+        merchant_name: 'Audio Gear Direct',
+        shipping_fee_cents: 0,
+        waiver_threshold_cents: 5000,
+        shipping_waived: true,
+        commission_rebate_cents: 2800,
+        tax_cents: 2310,
+        items: [
+          {
+            product_id: 'ch3_anc_headphone_01',
+            title: 'AcousticPro ANC Studio Headphones',
+            price_cents: 28000,
+            unit_price_cents: 28000,
+            quantity: 1,
+            cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=128&q=80',
+          },
+        ],
+      },
+    ],
+  };
+
+  const html = renderToString(
+    React.createElement(PurchaseConfirmationCard, {
+      cart: mockCart,
+      zipCode: '94016',
+    })
+  );
+
+  // Verifies compact card header, cancel option, and small image preview
+  assert.ok(html.includes('Pre-Purchase Authorization'));
+  assert.ok(html.includes('Cancel'), 'Expected Cancel button to be present');
+  assert.ok(html.includes('AcousticPro ANC Studio Headphones'));
+  assert.ok(html.includes('$275.10'));
+  assert.ok(html.includes('View breakdown'));
+  assert.ok(html.includes('w-9 h-9') || html.includes('w-10 sm:h-10'), 'Expected small image thumbnail');
+});
+

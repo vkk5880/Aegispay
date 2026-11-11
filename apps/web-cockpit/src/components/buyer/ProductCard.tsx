@@ -152,8 +152,8 @@ export function ProductCard({
       )}
 
       <div>
-        {/* Product Image & Radial Score Badge - Compact Responsive Size */}
-        <div className="relative w-full h-32 sm:h-36 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-950 mb-3 border border-slate-200/80 dark:border-white/10 flex items-center justify-center">
+        {/* Product Image & Radial Score Badge - Small Compact Size */}
+        <div className="relative w-full h-22 sm:h-24 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-950 mb-2.5 border border-slate-200/80 dark:border-white/10 flex items-center justify-center">
           {hasCleanUrl && !imgError ? (
             <img
               src={product.cleaned_url}

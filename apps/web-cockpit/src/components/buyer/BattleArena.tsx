@@ -179,8 +179,8 @@ function ContenderCard({
       )}
 
       <div>
-        {/* Compact Image & Score Badge */}
-        <div className="relative w-full h-28 sm:h-32 rounded-lg overflow-hidden bg-slate-50 dark:bg-slate-950 mb-2.5 border border-slate-200 dark:border-slate-800">
+        {/* Compact Small Image & Score Badge */}
+        <div className="relative w-full h-20 sm:h-22 rounded-lg overflow-hidden bg-slate-50 dark:bg-slate-950 mb-2 border border-slate-200 dark:border-slate-800">
           {img && (
             <img
               src={img}

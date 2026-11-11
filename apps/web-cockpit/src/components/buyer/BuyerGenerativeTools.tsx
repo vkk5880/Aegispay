@@ -94,8 +94,8 @@ export function GenerativeProductCard({
           : 'border-slate-200 dark:border-slate-800 hover:border-cyan-500/40'
       }`}
     >
-      {/* Product Image & Badges */}
-      <div className="relative h-28 sm:h-32 aspect-video w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+      {/* Product Image & Badges - Compact Small Image */}
+      <div className="relative h-20 sm:h-22 aspect-video w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={product.cleaned_image_url || product.image_url}
@@ -384,7 +384,7 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-36 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
+              <div key={i} className="h-24 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
             ))}
           </div>
         </div>
@@ -442,7 +442,7 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-36 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
+              <div key={i} className="h-24 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
             ))}
           </div>
         </div>
