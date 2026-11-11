@@ -17,10 +17,12 @@ import {
   CreditCard,
   Percent,
   Trash2,
+  Lock,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import type { KnapsackOptimizationData } from './KnapsackSplitVisualizer';
 import { useUiMode } from '@/context/UiModeContext';
+import { useAuth } from '@/context/AuthContext';
 
 export interface UnifiedCartDrawerProps {
   isOpen: boolean;
@@ -94,6 +96,7 @@ export function UnifiedCartDrawer({
   onRemoveItem,
 }: UnifiedCartDrawerProps) {
   const { showTechnicalDetails } = useUiMode();
+  const auth = useAuth();
 
   // Log drawer visibility transitions
   useEffect(() => {
@@ -403,10 +406,18 @@ export function UnifiedCartDrawer({
 
         {/* Footer Actions */}
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#050912]/80 space-y-2">
+          {auth.isTrackingMode && (
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400 font-mono">
+              <Lock className="w-3.5 h-3.5 shrink-0" />
+              <span>Read-Only Tracking Mode Active — Checkout Disabled</span>
+            </div>
+          )}
+
           <button
             type="button"
-            disabled={totalItemsCount === 0}
+            disabled={totalItemsCount === 0 || auth.isTrackingMode}
             onClick={() => {
+              if (auth.isTrackingMode) return;
               logger.info('[UnifiedCartDrawer:Checkout] Checkout initiated from cart drawer', {
                 netTotalCents,
                 totalItemsCount,
@@ -420,15 +431,24 @@ export function UnifiedCartDrawer({
             }}
             className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
           >
-            <CreditCard className="w-4 h-4" />
-            <span>
-              {totalItemsCount === 0
-                ? 'Cart is Empty'
-                : showTechnicalDetails
-                ? `Proceed to Vault Authorization • ${formatCents(netTotalCents)}`
-                : `Authorize Purchase with PayPal • ${formatCents(netTotalCents)}`}
-            </span>
-            <ArrowRight className="w-4 h-4" />
+            {auth.isTrackingMode ? (
+              <>
+                <Lock className="w-4 h-4" />
+                <span>Checkout Disabled (Read-Only Tracking)</span>
+              </>
+            ) : (
+              <>
+                <CreditCard className="w-4 h-4" />
+                <span>
+                  {totalItemsCount === 0
+                    ? 'Cart is Empty'
+                    : showTechnicalDetails
+                    ? `Proceed to Vault Authorization • ${formatCents(netTotalCents)}`
+                    : `Authorize Purchase with PayPal • ${formatCents(netTotalCents)}`}
+                </span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
           </button>
 
           <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500">

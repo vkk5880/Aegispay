@@ -680,9 +680,12 @@ export class ShoppingAssistantService {
       name: 'AegisPay Autonomous Shopping Concierge',
       instructions:
         'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
-        'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
         'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
         'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
+        'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
+        'When a user wants to find or discover items, invoke the search_catalog tool. ' +
+        'When a user asks to compare products, invoke compare_products. ' +
+        'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
         'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
       model: resolveCommerceModel(),
       tools: {
@@ -1000,7 +1003,7 @@ export class ShoppingAssistantService {
           inputData.selected_product_ids && inputData.selected_product_ids.length > 0
             ? inputData.selected_product_ids
             : inputData.product_ids;
-        const action = this.resolveIntent(inputData.message, inputData.explicit_action, effectiveProductIds);
+        const action = this.resolveIntent(inputData.message, inputData.explicit_action, effectiveProductIds) || 'DISCOVER';
         const query = this.extractSearchQuery(inputData.message);
         const keyAuth = inputData.user_api_key ? 'User-Scoped BYOK' : 'Platform Deploy';
         const trace = [
@@ -1082,16 +1085,9 @@ export class ShoppingAssistantService {
 
   /**
    * Resolves natural language shopping intent into DISCOVER, COMPARE, DETAILS, or BUY actions.
+   * Preserved for static unit test assertions and fallback reasoner routing.
    */
   public parseIntent(message: string, explicitAction?: ShoppingActionType, productIds?: string[]): ShoppingActionType {
-    return this.resolveIntent(message, explicitAction, productIds);
-  }
-
-  /**
-   * Resolves shopping intent using the Mastra Agent with deterministic semantics,
-   * with zero markdown regex parsing.
-   */
-  private resolveIntent(message: string, explicitAction?: ShoppingActionType, productIds?: string[]): ShoppingActionType {
     if (explicitAction) {
       return explicitAction;
     }
@@ -1142,6 +1138,18 @@ export class ShoppingAssistantService {
     }
 
     return 'DISCOVER';
+  }
+
+  /**
+   * Resolves shopping intent strictly from explicit user interface action clicks (request.action).
+   * All natural language conversational prompts return undefined so the Mastra Agent LLM
+   * autonomously decides when to invoke prepare_checkout, search_catalog, compare_products, or filter_turn_products.
+   */
+  private resolveIntent(message: string, explicitAction?: ShoppingActionType, productIds?: string[]): ShoppingActionType | undefined {
+    if (explicitAction) {
+      return explicitAction;
+    }
+    return undefined;
   }
 
   /**
@@ -1334,6 +1342,7 @@ export class ShoppingAssistantService {
     } catch (err: any) {
       mastraLogger.warn(`Mastra Workflow DAG failed (${err?.message}). Activating local deterministic reasoner fallback...`);
       // Upstream LLM timeout or 429 rate limit failover to deterministic local reasoner
+      const fallbackIntent = request.action || this.parseIntent(request.message, undefined, effectiveProductIds);
       const proposal = runLocalReasoner(request.message);
       const fallbackAmountCents = proposal.toolCall.args.amountUsd
         ? Math.round(proposal.toolCall.args.amountUsd * 100)
@@ -1341,7 +1350,26 @@ export class ShoppingAssistantService {
 
       const fallbackQuery = this.extractSearchQuery(request.message);
 
-      if (resolvedIntent === 'COMPARE') {
+      if (fallbackIntent === 'BUY') {
+        const buyResult = await this.executeBuyWorkflow({
+          query: fallbackQuery,
+          product_ids: effectiveProductIds,
+          budget_cap_cents: request.budget_cap_cents,
+          zip_code: request.zip_code,
+          model: 'local-financial-reasoner-v1',
+          trace: [
+            ...trace,
+            `[Circuit Breaker Fallback] Switched to deterministic Buy workflow: ${proposal.toolCall.toolName}`,
+          ],
+        });
+        return {
+          ...buyResult,
+          active_model: 'local-financial-reasoner-v1',
+          requires_human_confirmation: true,
+        };
+      }
+
+      if (fallbackIntent === 'COMPARE') {
         const compareResult = await this.executeCompareWorkflow({
           query: fallbackQuery,
           product_ids: effectiveProductIds,
@@ -1358,7 +1386,7 @@ export class ShoppingAssistantService {
         };
       }
 
-      if (resolvedIntent === 'DETAILS') {
+      if (fallbackIntent === 'DETAILS') {
         const detailsResult = await this.executeDetailsWorkflow({
           query: fallbackQuery,
           product_ids: effectiveProductIds,
@@ -1793,9 +1821,12 @@ export class ShoppingAssistantService {
         name: `AegisPay User-Scoped Concierge (${activeModelId})`,
         instructions:
           'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
-          'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
           'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
           'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
+          'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
+          'When a user wants to find or discover items, invoke the search_catalog tool. ' +
+          'When a user asks to compare products, invoke compare_products. ' +
+          'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
           'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
         model: modelConfig,
         tools,
@@ -1808,9 +1839,12 @@ export class ShoppingAssistantService {
         name: `AegisPay Autonomous Shopping Concierge (${requestedModel})`,
         instructions:
           'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
-          'You classify buyer shopping requests into DISCOVER, COMPARE, DETAILS, or BUY actions. ' +
           'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
           'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
+          'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
+          'When a user wants to find or discover items, invoke the search_catalog tool. ' +
+          'When a user asks to compare products, invoke compare_products. ' +
+          'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
           'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
         model: requestedModel,
         tools,
@@ -1832,10 +1866,9 @@ export class ShoppingAssistantService {
 
     const message = request.message || '';
     const activeModel = resolveCommerceModel(request.model);
-    const resolvedIntent = this.resolveIntent(message, request.action, effectiveProductIds);
 
     // 1. Safety & Financial Boundary: If user explicitly triggered BUY action (e.g. clicked "Buy for Me"):
-    if (request.action === 'BUY' || resolvedIntent === 'BUY') {
+    if (request.action === 'BUY') {
       const targetId = effectiveProductIds?.[0] || 'ch3_anc_headphone_01';
       const toolCallId = `call_buy_${Date.now()}`;
       yield formatDataStreamToolCall(toolCallId, 'prepare_checkout', {
@@ -1870,54 +1903,9 @@ export class ShoppingAssistantService {
       return;
     }
 
-    // 2. In-memory turn filtering query check (<2ms):
-    // e.g. "top 3 from that", "only show under $50", "filter", "show only top 2"
-    const lower = message.toLowerCase();
-    const activeTurnProducts = request.active_turn_products || [];
-    const isTurnFilterIntent =
-      activeTurnProducts.length > 0 &&
-      (
-        /\b(top\s+\d+|from\s+that|only\s+show|show\s+only|filter|cheapest\s+one|highest\s+rated|under\s+\$?\d+)\b/i.test(lower) &&
-        !lower.includes('vs') &&
-        !lower.includes('compare') &&
-        !lower.includes('buy')
-      );
-
-    if (isTurnFilterIntent) {
-      const toolCallId = `call_filter_${Date.now()}`;
-      yield formatDataStreamToolCall(toolCallId, 'filter_turn_products', {
-        criteria: message,
-        active_turn_products: activeTurnProducts,
-      });
-
-      const filterOutput = (await this.filterTurnProductsTool.execute!(
-        {
-          criteria: message,
-          top_n: 5,
-          active_turn_products: activeTurnProducts,
-        },
-        {} as any
-      )) as { products: ProductCardData[]; filtered_count: number; applied_criteria?: string };
-
-      yield formatDataStreamToolResult(toolCallId, filterOutput);
-
-      const items = filterOutput.products;
-      yield formatDataStreamText(`I filtered the items from our active search in-memory (<2ms) based on **"${message}"**:\n\n`);
-
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const net = ((item.price_cents - item.commission_rebate_cents) / 100).toFixed(2);
-        yield formatDataStreamText(
-          `${i + 1}. **${item.title}**\n   - Price: $${(item.price_cents / 100).toFixed(2)} (Effective Net: **$${net}**)\n   - Rating: ★ ${item.rating} • Seller: \`${item.merchant_domain}\` (${item.merchant_credibility_score}% Trust)\n   - Shipping: ${item.free_shipping ? 'Free Shipping' : `$${(item.shipping_fee_cents / 100).toFixed(2)}`}\n\n`
-        );
-      }
-
-      yield formatDataStreamFinish('stop', { promptTokens: 45, completionTokens: 90 });
-      return;
-    }
-
-    // 3. Multi-item comparison stream
-    if (request.action === 'COMPARE' || (resolvedIntent === 'COMPARE' && effectiveProductIds && effectiveProductIds.length >= 2)) {
+    // 2. Multi-item comparison stream: If user explicitly triggered COMPARE action:
+    if (request.action === 'COMPARE') {
+      const activeTurnProducts = request.active_turn_products || [];
       const targetIds =
         effectiveProductIds && effectiveProductIds.length >= 2
           ? effectiveProductIds
@@ -1951,8 +1939,8 @@ export class ShoppingAssistantService {
       return;
     }
 
-    // 4. Multi-item discovery stream
-    if (request.action === 'DISCOVER' || resolvedIntent === 'DISCOVER') {
+    // 3. Multi-item discovery stream: If user explicitly triggered DISCOVER action:
+    if (request.action === 'DISCOVER') {
       const query = this.extractSearchQuery(message);
       const toolCallId = `call_search_${Date.now()}`;
       yield formatDataStreamToolCall(toolCallId, 'search_catalog', {
@@ -1981,7 +1969,7 @@ export class ShoppingAssistantService {
       return;
     }
 
-    // 5. All other conversational messages: Stream through Mastra Agent LLM with full tool access
+    // 4. All other conversational messages: Stream through Mastra Agent LLM with full tool access
     try {
       const agent = this.getAgent(request.model, request.user_api_key);
       const prompt = buildAgentPrompt(request, effectiveProductIds);

@@ -129,6 +129,7 @@ export async function POST(req: Request) {
       const authHeader = req.headers.get('authorization');
       if (authHeader) {
         headers['Authorization'] = authHeader;
+        headers['authorization'] = authHeader;
       }
       const sessionToken = req.headers.get('x-session-token');
       if (sessionToken) {
@@ -174,24 +175,8 @@ export async function POST(req: Request) {
     : [];
   const activeTurnProducts: any[] = Array.isArray(body.active_turn_products) ? body.active_turn_products : [];
 
-  // Determine intent
-  let action: 'DISCOVER' | 'COMPARE' | 'DETAILS' | 'BUY' = explicitAction || 'DISCOVER';
-  if (!explicitAction) {
-    if (
-      /\b(buy|purchase|checkout|order|get it for me|pay now|buy both|buy all|within budget|within my budget)\b/i.test(message)
-    ) {
-      action = 'BUY';
-    } else if (
-      /\b(compare|vs|versus|difference between|side by side|which one|which of these|which is better|longer warranty|better for)\b/i.test(message) ||
-      (selectedProductIds.length >= 2 && /\b(which|better|compare|difference)\b/i.test(message))
-    ) {
-      action = 'COMPARE';
-    } else if (
-      /\b(detail|details|specs|specifications|more info|tell me about|wattage|warranty|ask ai)\b/i.test(message)
-    ) {
-      action = 'DETAILS';
-    }
-  }
+  // Determine intent strictly from explicit action, defaulting to DISCOVER without regex overrides
+  const action: 'DISCOVER' | 'COMPARE' | 'DETAILS' | 'BUY' = explicitAction || 'DISCOVER';
 
   const sampleProducts: import('@aegispay/shared-types').ProductCardData[] = [
     {

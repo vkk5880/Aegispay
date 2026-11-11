@@ -143,6 +143,7 @@ export function UserSettingsDrawer({
     isAuthorized,
     loginWithPayPal,
     authorizePayment,
+    revokePaymentAuthorization,
   } = useAuth();
   const [formData, setFormData] = useState<UserSettings>(initialSettings);
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -334,6 +335,19 @@ export function UserSettingsDrawer({
                 >
                   <CreditCard className="w-3.5 h-3.5" />
                   <span>Authorize Payment</span>
+                </button>
+              )}
+
+              {/* Revoke Spend Allowance button if authorized (1-click drop to Mode A $0 Identity Only) */}
+              {isLoggedIn && isAuthorized && (
+                <button
+                  type="button"
+                  onClick={() => revokePaymentAuthorization()}
+                  className="w-full py-2 rounded-xl bg-slate-200/80 hover:bg-slate-300 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 font-bold text-xs shadow-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 border border-slate-300/80 dark:border-white/10 transition-colors"
+                  title="Revoke active spend mandate and drop back to Mode A ($0 Identity Only)"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-500" />
+                  <span>Revoke Spend Allowance (Drop to $0 Sign-In)</span>
                 </button>
               )}
             </div>
