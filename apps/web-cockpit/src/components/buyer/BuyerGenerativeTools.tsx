@@ -418,6 +418,64 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
 });
 
 /**
+ * 1b. discover_products Tool UI (Alternative tool name from Mastra discover tool)
+ * Renders interactive Channel3 product cards with selection checkbox, specs deep dive, and buy action.
+ */
+export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, SearchCatalogOutput>({
+  toolName: 'discover_products',
+  render: ({ args, result, status }) => {
+    const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
+    const isRunning = status.type === 'running' || !result;
+
+    if (isRunning) {
+      return (
+        <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4 my-2 animate-pulse space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-cyan-400 text-xs font-mono">
+              <Sparkles className="w-4 h-4 animate-spin text-cyan-400" />
+              <span>
+                Searching Channel3 Catalog for: <strong>"{args.query}"</strong>...
+              </span>
+            </div>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+              PAYPAL-HACKATHON-2026
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-44 rounded-lg bg-slate-800/40 border border-slate-700/40" />
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    const products = result.products || [];
+    const promoCode = (result as any).promo_code || 'PAYPAL-HACKATHON-2026';
+    return (
+      <div className="my-2 space-y-2">
+        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
+          <span>Discovered {products.length} merchant catalog items</span>
+          <span className="text-[10px] text-cyan-400">Promo applied: {promoCode}</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {products.map((product) => (
+            <GenerativeProductCard
+              key={product.product_id}
+              product={product}
+              isSelected={selectedProducts.some((p) => p.product_id === product.product_id)}
+              onToggleSelect={onToggleSelectProduct}
+              onAskAi={onAskAi}
+              onAction={onAction}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  },
+});
+
+/**
  * 2. filter_turn_products Tool UI
  * Renders in-memory filtered product slice with filter metric pill.
  */

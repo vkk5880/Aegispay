@@ -272,6 +272,66 @@ export default function BuyerPortalPage() {
     setIsCartOpen(true);
   };
 
+  const handleRemoveCartItem = (productId: string) => {
+    logger.info('[BuyerPage:RemoveItem] Removing item from knapsack cart', { productId });
+    setOptimizationData((prev) => {
+      let removedTitle = 'Item';
+      const updatedMerchants = prev.assigned_merchants
+        .map((merchant) => {
+          const remainingItems = merchant.items.filter((it) => {
+            if (it.product_id === productId) {
+              removedTitle = it.title;
+              return false;
+            }
+            return true;
+          });
+          if (remainingItems.length === 0) return null;
+
+          const merchantSubtotal = remainingItems.reduce((acc, it) => acc + it.unit_price_cents * it.quantity, 0);
+          const merchantRebate = remainingItems.reduce(
+            (acc, it) => acc + Math.round(it.unit_price_cents * it.commission_rate * 0.75 * it.quantity),
+            0
+          );
+          const isShippingWaived = merchant.waiver_threshold_cents
+            ? merchantSubtotal >= merchant.waiver_threshold_cents
+            : true;
+          const shippingFee = isShippingWaived ? 0 : (merchant.shipping_fee_cents || 1500);
+
+          return {
+            ...merchant,
+            items: remainingItems,
+            subtotal_cents: merchantSubtotal,
+            commission_rebate_cents: merchantRebate,
+            shipping_fee_cents: shippingFee,
+            shipping_waived: isShippingWaived,
+            net_merchant_cents: merchantSubtotal - merchantRebate + shippingFee,
+          };
+        })
+        .filter((m): m is NonNullable<typeof m> => m !== null);
+
+      const grossSubtotal = updatedMerchants.reduce((acc, m) => acc + m.subtotal_cents, 0);
+      const totalRebate = updatedMerchants.reduce((acc, m) => acc + m.commission_rebate_cents, 0);
+      const totalShipping = updatedMerchants.reduce((acc, m) => acc + m.shipping_fee_cents, 0);
+      const netBuyer = grossSubtotal - totalRebate + totalShipping;
+      const savingsPct = grossSubtotal > 0 ? Number(((totalRebate / grossSubtotal) * 100).toFixed(1)) : 0;
+      const budgetCap = prev.budget_cap_cents || 50000;
+      const isWithinBudget = netBuyer <= budgetCap;
+
+      showNotification(`Removed "${removedTitle.slice(0, 32)}..." from cart`);
+
+      return {
+        ...prev,
+        assigned_merchants: updatedMerchants,
+        gross_subtotal_cents: grossSubtotal,
+        total_commission_rebate_cents: totalRebate,
+        total_shipping_cents: totalShipping,
+        net_buyer_expenditure_cents: netBuyer,
+        savings_percentage: savingsPct,
+        is_within_budget: isWithinBudget,
+      };
+    });
+  };
+
   const cartItemCount = optimizationData.assigned_merchants.reduce(
     (acc, m) => acc + m.items.reduce((iAcc, item) => iAcc + item.quantity, 0),
     0
@@ -435,6 +495,7 @@ export default function BuyerPortalPage() {
         }}
         cart={optimizationData}
         zipCode={userSettings.zipCode}
+        onRemoveItem={handleRemoveCartItem}
         onProceedToCheckout={() => {
           logger.info('[BuyerPage:Checkout] Proceed to checkout triggered from UnifiedCartDrawer', {
             netBuyerExpenditureCents: optimizationData.net_buyer_expenditure_cents,

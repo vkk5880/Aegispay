@@ -16,6 +16,7 @@ import {
   Info,
   CreditCard,
   Percent,
+  Trash2,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import type { KnapsackOptimizationData } from './KnapsackSplitVisualizer';
@@ -27,6 +28,7 @@ export interface UnifiedCartDrawerProps {
   cart?: KnapsackOptimizationData | null;
   zipCode?: string;
   onProceedToCheckout?: () => void;
+  onRemoveItem?: (productId: string) => void;
 }
 
 /**
@@ -89,6 +91,7 @@ export function UnifiedCartDrawer({
   cart,
   zipCode = '94016',
   onProceedToCheckout,
+  onRemoveItem,
 }: UnifiedCartDrawerProps) {
   const { showTechnicalDetails } = useUiMode();
 
@@ -99,7 +102,7 @@ export function UnifiedCartDrawer({
         zipCode,
         showTechnicalDetails,
         hasCustomCart: !!cart,
-        assignedMerchantsCount: (cart || {}).assigned_merchants?.length || 2,
+        assignedMerchantsCount: (cart || {}).assigned_merchants?.length || 0,
       });
     }
   }, [isOpen, zipCode, showTechnicalDetails, cart]);
@@ -108,69 +111,15 @@ export function UnifiedCartDrawer({
     return null;
   }
 
-  // Fallback default sample cart if none passed
-  const activeCart: KnapsackOptimizationData = cart || {
-    assigned_merchants: [
-      {
-        merchant_domain: 'nordic-workspaces.io',
-        delivery_window: '3-4 Day Priority Freight',
-        estimated_arrival: 'Est. Delivery in 3-4 business days',
-        subtotal_cents: 19500,
-        commission_rebate_cents: 1755,
-        shipping_fee_cents: 0,
-        shipping_waived: true,
-        waiver_threshold_cents: 15000,
-        net_merchant_cents: 17745,
-        items: [
-          {
-            product_id: 'ch3_desk_mat_walnut',
-            title: 'Precision Felt & Walnut Desk Organizer Pad',
-            quantity: 1,
-            unit_price_cents: 8500,
-            unit_compare_price_cents: 11000,
-            commission_rate: 0.12,
-            cleaned_url: 'https://images.unsplash.com/photo-1527864550417-7fd91fc51a46?w=400&q=80',
-          },
-          {
-            product_id: 'ch3_usb_dac_amp',
-            title: 'Hi-Fi 32-bit USB Audio DAC/Amp Interface',
-            quantity: 1,
-            unit_price_cents: 11000,
-            unit_compare_price_cents: 14000,
-            commission_rate: 0.12,
-            cleaned_url: 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=400&q=80',
-          },
-        ],
-      },
-      {
-        merchant_domain: 'audio-gear-direct.com',
-        delivery_window: '2-Day Express Consolidated',
-        estimated_arrival: 'Est. Delivery in 2 business days',
-        subtotal_cents: 28000,
-        commission_rebate_cents: 3150,
-        shipping_fee_cents: 0,
-        shipping_waived: true,
-        waiver_threshold_cents: 25000,
-        net_merchant_cents: 24850,
-        items: [
-          {
-            product_id: 'ch3_anc_headphone_01',
-            title: 'AcousticPro ANC Studio Headphones (Midnight)',
-            quantity: 1,
-            unit_price_cents: 28000,
-            unit_compare_price_cents: 34999,
-            commission_rate: 0.15,
-            cleaned_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&q=80',
-          },
-        ],
-      },
-    ],
-    gross_subtotal_cents: 47500,
-    total_commission_rebate_cents: 4905,
+  // Active cart (respecting empty cart when cart prop is provided)
+  const activeCart: KnapsackOptimizationData = cart !== undefined && cart !== null ? cart : {
+    assigned_merchants: [],
+    gross_subtotal_cents: 0,
+    total_commission_rebate_cents: 0,
     total_shipping_cents: 0,
-    total_shipping_saved_cents: 2500,
-    net_buyer_expenditure_cents: 42595,
-    savings_percentage: 29.0,
+    total_shipping_saved_cents: 0,
+    net_buyer_expenditure_cents: 0,
+    savings_percentage: 0,
     is_within_budget: true,
     budget_cap_cents: 50000,
   };
@@ -252,90 +201,135 @@ export function UnifiedCartDrawer({
             </p>
           </div>
 
-          {/* Items Grouped by Merchant & Delivery Window */}
-          <div className="space-y-4">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-              Shipment Groups & Delivery Windows
-            </h4>
-
-            {activeCart.assigned_merchants.map((merchant, mIdx) => (
-              <div
-                key={merchant.merchant_domain}
-                className="bg-slate-50 dark:bg-[#0b1426] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs"
-              >
-                {/* Merchant Header Bar */}
-                <div className="p-3 bg-slate-100/70 dark:bg-[#070e1c] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <Store className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                    <span className="font-bold text-slate-900 dark:text-white font-mono">
-                      {merchant.merchant_domain}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
-                    <Calendar className="w-3 h-3 text-cyan-500" />
-                    <span>{merchant.delivery_window || '2-3 Business Days'}</span>
-                  </div>
-                </div>
-
-                {/* Items in this merchant */}
-                <div className="divide-y divide-slate-100 dark:divide-slate-800/60 p-3 space-y-2">
-                  {merchant.items.map((item) => (
-                    <div key={item.product_id} className="pt-2 first:pt-0 flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-lg bg-slate-200 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.cleaned_url}
-                          alt={item.title}
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                          {item.title}
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
-                          <span>Qty: {item.quantity}</span>
-                          <span>•</span>
-                          <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                            Rebate: -{formatCents(Math.round(item.unit_price_cents * item.commission_rate * 0.75))}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs font-bold text-slate-900 dark:text-white font-mono">
-                          {formatCents(item.unit_price_cents * item.quantity)}
-                        </div>
-                        {item.unit_compare_price_cents > item.unit_price_cents && (
-                          <div className="text-[10px] text-slate-400 line-through font-mono">
-                            {formatCents(item.unit_compare_price_cents * item.quantity)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Merchant Footer: Shipping Waived indicator */}
-                <div className="px-3 py-2 bg-slate-100/40 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-[11px]">
-                  <div className="flex items-center gap-1.5 text-slate-500">
-                    <Truck className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Estimated arrival: {merchant.estimated_arrival || 'In 2-3 business days'}</span>
-                  </div>
-                  {merchant.shipping_waived ? (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 text-[10px]">
-                      <CheckCircle2 className="w-3 h-3" />
-                      Shipping Waived ($0.00)
-                    </span>
-                  ) : (
-                    <span className="text-slate-600 dark:text-slate-400 font-mono">
-                      Shipping: {formatCents(merchant.shipping_fee_cents)}
-                    </span>
-                  )}
-                </div>
+          {/* Items Grouped by Merchant & Delivery Window, or Empty Cart State */}
+          {totalItemsCount === 0 ? (
+            <div className="py-16 px-4 text-center flex flex-col items-center justify-center space-y-4 rounded-2xl bg-slate-50/50 dark:bg-[#070e1c]/50 border border-slate-200 dark:border-slate-800">
+              <div className="p-4 rounded-2xl bg-cyan-500/10 text-cyan-500 dark:text-cyan-400 border border-cyan-500/20">
+                <ShoppingBag className="w-10 h-10" />
               </div>
-            ))}
-          </div>
+              <div className="space-y-1">
+                <h4 className="text-base font-bold text-slate-900 dark:text-white">Your cart is empty</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-xs leading-relaxed">
+                  Discover live products across 100M+ items on Channel3 or ask your concierge assistant.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  if (typeof window !== 'undefined') {
+                    window.location.href = '/search';
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+              >
+                Browse Products
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Shipment Groups & Delivery Windows
+              </h4>
+
+              {activeCart.assigned_merchants.map((merchant, mIdx) => (
+                <div
+                  key={merchant.merchant_domain}
+                  className="bg-slate-50 dark:bg-[#0b1426] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden shadow-xs"
+                >
+                  {/* Merchant Header Bar */}
+                  <div className="p-3 bg-slate-100/70 dark:bg-[#070e1c] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      <Store className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                      <span className="font-bold text-slate-900 dark:text-white font-mono">
+                        {merchant.merchant_domain}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium">
+                      <Calendar className="w-3 h-3 text-cyan-500" />
+                      <span>{merchant.delivery_window || '2-3 Business Days'}</span>
+                    </div>
+                  </div>
+
+                  {/* Items in this merchant */}
+                  <div className="divide-y divide-slate-100 dark:divide-slate-800/60 p-3 space-y-2">
+                    {merchant.items.map((item) => (
+                      <div key={item.product_id} className="pt-2 first:pt-0 flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-lg bg-slate-200 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={item.cleaned_url}
+                            alt={item.title}
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                            {item.title}
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span>Qty: {item.quantity}</span>
+                            <span>•</span>
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                              Rebate: -{formatCents(Math.round(item.unit_price_cents * item.commission_rate * 0.75))}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right">
+                            <div className="text-xs font-bold text-slate-900 dark:text-white font-mono">
+                              {formatCents(item.unit_price_cents * item.quantity)}
+                            </div>
+                            {item.unit_compare_price_cents > item.unit_price_cents && (
+                              <div className="text-[10px] text-slate-400 line-through font-mono">
+                                {formatCents(item.unit_compare_price_cents * item.quantity)}
+                              </div>
+                            )}
+                          </div>
+                          {onRemoveItem && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                logger.info('[UnifiedCartDrawer:RemoveItem] Removing item from cart', {
+                                  productId: item.product_id,
+                                  title: item.title,
+                                });
+                                onRemoveItem(item.product_id);
+                              }}
+                              title="Remove item from cart"
+                              aria-label={`Remove ${item.title} from cart`}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 dark:hover:bg-rose-500/20 transition-all cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Merchant Footer: Shipping Waived indicator */}
+                  <div className="px-3 py-2 bg-slate-100/40 dark:bg-slate-900/40 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between text-[11px]">
+                    <div className="flex items-center gap-1.5 text-slate-500">
+                      <Truck className="w-3.5 h-3.5 text-blue-500" />
+                      <span>Estimated arrival: {merchant.estimated_arrival || 'In 2-3 business days'}</span>
+                    </div>
+                    {merchant.shipping_waived ? (
+                      <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 text-[10px]">
+                        <CheckCircle2 className="w-3 h-3" />
+                        Shipping Waived ($0.00)
+                      </span>
+                    ) : (
+                      <span className="text-slate-600 dark:text-slate-400 font-mono">
+                        Shipping: {formatCents(merchant.shipping_fee_cents)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Cost Summary Breakdown */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#070d18] border border-slate-200 dark:border-slate-800 space-y-2.5">
@@ -411,6 +405,7 @@ export function UnifiedCartDrawer({
         <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#050912]/80 space-y-2">
           <button
             type="button"
+            disabled={totalItemsCount === 0}
             onClick={() => {
               logger.info('[UnifiedCartDrawer:Checkout] Checkout initiated from cart drawer', {
                 netTotalCents,
@@ -423,11 +418,13 @@ export function UnifiedCartDrawer({
                 onProceedToCheckout();
               }
             }}
-            className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+            className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-600 via-blue-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs uppercase tracking-wider transition-all shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 cursor-pointer active:scale-98"
           >
             <CreditCard className="w-4 h-4" />
             <span>
-              {showTechnicalDetails
+              {totalItemsCount === 0
+                ? 'Cart is Empty'
+                : showTechnicalDetails
                 ? `Proceed to Vault Authorization • ${formatCents(netTotalCents)}`
                 : `Authorize Purchase with PayPal • ${formatCents(netTotalCents)}`}
             </span>

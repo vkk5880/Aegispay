@@ -8,6 +8,7 @@ import {
 import { POST as chatHandler } from '../../app/api/buyer/chat/route.js';
 import {
   SearchCatalogToolUI,
+  DiscoverProductsToolUI,
   FilterTurnProductsToolUI,
   CompareProductsToolUI,
   PrepareCheckoutToolUI,
@@ -206,6 +207,9 @@ test('Buyer Chat Route: BUY action in SSE stream returns prepare_checkout tool c
 test('BuyerGenerativeTools: makeAssistantToolUI correctly registers the 4 core generative visualizers', () => {
   assert.equal(SearchCatalogToolUI.unstable_tool.toolName, 'search_catalog');
   assert.equal(typeof SearchCatalogToolUI.unstable_tool.render, 'function');
+
+  assert.equal(DiscoverProductsToolUI.unstable_tool.toolName, 'discover_products');
+  assert.equal(typeof DiscoverProductsToolUI.unstable_tool.render, 'function');
 
   assert.equal(FilterTurnProductsToolUI.unstable_tool.toolName, 'filter_turn_products');
   assert.equal(typeof FilterTurnProductsToolUI.unstable_tool.render, 'function');

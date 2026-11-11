@@ -30,7 +30,7 @@ const PRESET_QUERIES = [
   'Anker high-capacity power bank with fast charging',
 ];
 
-const MOCK_SEARCH_RESULTS: ProductCardData[] = [
+const INITIAL_PREVIEW_PRODUCTS: ProductCardData[] = [
   {
     product_id: 'ch3_anc_headphone_01',
     title: 'Sony WH-1000XM5 Wireless Noise-Canceling Headphones',
@@ -66,78 +66,10 @@ const MOCK_SEARCH_RESULTS: ProductCardData[] = [
       { badge_type: 'TOP_RATED', label: '4.8 ★ Verified', badge_color: '#8b5cf6', color: '#8b5cf6' },
     ],
   },
-  {
-    product_id: 'ch3_bose_qc_ultra',
-    title: 'Bose QuietComfort Ultra Wireless Noise Cancelling Headphones',
-    description: 'Breakthrough spatialized audio for more immersive listening. World-class noise cancellation and CustomTune technology.',
-    price_cents: 37900,
-    compare_at_price_cents: 42900,
-    currency: 'USD',
-    merchant_domain: 'amazon.com',
-    cleaned_url: 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=500&q=80',
-    stock_status: 'IN_STOCK',
-    category_id: 'electronics',
-    commission_rate: 0.12,
-    commission_rebate_cents: 3411,
-    shipping_fee_cents: 0,
-    shipping_waiver_threshold_cents: 3500,
-    delivery_window_days: 1,
-    delivery_window: 'Next-Day Delivery',
-    rating: 4.7,
-    review_count: 85,
-    free_shipping: true,
-    merchant_credibility_score: 96,
-    store_tier: 'tier1_official',
-    composite_score: 9.1,
-    score_breakdown: {
-      cosine_similarity: 0.92,
-      price_affinity: 0.82,
-      merchant_reputation: 0.96,
-      shipping_speed: 0.98,
-    },
-    badges: [
-      { badge_type: 'TOP_RATED', label: 'Spatial Audio Leader', badge_color: '#8b5cf6', color: '#8b5cf6' },
-      { badge_type: 'FASTEST_DELIVERY', label: 'Next-Day Delivery', badge_color: '#3b82f6', color: '#3b82f6' },
-    ],
-  },
-  {
-    product_id: 'ch3_sennheiser_m4',
-    title: 'Sennheiser Momentum 4 Wireless ANC Headphones (Black)',
-    description: 'Audiophile-inspired 42mm transducer system delivering brilliant dynamics. Unmatched 60-hour battery life with fast charging.',
-    price_cents: 29995,
-    compare_at_price_cents: 37995,
-    currency: 'USD',
-    merchant_domain: 'bhphotovideo.com',
-    cleaned_url: 'https://images.unsplash.com/photo-1583394838336-acd977736f90?w=500&q=80',
-    stock_status: 'IN_STOCK',
-    category_id: 'electronics',
-    commission_rate: 0.14,
-    commission_rebate_cents: 3149,
-    shipping_fee_cents: 0,
-    shipping_waiver_threshold_cents: 4900,
-    delivery_window_days: 3,
-    delivery_window: '3-Day Ground',
-    rating: 4.6,
-    review_count: 64,
-    free_shipping: true,
-    merchant_credibility_score: 92,
-    store_tier: 'tier2_trusted',
-    composite_score: 8.9,
-    score_breakdown: {
-      cosine_similarity: 0.89,
-      price_affinity: 0.94,
-      merchant_reputation: 0.92,
-      shipping_speed: 0.85,
-    },
-    badges: [
-      { badge_type: 'PRICE_LEADER', label: '21% Discount', badge_color: '#10b981', color: '#10b981' },
-      { badge_type: 'MOST_REVIEWED', label: '60h Battery King', badge_color: '#ec4899', color: '#ec4899' },
-    ],
-  },
 ];
 
 export function SearchContent({
-  initialResults = MOCK_SEARCH_RESULTS,
+  initialResults = INITIAL_PREVIEW_PRODUCTS,
 }: {
   initialResults?: ProductCardData[];
 }) {
@@ -158,6 +90,9 @@ export function SearchContent({
       setQuery(queryParam);
       setActiveQuery(queryParam);
       runSearch(queryParam);
+    } else {
+      // Auto-fetch live Channel3 items on initial mount
+      runSearch('Noise canceling studio headphones under $350');
     }
   }, [queryParam]);
 
@@ -168,20 +103,27 @@ export function SearchContent({
     try {
       const res = await fetch('/api/buyer/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: q, action: 'DISCOVER' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'x-guest-session': 'true',
+        },
+        body: JSON.stringify({ message: q, action: 'DISCOVER', stream: false }),
       });
 
       if (res.ok) {
         const data = await res.json();
-        if (data.recommended_products && Array.isArray(data.recommended_products)) {
-          setResults(data.recommended_products);
-        }
+        const incomingProducts: ProductCardData[] =
+          (Array.isArray(data.products) && data.products.length > 0 && data.products) ||
+          (Array.isArray(data.recommended_products) && data.recommended_products.length > 0 && data.recommended_products) ||
+          [];
+        setResults(incomingProducts);
+      } else {
+        setResults([]);
       }
     } catch {
-      // Retain deterministic mock fallback
+      setResults([]);
     } finally {
-      setTimeout(() => setIsSearching(false), 600);
+      setIsSearching(false);
     }
   };
 
@@ -314,8 +256,25 @@ export function SearchContent({
         </button>
       </div>
 
-      {/* Product Results Grid or Empty State */}
-      {results.length === 0 ? (
+      {/* Product Results Grid, Loading Skeleton, or Empty State */}
+      {isSearching ? (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-pulse">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="p-6 rounded-2xl bg-slate-900/40 border border-slate-800 flex flex-col justify-between space-y-4">
+              <div className="w-full h-48 rounded-xl bg-slate-800/60" />
+              <div className="space-y-2">
+                <div className="h-4 w-24 bg-slate-800/60 rounded" />
+                <div className="h-5 w-full bg-slate-800/60 rounded" />
+                <div className="h-3 w-3/4 bg-slate-800/40 rounded" />
+              </div>
+              <div className="pt-4 border-t border-slate-800/60 flex justify-between items-center">
+                <div className="h-6 w-20 bg-slate-800/60 rounded" />
+                <div className="h-8 w-24 bg-slate-800/60 rounded-xl" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : results.length === 0 ? (
         <div className="p-12 text-center rounded-3xl bg-slate-900/40 border border-slate-800 flex flex-col items-center justify-center">
           <PackageSearch className="w-12 h-12 text-slate-600 mb-3" />
           <h3 className="text-lg font-bold text-white mb-1">No Matching Offers Found</h3>

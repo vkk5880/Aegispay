@@ -46,6 +46,7 @@ import {
 } from '@/lib/assistantUiRuntime';
 import {
   SearchCatalogToolUI,
+  DiscoverProductsToolUI,
   FilterTurnProductsToolUI,
   CompareProductsToolUI,
   PrepareCheckoutToolUI,
@@ -368,6 +369,7 @@ export function ConversationalAgentChat({
       >
         {/* Generative Tool UI Mounts */}
         <SearchCatalogToolUI />
+        <DiscoverProductsToolUI />
         <FilterTurnProductsToolUI />
         <CompareProductsToolUI />
         <PrepareCheckoutToolUI />
