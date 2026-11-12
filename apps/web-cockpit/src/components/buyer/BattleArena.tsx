@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
+import { getProductImageUrl } from '@/lib/productImageHelper';
 
 export interface BattleArenaProps {
   contenders: (ProductCardData | Record<string, any>)[];
@@ -158,7 +159,7 @@ function ContenderCard({
   const score = extractProductScore(product);
   const merchant = product.merchant_domain || product.source || 'Verified Store';
   const title = product.title || 'Product Offer';
-  const img = product.cleaned_url || product.image_url;
+  const img = getProductImageUrl(product);
 
   return (
     <div

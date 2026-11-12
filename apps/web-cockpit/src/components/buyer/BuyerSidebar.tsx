@@ -83,8 +83,8 @@ export function BuyerSidebar({
       {/* Sidebar Container */}
       <aside
         className={`
-          fixed lg:static top-0 bottom-0 left-0 z-50 lg:z-10
-          h-full min-h-0 max-h-full bg-white dark:bg-[#070e1c] border-r border-slate-200/80 dark:border-white/10
+          fixed lg:static top-14 lg:top-0 bottom-0 left-0 z-40 lg:z-10
+          h-[calc(100dvh-3.5rem)] lg:h-full min-h-0 max-h-full bg-white dark:bg-[#070e1c] border-r border-slate-200/80 dark:border-white/10
           flex flex-col transition-all duration-300 ease-in-out overflow-hidden
           ${
             isOpen
@@ -95,7 +95,7 @@ export function BuyerSidebar({
       >
         {/* Expanded Content View */}
         {isOpen ? (
-          <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             {/* Header / Collapse Toolbar */}
             <div className="p-3.5 border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-[#060c18]/50">
               <div className="flex items-center gap-2">
@@ -125,7 +125,7 @@ export function BuyerSidebar({
             </div>
 
             {/* Scrollable Body: Budget Cards & User Actions */}
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 space-y-4 touch-pan-y">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3.5 space-y-4 touch-pan-y scroll-smooth pb-8">
               {/* Account / PayPal Status Card */}
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#0a1224] border border-slate-200/70 dark:border-white/10 space-y-2">
                 <div className="flex items-center justify-between">

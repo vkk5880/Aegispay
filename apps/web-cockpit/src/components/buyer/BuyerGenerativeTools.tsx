@@ -31,6 +31,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { getProductImageUrl } from '@/lib/productImageHelper';
 import { BattleArena } from './BattleArena';
 import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
 
@@ -102,7 +103,7 @@ export function GenerativeProductCard({
       <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-lg bg-slate-100 dark:bg-slate-900 overflow-hidden shrink-0 border border-slate-200/70 dark:border-slate-800/70">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={product?.cleaned_image_url || product?.image_url}
+          src={getProductImageUrl(product)}
           alt={product?.title || 'Product'}
           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-200"
           loading="lazy"
@@ -425,7 +426,27 @@ export function SideBySideProductColumns({
   onBuy,
   onRemove,
 }: SideBySideProductColumnsProps) {
-  const safeProducts = (products || []).slice(0, 4);
+  const safeProducts = (products || [])
+    .filter((p): p is ProductCardData => Boolean(p && typeof p === 'object' && p.product_id))
+    .slice(0, 4);
+
+  if (safeProducts.length === 0) {
+    return (
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#080f20] p-4 text-center text-xs text-slate-500">
+        <Scale className="w-5 h-5 mx-auto mb-1 text-slate-400" />
+        <span>Select 2 or more products from the chat to compare side-by-side</span>
+      </div>
+    );
+  }
+
+  // Extract unique spec attributes dynamically from products
+  const specKeys = Array.from(
+    new Set(
+      safeProducts.flatMap((p) =>
+        p.specs && typeof p.specs === 'object' ? Object.keys(p.specs) : []
+      )
+    )
+  ).slice(0, 5);
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#080f20] overflow-hidden shadow-xs">
@@ -454,8 +475,8 @@ export function SideBySideProductColumns({
                     )}
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={p.cleaned_image_url || p.image_url}
-                      alt={p.title}
+                      src={getProductImageUrl(p)}
+                      alt={p.title || 'Product'}
                       className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shadow-2xs"
                     />
                     <div className="font-semibold text-slate-900 dark:text-white text-[11px] line-clamp-2 text-center leading-tight">
@@ -568,6 +589,27 @@ export function SideBySideProductColumns({
                 </td>
               ))}
             </tr>
+
+            {/* Dynamic Specification Rows if available */}
+            {specKeys.map((key) => (
+              <tr key={key}>
+                <td className="py-2 px-2 font-medium text-slate-500 dark:text-slate-400 text-[11px] capitalize truncate max-w-[90px]">
+                  {key.replace(/_/g, ' ')}
+                </td>
+                {safeProducts.map((p, idx) => {
+                  const specVal = p.specs?.[key] ? String(p.specs[key]) : '-';
+                  return (
+                    <td
+                      key={p.product_id || idx}
+                      className="py-2 px-2 text-center text-[11px] text-slate-700 dark:text-slate-300 border-l border-slate-200 dark:border-slate-800 truncate max-w-[120px]"
+                      title={specVal}
+                    >
+                      {specVal}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
           </tbody>
           <tfoot>
             <tr className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#060c18]">

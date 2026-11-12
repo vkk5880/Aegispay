@@ -388,7 +388,7 @@ export default function BuyerPortalPage() {
   );
 
   return (
-    <div className="flex-1 flex flex-col h-[calc(100dvh-3.25rem)] sm:h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.25rem)] sm:max-h-[calc(100dvh-3.5rem)] overflow-hidden transition-colors relative">
+    <div className="flex-1 flex flex-col h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.5rem)] overflow-hidden transition-colors relative">
       {/* Toast Notification */}
       {notification && (
         <div className="fixed top-16 right-6 z-50 bg-cyan-900/95 dark:bg-cyan-950/95 border border-cyan-400 dark:border-cyan-500/50 text-white dark:text-cyan-200 text-xs px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md animate-fade-in font-mono">
@@ -476,7 +476,7 @@ export default function BuyerPortalPage() {
           )}
 
           {/* Fixed Chatbox (fills entire height smoothly, only message content scrolls) */}
-          <div className="flex-1 min-h-0 h-full overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
             <ConversationalAgentChat
               budgetCapCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
               zipCode={userSettings.zipCode}

@@ -66,7 +66,7 @@ export function ChatInputBar({
         e.preventDefault();
         onSubmit();
       }}
-      className="p-3 sm:p-4 border-t border-slate-200 dark:border-[#1e293b] bg-slate-50/80 dark:bg-[#070d18]/80 backdrop-blur-md"
+      className="p-2 sm:p-2.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-[#070d18]/95 backdrop-blur-md"
     >
       {/* Multi-Chip Input Bar Visualizer (Upgrade B - Section 3.2) */}
       {selectedProducts.length > 0 && (
@@ -207,7 +207,7 @@ export function ChatInputBar({
             onChange={(e) => onInputChange(e.target.value)}
             placeholder={placeholder || defaultPlaceholder}
             disabled={isLoading}
-            className="w-full pl-4 pr-32 py-3 bg-white dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans"
+            className="w-full pl-3.5 pr-28 sm:pr-32 py-2 sm:py-2.5 bg-white dark:bg-[#050912] border border-slate-300 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:border-cyan-500 transition-all font-sans"
           />
           <div className="absolute right-1.5 flex items-center gap-1">
             <AudioPromptButton
@@ -222,7 +222,7 @@ export function ChatInputBar({
             <button
               type="submit"
               disabled={isLoading || (!inputMessage.trim() && selectedProducts.length === 0)}
-              className="px-3.5 py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+              className="px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-semibold text-xs transition-all shadow-sm flex items-center gap-1.5 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
             >
               <span>Send</span>
               <Send className="w-3.5 h-3.5" />

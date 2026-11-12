@@ -94,7 +94,7 @@ export function Navbar() {
       {/* Top subtle radiant border light */}
       <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent pointer-events-none" />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-13 sm:h-14 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
         {/* Brand Logo with 3D Orbital Rings */}
         <Link href="/" className="flex items-center gap-2.5 group select-none">
           <NavbarLogo />

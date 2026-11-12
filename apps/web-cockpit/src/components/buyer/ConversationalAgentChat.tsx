@@ -59,6 +59,7 @@ import {
 } from './BuyerGenerativeTools';
 import { BattleArena } from './BattleArena';
 import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
+import { getProductImageUrl } from '@/lib/productImageHelper';
 
 // Maximum allowed products for side-by-side comparison
 export const MAX_SELECTED_PRODUCTS = 4;
@@ -233,6 +234,13 @@ export function ConversationalAgentChat({
       setIsSidePanelOpen(true);
     }
   }, [selectedProducts.length, isSidePanelOpen]);
+
+  // Auto-scroll chat viewport to latest content whenever discovered products, comparisons, or message streaming updates
+  useEffect(() => {
+    if (viewportEndRef.current) {
+      viewportEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [discoveredProducts.length, activeComparison, activeCart, isSubmitting]);
 
   // Handle Multi-Select Product Toggle (Enforces MAX_SELECTED_PRODUCTS limit)
   const handleToggleSelectProduct = (product: ProductCardData) => {
@@ -690,7 +698,7 @@ export function ConversationalAgentChat({
               </div>
 
               {/* Phase 3 Interactive Multi-Chip ChatInputBar */}
-              <div className="p-2.5 sm:p-3 bg-white dark:bg-[#081124] border-t border-slate-200 dark:border-slate-800 shrink-0 min-w-0">
+              <div className="shrink-0 min-w-0 z-20">
                 <ChatInputBar
                   inputMessage={inputMessage}
                   onInputChange={setInputMessage}
@@ -730,8 +738,9 @@ export function ConversationalAgentChat({
                 aria-hidden="true"
               />
 
-              <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] max-w-[92vw] lg:static lg:w-2/5 lg:max-w-none flex flex-col h-full min-h-0 min-w-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070e1c] p-3 sm:p-4 overflow-y-auto overscroll-contain space-y-3 shadow-2xl lg:shadow-none transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
+              <div className="fixed top-14 bottom-0 right-0 z-40 w-full sm:w-[480px] max-w-[92vw] lg:static lg:top-0 lg:w-2/5 lg:max-w-none flex flex-col h-[calc(100dvh-3.5rem)] lg:h-full min-h-0 min-w-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070e1c] shadow-2xl lg:shadow-none transition-all">
+                {/* Fixed Non-scrolling Header with Guaranteed Visible Close Button */}
+                <div className="flex items-center justify-between p-3 sm:p-4 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white/95 dark:bg-[#070e1c]/95 backdrop-blur-md z-10">
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
                     <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
                     <span>Product Comparison ({selectedProducts.length}/4)</span>
@@ -741,7 +750,7 @@ export function ConversationalAgentChat({
                       <button
                         type="button"
                         onClick={() => setSelectedProducts([])}
-                        className="text-[10px] text-slate-500 hover:text-rose-500 font-mono transition-colors cursor-pointer"
+                        className="text-[11px] text-slate-500 hover:text-rose-500 font-mono transition-colors cursor-pointer px-1.5 py-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-800"
                       >
                         Clear
                       </button>
@@ -749,187 +758,212 @@ export function ConversationalAgentChat({
                     <button
                       type="button"
                       onClick={() => setIsSidePanelOpen(false)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                      title="Close side panel"
+                      className="p-1.5 sm:px-2.5 sm:py-1.5 rounded-lg text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 transition-colors cursor-pointer border border-slate-200 dark:border-slate-700 flex items-center gap-1 shadow-xs"
+                      title="Close comparison window"
+                      aria-label="Close comparison window"
                     >
-                      <X className="w-4 h-4" />
+                      <X className="w-4 h-4 stroke-[2.5]" />
+                      <span className="text-xs font-bold hidden sm:inline">Close</span>
                     </button>
                   </div>
                 </div>
 
-                {/* 1. Multi-Product Comparison: 2 to 4 Products Selected */}
-                {selectedProducts.length >= 2 ? (
-                  <div className="space-y-3">
-                    <SideBySideProductColumns
-                      products={selectedProducts}
-                      onBuy={(winProd) => handleActionClick('BUY', winProd)}
-                      onRemove={(prodId) =>
-                        handleToggleSelectProduct({ product_id: prodId } as any)
-                      }
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCompareSelected}
-                      className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Ask AI to Compare Specs</span>
-                    </button>
-                  </div>
-                ) : selectedProducts.length === 1 ? (
-                  /* 2. Single Product Selected: Show details and prompt to add second item */
-                  <div className="space-y-3">
-                    <SideBySideProductColumns
-                      products={selectedProducts}
-                      onBuy={(winProd) => handleActionClick('BUY', winProd)}
-                      onRemove={() => setSelectedProducts([])}
-                    />
-                    <div className="p-3 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-500/30 text-xs space-y-2">
-                      <div className="flex items-center gap-2 font-bold text-cyan-800 dark:text-cyan-300">
-                        <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
-                        <span>Select 1 More Product to Compare</span>
-                      </div>
-                      <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                        Add a 2nd product from the chat or the list below to unlock full side-by-side comparison.
-                      </p>
-                      {discoveredProducts.filter((p) => p.product_id !== selectedProducts[0].product_id).length > 0 ? (
-                        <div className="pt-2 space-y-1.5 border-t border-cyan-500/20">
-                          <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-700 dark:text-cyan-400 font-bold block">
-                            Quick Add Contender:
-                          </span>
-                          {discoveredProducts
-                            .filter((p) => p.product_id !== selectedProducts[0].product_id)
-                            .slice(0, 3)
-                            .map((prod) => (
-                              <button
-                                key={prod.product_id}
-                                type="button"
-                                onClick={() => handleToggleSelectProduct(prod)}
-                                className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-cyan-500 flex items-center justify-between text-left text-xs transition-colors cursor-pointer"
-                              >
-                                <span className="font-medium text-slate-800 dark:text-slate-200 truncate pr-2">
-                                  {prod.title}
-                                </span>
-                                <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono text-[11px] shrink-0">
-                                  + Compare
-                                </span>
-                              </button>
-                            ))}
+                {/* Scrollable Body Container */}
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-3 pb-8">
+                  {/* 1. Multi-Product Comparison: 2 to 4 Products Selected */}
+                  {selectedProducts.length >= 2 ? (
+                    <div className="space-y-3">
+                      {selectedProducts.length === 2 && (
+                        <BattleArena
+                          contenders={selectedProducts}
+                          battleReport={
+                            activeComparison?.rationale ||
+                            'Side-by-side spec and value analysis of selected contenders.'
+                          }
+                          winner={
+                            activeComparison?.winner_product_id
+                              ? selectedProducts.find(
+                                  (p) => p.product_id === activeComparison.winner_product_id
+                                )
+                              : selectedProducts[0]
+                          }
+                          onSelectWinner={(winner) => handleActionClick('BUY', winner)}
+                        />
+                      )}
+                      <SideBySideProductColumns
+                        products={selectedProducts}
+                        onBuy={(winProd) => handleActionClick('BUY', winProd)}
+                        onRemove={(prodId) =>
+                          setSelectedProducts((prev) => prev.filter((p) => p.product_id !== prodId))
+                        }
+                      />
+                      {activeComparison && (
+                        <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleCompareSelected}
+                        className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Ask AI to Compare Specs</span>
+                      </button>
+                    </div>
+                  ) : selectedProducts.length === 1 ? (
+                    /* 2. Single Product Selected: Show details and prompt to add second item */
+                    <div className="space-y-3">
+                      <SideBySideProductColumns
+                        products={selectedProducts}
+                        onBuy={(winProd) => handleActionClick('BUY', winProd)}
+                        onRemove={() => setSelectedProducts([])}
+                      />
+                      <div className="p-3 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-500/30 text-xs space-y-2">
+                        <div className="flex items-center gap-2 font-bold text-cyan-800 dark:text-cyan-300">
+                          <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                          <span>Select 1 More Product to Compare</span>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const demoContender = DEMO_COMPARISON_PRODUCTS.find(
-                              (p) => p.product_id !== selectedProducts[0].product_id
-                            ) || DEMO_COMPARISON_PRODUCTS[1];
-                            handleToggleSelectProduct(demoContender);
-                          }}
-                          className="w-full py-1.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
-                        >
-                          <span>+ Add Contender to Compare</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ) : activeComparison ? (
-                  /* 3. Active Comparison Matrix from LLM tool call */
-                  <div className="space-y-3">
-                    <SideBySideProductColumns
-                      products={activeComparison.products || []}
-                      onBuy={(winProd) => handleActionClick('BUY', winProd)}
-                    />
-                    <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
-                  </div>
-                ) : activeCart ? (
-                  /* 4. Active Cart Settlement */
-                  <div className="space-y-3">
-                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                      <span>Two-Phase Commit (2PC) Hold Active</span>
-                    </div>
-                    <PurchaseConfirmationCard
-                      cart={activeCart}
-                      zipCode={zipCode}
-                      onViewFullCart={onOpenCart}
-                      onConfirmPurchase={handlePurchaseConfirmedInternal}
-                    />
-                  </div>
-                ) : discoveredProducts.length > 0 ? (
-                  /* 5. Discovered Products from Recent Chat Search */
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                        Discovered Products ({discoveredProducts.length})
-                      </span>
-                      {discoveredProducts.length >= 2 && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedProducts(discoveredProducts.slice(0, 2))}
-                          className="px-2 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] shadow-2xs transition-all cursor-pointer"
-                        >
-                          Compare Top 2
-                        </button>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      {discoveredProducts.slice(0, 4).map((p) => (
-                        <div
-                          key={p.product_id}
-                          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between gap-2"
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={p.cleaned_image_url || p.image_url}
-                              alt={p.title}
-                              className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200 dark:border-slate-700"
-                            />
-                            <div className="min-w-0">
-                              <h5 className="font-semibold text-xs text-slate-800 dark:text-slate-200 truncate">
-                                {p.title}
-                              </h5>
-                              <span className="text-[11px] font-mono font-bold text-cyan-600 dark:text-cyan-400">
-                                {formatCents(p.price_cents - (p.commission_rebate_cents || 0))}
-                              </span>
-                            </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                          Add a 2nd product from the chat or the list below to unlock full side-by-side comparison.
+                        </p>
+                        {discoveredProducts.filter((p) => p.product_id !== selectedProducts[0].product_id).length > 0 ? (
+                          <div className="pt-2 space-y-1.5 border-t border-cyan-500/20">
+                            <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-700 dark:text-cyan-400 font-bold block">
+                              Quick Add Contender:
+                            </span>
+                            {discoveredProducts
+                              .filter((p) => p.product_id !== selectedProducts[0].product_id)
+                              .slice(0, 3)
+                              .map((prod) => (
+                                <button
+                                  key={prod.product_id}
+                                  type="button"
+                                  onClick={() => handleToggleSelectProduct(prod)}
+                                  className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-cyan-500 flex items-center justify-between text-left text-xs transition-colors cursor-pointer"
+                                >
+                                  <span className="font-medium text-slate-800 dark:text-slate-200 truncate pr-2">
+                                    {prod.title}
+                                  </span>
+                                  <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono text-[11px] shrink-0">
+                                    + Compare
+                                  </span>
+                                </button>
+                              ))}
                           </div>
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => handleToggleSelectProduct(p)}
-                            className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-cyan-600 dark:text-cyan-400 font-bold text-xs hover:bg-cyan-50 cursor-pointer shadow-2xs shrink-0"
+                            onClick={() => {
+                              const demoContender = DEMO_COMPARISON_PRODUCTS.find(
+                                (p) => p.product_id !== selectedProducts[0].product_id
+                              ) || DEMO_COMPARISON_PRODUCTS[1];
+                              handleToggleSelectProduct(demoContender);
+                            }}
+                            className="w-full py-1.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
                           >
-                            + Compare
+                            <span>+ Add Contender to Compare</span>
                           </button>
-                        </div>
-                      ))}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  /* 6. Default Welcome & Demo Comparison State (Never Blank!) */
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-slate-500 dark:text-slate-400 space-y-4">
-                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shadow-sm">
-                      <Scale className="w-6 h-6" />
+                  ) : activeComparison ? (
+                    /* 3. Active Comparison Matrix from LLM tool call */
+                    <div className="space-y-3">
+                      <SideBySideProductColumns
+                        products={activeComparison.products || []}
+                        onBuy={(winProd) => handleActionClick('BUY', winProd)}
+                      />
+                      <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
                     </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                        Side-by-Side Comparison Arena
-                      </h4>
-                      <p className="text-xs max-w-xs leading-relaxed text-slate-500 dark:text-slate-400 mt-1">
-                        Select 2 to 4 products in the chat to compare prices, cashback rebates, and tech specs side-by-side.
-                      </p>
+                  ) : activeCart ? (
+                    /* 4. Active Cart Settlement */
+                    <div className="space-y-3">
+                      <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                        <span>Two-Phase Commit (2PC) Hold Active</span>
+                      </div>
+                      <PurchaseConfirmationCard
+                        cart={activeCart}
+                        zipCode={zipCode}
+                        onViewFullCart={onOpenCart}
+                        onConfirmPurchase={handlePurchaseConfirmedInternal}
+                      />
                     </div>
+                  ) : discoveredProducts.length > 0 ? (
+                    /* 5. Discovered Products from Recent Chat Search */
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Discovered Products ({discoveredProducts.length})
+                        </span>
+                        {discoveredProducts.length >= 2 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedProducts(discoveredProducts.slice(0, 2))}
+                            className="px-2 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] shadow-2xs transition-all cursor-pointer"
+                          >
+                            Compare Top 2
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {discoveredProducts.slice(0, 4).map((p) => (
+                          <div
+                            key={p.product_id}
+                            className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between gap-2"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={getProductImageUrl(p)}
+                                alt={p.title}
+                                className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200 dark:border-slate-700"
+                              />
+                              <div className="min-w-0">
+                                <h5 className="font-semibold text-xs text-slate-800 dark:text-slate-200 truncate">
+                                  {p.title}
+                                </h5>
+                                <span className="text-[11px] font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                                  {formatCents(p.price_cents - (p.commission_rebate_cents || 0))}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleSelectProduct(p)}
+                              className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-cyan-600 dark:text-cyan-400 font-bold text-xs hover:bg-cyan-50 cursor-pointer shadow-2xs shrink-0"
+                            >
+                              + Compare
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    /* 6. Default Welcome & Demo Comparison State (Never Blank!) */
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-slate-500 dark:text-slate-400 space-y-4">
+                      <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shadow-sm">
+                        <Scale className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                          Side-by-Side Comparison Arena
+                        </h4>
+                        <p className="text-xs max-w-xs leading-relaxed text-slate-500 dark:text-slate-400 mt-1">
+                          Select 2 to 4 products in the chat to compare prices, cashback rebates, and tech specs side-by-side.
+                        </p>
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setSelectedProducts(DEMO_COMPARISON_PRODUCTS)}
-                      className="py-2 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Load Demo Comparison</span>
-                    </button>
-                  </div>
-                )}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProducts(DEMO_COMPARISON_PRODUCTS)}
+                        className="py-2 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Load Demo Comparison</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}
