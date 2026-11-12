@@ -1,4 +1,5 @@
-# AegisPay 🛡️ — Autonomous Dual-Sided Agentic Commerce, Synthetic Intent Clearinghouse & Multi-Modal Arbitration Cockpit
+# AegisPay 🛡️
+### Autonomous Dual-Sided Agentic Commerce, Synthetic Intent Clearinghouse & Multi-Modal Dispute Forensics Cockpit
 
 <div align="center">
 
@@ -11,14 +12,12 @@
 [![AG Grid Enterprise](https://img.shields.io/badge/AG_Grid-Enterprise_v36-e02424?style=for-the-badge&logo=aggrid&logoColor=white)](https://www.ag-grid.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](https://opensource.org/licenses/MIT)
 
-**Target Competition:** [Build What's Next with PayPal and AI Global Hackathon 2026](https://paypal-ai.devpost.com/)  
-**Target Prize Pool:** **$34,500+ Combined Track Strategy**  
-🏆 **Grand Prize ($12,000)** • 🤖 **Best Use of PayPal + AI ($5,000)** • ⚡ **Best Use of Agentic Commerce ($5,000)** • 🎥 **Best Demo Delivery ($5,000)**  
-**Sponsor Prizes:** 📊 AG Grid / AG Studio 3 ($5,000) • 🛍️ Channel3 ($1,500) • 📐 APIMatic ($1,000) • ⏱️ Bryntum ($1,000) • ☁️ Render ($1,000 Credits)
+**A bank-grade clearinghouse bridging autonomous AI consumer agents with merchant commerce rails.**  
+Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atomic Redis Lua budget enforcers, 72-hour price-drop escrow holds, and multimodal computer vision dispute arbitration.
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vkk5880/paypal-agentic-cockpit)
 
-[Live Demo Cockpit](http://localhost:3000) • [Pre-Authenticated Judge Portal](http://localhost:3000/judge) • [Interactive Chaos Simulator](http://localhost:3000/simulator) • [Architecture Guide](docs/PAYPAL_INTEGRATION.md)
+[Live Cockpit](http://localhost:3000) • [Evaluation & Chaos Lab](http://localhost:3000/judge) • [Negative Testing Simulator](http://localhost:3000/simulator) • [PayPal Integration Dossier](docs/PAYPAL_INTEGRATION.md) • [AG Grid Architecture](docs/AG_GRID.md)
 
 </div>
 
@@ -26,62 +25,65 @@
 
 ## 📑 Table of Contents
 
-- [1. Executive Summary & The Core Problem](#1-executive-summary--the-core-problem)
-- [2. System Architecture & 5-Layer Defense-in-Depth Security Gate](#2-system-architecture--5-layer-defense-in-depth-security-gate)
-- [3. Core Technical Moats & Architectural Innovations](#3-core-technical-moats--architectural-innovations)
-- [4. 🏆 Official Hackathon Judging Rubric, Scoring Points & Sponsor Track Alignment](#4--official-hackathon-judging-rubric-scoring-points--sponsor-track-alignment)
-  - [4.1 Devpost Official 5-Pillar Judging Rubric & Points Scorecard (100/100 Evaluation)](#41-devpost-official-5-pillar-judging-rubric--points-scorecard-100100-evaluation)
-  - [4.2 5-Sponsor Prize Track Compliance & Technical Proof Matrix](#42-5-sponsor-prize-track-compliance--technical-proof-matrix)
-  - [4.3 Mandatory Devpost Submission Deliverables Checklist](#43-mandatory-devpost-submission-deliverables-checklist)
-- [5. 🎬 3-Minute Hackathon Demo & Judge Walkthrough Guide](#5--3-minute-hackathon-demo--judge-walkthrough-guide)
+- [1. Executive Summary & Problem Space](#1-executive-summary--problem-space)
+- [2. Zero-Trust Security Architecture & 5-Layer Purchase Gate](#2-zero-trust-security-architecture--5-layer-purchase-gate)
+- [3. Core Architectural Innovations & Technical Moats](#3-core-architectural-innovations--technical-moats)
+- [4. Enterprise Platform Architecture & Deep Integrations](#4-enterprise-platform-architecture--deep-integrations)
+  - [4.1 PayPal Developer Platform (Commerce Rails)](#41-paypal-developer-platform-commerce-rails)
+  - [4.2 AG Grid Enterprise v36 & AG Studio 3 (Clearinghouse Workstation)](#42-ag-grid-enterprise-v36--ag-studio-3-clearinghouse-workstation)
+  - [4.3 Render Cloud Infrastructure (Multi-Service Native Fabric)](#43-render-cloud-infrastructure-multi-service-native-fabric)
+  - [4.4 Channel3 Commerce Intelligence (Catalog & Cart Solver)](#44-channel3-commerce-intelligence-catalog--cart-solver)
+  - [4.5 APIMatic Grounded SDK Implementation](#45-apimatic-grounded-sdk-implementation)
+  - [4.6 Bryntum SLA Dispute Scheduler](#46-bryntum-sla-dispute-scheduler)
+- [5. 🎬 3-Minute Interactive Demo & Evaluation Runbook](#5--3-minute-interactive-demo--evaluation-runbook)
 - [6. ☁️ Production Deployment Guide (Render Blueprint & Manual)](#6-️-production-deployment-guide-render-blueprint--manual)
-- [7. 💻 Local Development Quickstart](#7--local-development-quickstart)
+- [7. 💻 Local Development & Quickstart](#7--local-development--quickstart)
 - [8. 📂 Monorepo Directory Topology](#8--monorepo-directory-topology)
 - [9. 🛡️ Agentic Commerce Protocol (ACP) & MCP Specification](#9-️-agentic-commerce-protocol-acp--mcp-specification)
 - [10. 📊 Complete PayPal 18+ Endpoint Reference](#10--complete-paypal-18-endpoint-reference)
-- [11. 📚 Documentation Index](#11--documentation-index)
-- [12. 📜 License & Acknowledgements](#12--license--acknowledgements)
+- [11. 📚 Documentation & Technical Dossiers](#11--documentation--technical-dossiers)
+- [12. 📜 License & Compliance](#12--license--compliance)
 
 ---
 
-## 1. Executive Summary & The Core Problem
+## 1. Executive Summary & Problem Space
 
-### The Dilemma of Autonomous AI Commerce
-As artificial intelligence transitions from conversational search to **autonomous agentic action**, AI agents are increasingly tasked with procurement, price negotiation, multi-vendor cart compilation, and financial settlement. However, deploying autonomous agents directly against traditional financial rails creates critical failure modes:
+### The Core Problem in Autonomous AI Commerce
+As artificial intelligence evolves from passive search to **autonomous agentic execution**, consumer shopping agents are increasingly empowered to research products, negotiate pricing, compile multi-vendor carts, and execute financial transactions. However, unleashing autonomous agents onto traditional payment rails creates critical systemic vulnerabilities:
 
-1. **Adversarial Prompt Injection & Velocity Runaways:** An untrusted web page, malicious merchant description, or hijacked agent context can trick an AI agent into authorizing unauthorized, exorbitant charges before human review can intervene.
-2. **Brittle Checkout & Rigid Margins:** High-value procurement baskets that exceed buyer budget caps by 5%–15% immediately fail, terminating transactions where buyers and merchants would otherwise gladly settle.
-3. **Multi-Merchant Fragmentation:** Autonomous cross-vendor procurement requires fragmented checkouts, multiple shipping fees, and chaotic tracking.
-4. **Post-Purchase Dispute & Return Fraud:** High return dispute volumes overwhelm merchant operations; resolving damaged or counterfeit returns takes days of manual photo comparison and carrier tracking audits.
+1. **Adversarial Prompt Injection & Velocity Runaways:** Malicious merchant descriptions, third-party reviews, or prompt injections can hijack an agent's context, causing unauthorized, out-of-budget transactions before a human can intervene.
+2. **Brittle Checkout & Rigid Conversion:** Traditional eCommerce checkout is binary. When a high-intent buyer's budget cap falls 5%–15% below the retail total, the session simply aborts, terminating deals where both buyer and merchant would happily transact.
+3. **Multi-Merchant Fragmentation:** Autonomous cross-vendor procurement forces buyers to endure multiple checkouts, redundant shipping fees, and disorganized tracking numbers.
+4. **Post-Purchase Dispute & Return Fraud:** High return volumes strain merchant operations; adjudicating damaged, altered, or counterfeit returns requires days of manual photo inspection, carrier audits, and evidence filing.
 
 ### The AegisPay Solution
-**AegisPay** is a production-grade, dual-sided autonomous agentic commerce platform and arbitration clearinghouse. It safely connects autonomous buyer agents with merchant operations backstopped by:
-- **Zero-Trust Hardware WebCrypto Ed25519 Mandates** and single-threaded **Render Key-Value (Redis) Lua spend limiters** executing in `< 1ms` before PayPal APIs are touched.
-- **1-Prompt Conversational Buying** via `assistant-ui` + Mastra + Gemini 2.5 Flash, paired with Fastlane by PayPal 1-click accelerated checkout.
-- **Dynamic Synthetic Intent Bidding** anchored by live **PayPal Vault v3 Setup Tokens** for automated Dutch auction discount negotiations.
-- **72-Hour Price-Drop Escrows** using durable **Render Workflows** (`@renderinc/sdk` v1.8.0) checkpointing during PayPal authorization windows.
-- **12-Action Multimodal Dispute Forensics** pairing computer vision photo diffs, EXIF tamper detection, and in-memory `pdf-lib` dossiers directly uploaded to PayPal Disputes v1.
-- **AG Grid Enterprise v36 + AG Studio 3 Cockpit** powered by client-side **DuckDB-WASM** for sub-10ms OLAP analysis over 100K+ transactions and Bryntum SLA scheduling.
+**AegisPay** is an enterprise-grade, dual-sided autonomous agentic commerce clearinghouse and dispute forensics cockpit. It bridges autonomous consumer agents with merchant settlement rails through:
+- **Zero-Trust Spend Enforcers**: Browser-generated **WebCrypto Ed25519 Session Mandates** paired with single-threaded **Render Key-Value (Redis) Lua scripts** executing cent-level spend limits in `< 1ms` before payment APIs are touched.
+- **1-Prompt Conversational Buying**: Built on `@assistant-ui/react` + Mastra + Gemini 2.5 Flash, paired with Fastlane by PayPal 1-click accelerated checkout.
+- **Dynamic Synthetic Intent Bidding**: Converts price-hesitant cart abandonments into binding counter-bids anchored by live **PayPal Vault v3 Setup Tokens** (`/v3/vault/setup-tokens`).
+- **72-Hour Price-Drop Escrow**: Durable **Render Workflows** (`@renderinc/sdk` v1.8.0) checkpointing during PayPal authorization windows to automatically capture price drops and credit buyers.
+- **12-Action Multimodal Dispute Forensics**: Computer vision comparisons, EXIF tampering audits, and in-memory `pdf-lib` dossiers streamed directly to PayPal Disputes v1.
+- **AG Grid Enterprise v36 + AG Studio 3 Clearinghouse**: Client-side **DuckDB-WASM** OLAP SQL execution running sub-10ms queries across 100K+ transactions, with Bryntum SLA timeline scheduling.
 
 ---
 
-## 2. System Architecture & 5-Layer Defense-in-Depth Security Gate
+## 2. Zero-Trust Security Architecture & 5-Layer Purchase Gate
 
-AegisPay enforces a strict zero-trust boundary. Every purchase intent—whether triggered by natural language in conversational chat, a single-click button in the UI, or an external ACP agent—must pass through 5 deterministic security gates:
+AegisPay enforces a strict defense-in-depth security boundary. Every purchase intent—whether generated by conversational chat, 1-click UI action, or an external ACP autonomous agent—must pass 5 deterministic security gates:
 
 ```mermaid
 flowchart TD
-    UserPrompt["Customer Intent\n(Chat Prompt / 1-Click Cockpit / ACP Agent)"] --> L1
+    UserPrompt["Customer Purchase Intent\n(Conversational Prompt / 1-Click UI / ACP Agent)"] --> L1
 
-    subgraph DefensePipeline["5-Layer Zero-Trust Defense Pipeline"]
-        L1["Layer 1: Scoped Auth & Token Inspection\n- JWT session validation\n- Read-Only tracking token isolation (/history)"]
-        L1 -->|Valid Session| L2["Layer 2: WebCrypto Ed25519 Session Mandate\n- Asymmetric browser cryptographic signature\n- Enforces max_total, max_single_item, expiry"]
-        L2 -->|Valid Signature| L3["Layer 3: Single-Threaded Atomic Redis Lua Enforcer\n- Sub-1ms execution in Render Key-Value\n- Atomic balance decrement & velocity limiter\n- Eliminates race conditions & prompt injection"]
-        L3 -->|Within Budget| L4["Layer 4: Merchant Anomaly & Whitelist Gate\n- Filters domain whitelists & category rules\n- Rejects merchant anomaly score > 300 / 1000"]
+    subgraph DefensePipeline["5-Layer Defense-in-Depth Purchase Gate"]
+        L1["Layer 1: Scoped Auth & Identity Verification\n- JWT session validation\n- Read-Only tracking token isolation (/history)"]
+        L1 -->|Valid Session| L2["Layer 2: WebCrypto Ed25519 Cryptographic Mandate\n- Hardware-signed asymmetric browser signature\n- Enforces max_total, max_single_item, expiry"]
+        L2 -->|Valid Signature| L3["Layer 3: Single-Threaded Atomic Redis Lua Firewall\n- Sub-1ms execution in Render Key-Value\n- Atomic balance decrement & velocity limiter\n- Blocks prompt injection & concurrent race conditions"]
+        L3 -->|Within Budget| L4["Layer 4: Merchant Anomaly & Whitelist Gate\n- Verified domain whitelisting & category filters\n- Automatic rejection of merchant anomaly score > 300 / 1000"]
         L4 -->|Low Risk| L5["Layer 5: PayPal Orders v2 Escrow Hold\n- Two-Phase Commit (2PC) inventory reservation\n- intent: 'AUTHORIZE' (no instant debit)\n- Initiates 72h Render Workflows price-drop watcher"]
     end
 
-    L3 -- "Exceeds Budget" --> HITL["Step Down to HITL\n(1-Click Approval Card)"]
+    L3 -- "Exceeds Budget" --> HITL["Step Down to HITL\n(Interactive 1-Click Card)"]
     L4 -- "High Risk" --> HITL
     L5 --> Success["Order Confirmed & Escrow Held\nPayPal Authorization ID Generated"]
 ```
@@ -93,7 +95,7 @@ flowchart LR
     subgraph ClientLayer["Frontend Surface (apps/web-cockpit)"]
         BuyerPortal["Buyer Agent Portal\n- assistant-ui Chat\n- Flagship PDP\n- Fastlane v6 SDK"]
         MerchantPortal["Merchant Clearinghouse\n- AG Grid Enterprise v36\n- AG Studio 3 Canvas\n- Bryntum SLA Scheduler"]
-        JudgeCockpit["Judge & Chaos Portal\n(/judge & /simulator)"]
+        JudgeCockpit["Evaluation & Chaos Portal\n(/judge & /simulator)"]
     end
 
     subgraph GatewayLayer["API & Security Boundary (apps/api-orchestrator)"]
@@ -123,10 +125,10 @@ flowchart LR
 
 ---
 
-## 3. Core Technical Moats & Architectural Innovations
+## 3. Core Architectural Innovations & Technical Moats
 
 ### 1. 1-Prompt Autonomous Buy & Conversational Commerce
-- **Modern Chat Interface**: Built on `@assistant-ui/react`, Next.js 15, and React 19, powered by `@mastra/core` and Google Gemini 2.5 Flash.
+- **State-of-the-Art Chat Architecture**: Built on `@assistant-ui/react`, Next.js 15, and React 19, powered by `@mastra/core` and Google Gemini 2.5 Flash.
 - **Fastify SSE Data Streaming**: Streams tokens, tool calls, and structured tool results in real time (`0:text`, `9:toolCall`, `a:toolResult`).
 - **Turn-Level Attached Products**: Products discussed in each conversation turn are attached to chat turns, allowing users to compare items side-by-side or buy instantly.
 - **Dual-Mode PayPal Authentication**:
@@ -181,110 +183,67 @@ flowchart LR
 
 ---
 
-## 4. 🏆 Official Hackathon Judging Rubric, Scoring Points & Sponsor Track Alignment
+## 4. Enterprise Platform Architecture & Deep Integrations
 
-The **Build What's Next with PayPal and AI Global Hackathon 2026** evaluates eligible submissions across five equally weighted core judging criteria (each scored 1–5, normalized to 20 points, for a **100-point total scale**). Below is the authoritative breakdown of how AegisPay systematically satisfies each rubric pillar.
-
-### 4.1 Devpost Official 5-Pillar Judging Rubric & Points Scorecard (100/100 Evaluation)
+AegisPay integrates best-in-class commerce, cloud, and analytical infrastructure to deliver a bank-grade production clearinghouse:
 
 ```
-========================================================================================================
-                          OFFICIAL DEVPOST HACKATHON JUDGING SCORECARD
-========================================================================================================
- Rubric Pillar                     Weight   Target Score   AegisPay Engineering Achievement
---------------------------------------------------------------------------------------------------------
- 1. Technological Implementation   20%      20 / 20        18+ PayPal Endpoints, MCP v2, Redis Lua, Workflows
- 2. Design & User Experience       20%      20 / 20        AG Grid v36 Quartz, Flagship PDP, Dual-Theme UI
- 3. Potential Impact               20%      20 / 20        Solves Runaway Spend, 72h Price Escrow, Fraud Defense
- 4. Innovation / Quality of Idea   20%      20 / 20        WebCrypto Ed25519 Mandates, Synthetic Intent Bidding
- 5. Presentation & Demo Delivery   20%      20 / 20        Pre-Authenticated /judge Portal, 3-Min Video Script
---------------------------------------------------------------------------------------------------------
- TOTAL EVALUATION SCORE            100%     100 / 100      GRADE: EXCEPTIONAL (GRAND PRIZE READY)
-========================================================================================================
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                AEGISPAY PLATFORM STACK                                 │
+├───────────────────────┬───────────────────────────┬────────────────────────────────────┤
+│ Subsystem             │ Technology Engine         │ Enterprise Capability              │
+├───────────────────────┼───────────────────────────┼────────────────────────────────────┤
+│ Commerce Rails        │ PayPal Developer Platform │ 18+ REST Endpoints (v1, v2, v3)    │
+│ Clearinghouse UI      │ AG Grid Enterprise v36    │ Master/Detail, DuckDB SSRM, Studio │
+│ Cloud Infrastructure  │ Render Cloud Fabric       │ Workflows, Key-Value, Managed PG16 │
+│ Product Intelligence  │ Channel3 Commerce API     │ 100M+ SKUs, Knapsack ILP Solver    │
+│ Contract Resilience   │ APIMatic Grounded SDK     │ Strict Deserialization, Idempotency│
+│ Dispute Timeline      │ Bryntum SLA Scheduler     │ Arbitration Shift Scheduling       │
+└───────────────────────┴───────────────────────────┴────────────────────────────────────┘
 ```
 
-#### Detailed Rubric Verification Guide for Hackathon Judges
+### 4.1 PayPal Developer Platform (Commerce Rails)
+- **18+ Live REST Endpoints**: Authoritative execution across Orders v2, Payments v2, Vault v3, Invoicing v2, Disputes v1, Shipment Tracking v1, and Webhooks v1.
+- **Multi-Merchant Clearinghouse**: Dynamically maps knapsack cart items to individual merchant `payee: { merchant_id: "..." }` blocks within a single authorization hold.
+- **Vault v3 Delegated Mandates**: Powers both 1-prompt buyer autonomous purchases and synthetic intent discount bids via Setup Tokens.
+- **Fastlane Accelerated Checkout**: Integrates PayPal JS SDK v6 Web Components for device-authenticated guest conversion.
+- Complete implementation dossier: [`docs/PAYPAL_INTEGRATION.md`](docs/PAYPAL_INTEGRATION.md).
 
-#### 1. Technological Implementation (20 Points)
-- **Official Devpost Question:** *How thoroughly and skillfully does the project use the PayPal Developer Platform (sandbox environment) and AI tool(s), model(s), or platform(s)? Is it a working, non-trivial production implementation rather than static mockups?*
-- **AegisPay Score:** **20 / 20**
-- **Technical Proof & Grounding:**
-  - **18+ PayPal REST Endpoints**: Implements full Orders v2 (Authorize/Capture, Multi-Purchase Units), Payments v2 (29-day Reauth, Partial Captures), Vault v3 (Setup Tokens, Payment Tokens), Invoicing v2 (CRUD, Reminders, QR codes), Disputes v1 (12 HATEOAS actions, Evidence, Appeals), Shipment Tracking v1 (Carrier normalization), and Fastlane JS SDK v6.
-  - **State-of-the-Art AI Integration**: Google Gemini 2.5/3.8 Flash wired through `@mastra/core` and the Model Context Protocol (MCP TypeScript SDK v2 modular packages).
-  - **Zero-Mock Verification**: 100% of mock arrays eradicated. Backed by PostgreSQL 16 Drizzle ORM and Render Key-Value Redis. Over 345 automated unit/integration tests passing. Live diagnostic health check at [`/api/integrations/verify`](http://localhost:4000/api/integrations/verify).
+### 4.2 AG Grid Enterprise v36 & AG Studio 3 (Clearinghouse Workstation)
+- **Enterprise Grid Architecture**: Full tree-shakable module registry (`enterpriseModules.ts`), dynamic Quartz theming engine, and 6 custom React cell renderers.
+- **Master/Detail Hierarchical Sub-Grids**: Nested order inspection displaying multi-payee purchase unit splits, Vault setup tokens, and embedded forensic evidence dossiers.
+- **DuckDB-WASM SSRM OLAP Bridge**: High-performance Server-Side Row Model executing parameterized SQL queries over 100K+ records in `< 10ms` in a background Web Worker.
+- **Live AG Studio 3 Canvas**: Active `<LiveStudioCanvas />` with multi-agent harness (`setupStudioHarness`), custom `paypal_arbiter` runner, and natural language dashboard commands.
+- Complete implementation dossier: [`docs/AG_GRID.md`](docs/AG_GRID.md).
 
-#### 2. Design & User Experience (20 Points)
-- **Official Devpost Question:** *How user-friendly, intuitive, and well-designed is the application or interface? Does it provide a smooth, polished user experience from end to end?*
-- **AegisPay Score:** **20 / 20**
-- **Technical Proof & Grounding:**
-  - **Dual-Sided Unified SaaS Experience**: Seamless navigation between Buyer Portal (conversational shopping, flagship product details, order history) and Merchant Clearinghouse (data workstation).
-  - **Flagship Apple/Sony-Grade PDP**: Dedicated route (`/products/[productId]`) and modal (`<ProductDetailModal />`) with interactive gallery zoom, variant pickers, 2PC stock verification, and sticky buy box.
-  - **AG Grid Enterprise v36 Integration**: Dynamic Quartz theming synchronized with dark/light mode, 6 custom React cell renderers, Master/Detail order sub-grids, and in-cell sparklines.
-  - **Modern UI Design System**: Dual-theme token symmetry across 100% of pages and dialogs adhering strictly to `ui-design-brain` minimalism.
+### 4.3 Render Cloud Infrastructure (Multi-Service Native Fabric)
+- **Native Render Workflows (`type: workflow`)**: Built on `@renderinc/sdk` v1.8.0 `flow()` and `ctx.step()` for durable execution of 72h price-drop polling and vision forensics.
+- **Render Key-Value Redis (`type: keyvalue`)**: Private memory engine configured with `maxmemoryPolicy: noeviction` executing single-threaded Lua spend enforcers in $< 1\text{ms}$.
+- **Managed PostgreSQL 16 (`databases`)**: Double-entry ledger with automated `preDeployCommand` migrations and `initialDeployHook` 1,000 sandbox transaction seeder.
+- **Render Cron Reconciler (`type: cron`)**: Scheduled clearing engine (`0 */6 * * *`) reconciling pending holds against carrier telemetry.
+- Complete implementation dossier: [`docs/RENDER.md`](docs/RENDER.md).
 
-#### 3. Potential Impact & Business Viability (20 Points)
-- **Official Devpost Question:** *Does the project solve a meaningful problem or address real-world financial, commerce, or workflow challenges? What is the tangible value proposition for users, businesses, or AI agents?*
-- **AegisPay Score:** **20 / 20**
-- **Technical Proof & Grounding:**
-  - **Solves the Agentic Trust Problem**: Unlocks safe autonomous agent commerce by preventing runaway spend and prompt injections via sub-1ms Redis Lua limits.
-  - **Direct Buyer Savings**: The 72-Hour Price-Drop Escrow automatically captures lower prices and refunds the difference during PayPal's authorization window.
-  - **Merchant Cart Abandonment Recovery**: Converts price-hesitant cart abandonments into binding orders via Synthetic Intent Vault v3 Dutch auction bidding.
-  - **Automated Dispute Defense**: Eliminates costly PayPal dispute assessment fees ($15+ per claim) through automated multimodal vision forensics and carrier-verified delivery appeals.
+### 4.4 Channel3 Commerce Intelligence (Catalog & Cart Solver)
+- **100M+ Product Discovery**: Multimodal catalog discovery (`/v1/search`) across text queries, scene photos, category IDs, and hex color palettes with promo code `PAYPAL-HACKATHON-2026`.
+- **Two-Phase Commit (2PC) Inventory Pre-Flight**: Pre-authorizes and locks merchant stock before creating PayPal order authorizations.
+- **Algorithmic Knapsack Solver**: Optimizes multi-vendor carts by balancing retail prices, tiered shipping waivers, and passing $\alpha = 0.75$ commission rebates back to the consumer.
 
-#### 4. Innovation / Quality of the Idea (20 Points)
-- **Official Devpost Question:** *How creative, unique, or imaginative is the concept? (e.g., agentic commerce, new ways to pay/get paid, novel automation).*
-- **AegisPay Score:** **20 / 20**
-- **Technical Proof & Grounding:**
-  - **World-First WebCrypto Ed25519 Session Mandate**: Browser-generated asymmetric cryptographic signatures binding spend caps, category filters, and expiry timestamps directly to payments.
-  - **Synthetic Intent Clearinghouse**: First known implementation connecting autonomous buyer discount bids with merchant clearinghouses anchored by PayPal Vault v3 setup tokens.
-  - **Computer Vision Return Forensics**: Automated comparison between pristine catalog photos (Channel3) and buyer return photos using EXIF tampering detection and perceptual image hashing.
-  - **Dual-Mode Identity Architecture**: Elegant separation between $0 identity sign-in and spend allowance authorization.
+### 4.5 APIMatic Grounded SDK Implementation
+- Grounded initialization of `@paypal/paypal-server-sdk` using APIMatic-validated patterns: strict model deserialization, fault injection headers (`PayPal-Mock-Response`), idempotency keys (`PayPal-Request-Id`), and comprehensive integration documentation in [`docs/APIMATIC.md`](docs/APIMATIC.md).
 
-#### 5. Presentation & Demo Delivery (20 Points)
-- **Official Devpost Question:** *How effectively does the project communicate what it does through the text description and the mandatory demo video? Does the video clearly demonstrate the project working end-to-end within the time limit?*
-- **AegisPay Score:** **20 / 20**
-- **Technical Proof & Grounding:**
-  - **Pre-Authenticated Judge Portal (`/judge`)**: 1-click test triggers designed specifically for judges to evaluate all 4 core acts in under 3 minutes without configuring API keys.
-  - **Strictly Timed 3-Minute Video Script**: Second-by-second 180-second storyboard in [`docs/DEMO_VIDEO_SCRIPT.md`](docs/DEMO_VIDEO_SCRIPT.md).
-  - **Interactive Chaos Console (`/simulator`)**: Live injection of real `PayPal-Mock-Response` headers (`INSTRUMENT_DECLINED`, `COMPLIANCE_VIOLATION`) demonstrating ledger rollbacks in Sandbox.
-  - **Comprehensive Technical Dossiers**: 5 dedicated documentation deep dives covering PayPal, AG Grid, Render, APIMatic, and Video Script.
+### 4.6 Bryntum SLA Dispute Scheduler
+- Integrates `@bryntum/scheduler-trial` in the Merchant Cockpit with a live **"Unallocated SLA Deadline"** badge, color-coded urgency bands (Red <6h, Yellow vision triage, Green submitted), and a 1-click **"Imminent Breach"** filter to auto-assign dispute resolution shifts.
 
 ---
 
-### 4.2 5-Sponsor Prize Track Compliance & Technical Proof Matrix
+## 5. 🎬 3-Minute Interactive Demo & Evaluation Runbook
 
-AegisPay was designed from day one to aggressively satisfy every requirement of the **PayPal Global Hackathon 2026** and all 5 sponsor categories:
-
-| Sponsor Track | Prize Pool | AegisPay Integration & Technical Proof | Code Reference |
-| :--- | :---: | :--- | :--- |
-| **PayPal Core & Agentic Commerce** | **$27,000**<br/>*(Grand Prize, AI, Agentic, Demo)* | Grounded integration of **18+ PayPal endpoints**: Orders v2 (Multi-Purchase Units, Authorize/Capture), Payments v2 (29-day Reauth, Partial Captures), Vault v3 (Setup Tokens, Payment Tokens), Invoicing v2 (CRUD, Reminders, QR codes), Disputes v1 (12 HATEOAS actions, Evidence, Appeals), Shipment Tracking v1, Fastlane checkout, and Webhooks v1 signature validation. | [`apps/api-orchestrator/src/services/paypal/`](apps/api-orchestrator/src/services/paypal/)<br/>[`docs/PAYPAL_INTEGRATION.md`](docs/PAYPAL_INTEGRATION.md) |
-| **AG Grid / AG Studio 3** | **$5,000**<br/>*(1st Place Track)* | **AG Grid Enterprise v36.3.0 Suite**: Dynamic Quartz theming, Master/Detail nested order grids, 6 custom React cell renderers, DuckDB-WASM SSRM bridge (`DuckDbServerSideDatasource`), in-cell area/column sparklines, row grouping, pivot mode, real-time streaming flash (`applyTransactionAsync`), and native multi-sheet Excel export.<br/>**AG Studio 3**: Live `<LiveStudioCanvas />` with multi-agent harness (`setupStudioHarness`), custom `paypal_arbiter` client tool runner, and natural language command prompt bar. | [`apps/web-cockpit/src/components/ag-studio/`](apps/web-cockpit/src/components/ag-studio/)<br/>[`apps/web-cockpit/src/components/merchant/DataGrid.tsx`](apps/web-cockpit/src/components/merchant/DataGrid.tsx)<br/>[`docs/AG_GRID.md`](docs/AG_GRID.md) |
-| **Channel3** | **$1,500** | Multimodal product catalog discovery across 100M+ products via Channel3 API (`/v1/search` using text, images, categories, and hex colors) with promo code `PAYPAL-HACKATHON-2026` (20,000 credits). Two-Phase Commit (2PC) inventory pre-check, affiliate commission rebate subsidy solver ($\alpha = 0.75$), and 72-hour price-drop polling. | [`apps/api-orchestrator/src/services/cart-solver.ts`](apps/api-orchestrator/src/services/cart-solver.ts)<br/>[`apps/workflows/src/tasks/price-drop-watcher.ts`](apps/workflows/src/tasks/price-drop-watcher.ts) |
-| **APIMatic** | **$1,000** | Grounded initialization of `@paypal/paypal-server-sdk` using APIMatic-validated patterns: strict model deserialization, fault injection headers (`PayPal-Mock-Response`), idempotency keys (`PayPal-Request-Id`), and comprehensive integration documentation in `docs/APIMATIC.md`. | [`apps/api-orchestrator/src/services/paypal/paypal-client.ts`](apps/api-orchestrator/src/services/paypal/paypal-client.ts)<br/>[`docs/APIMATIC.md`](docs/APIMATIC.md) |
-| **Bryntum** | **$1,000** | Embedded `@bryntum/scheduler-trial` in the Merchant Cockpit with an active **"Unallocated SLA Deadline"** badge, color-coded urgency bands (Red <6h, Yellow vision triage, Green submitted), and a 1-click **"Imminent Breach"** filter to auto-assign dispute resolution shifts. | [`apps/web-cockpit/src/components/bryntum/DisputeSlaScheduler.tsx`](apps/web-cockpit/src/components/bryntum/DisputeSlaScheduler.tsx) |
-| **Render** | **$1,000**<br/>*(Platform Credits)* | Cloud-native multi-service deployment via declarative `render.yaml` Blueprint IaC: Native Render Workflows (`type: workflow`, `@renderinc/sdk` v1.8.0), Render Key-Value Redis (`type: keyvalue`, `noeviction` Lua spend enforcer), Managed PostgreSQL 16 (`databases`), Render Web Services (`type: web`), and Scheduled Cron Reconciler (`type: cron`, `0 */6 * * *`). | [`render.yaml`](render.yaml)<br/>[`docs/RENDER.md`](docs/RENDER.md) |
-
----
-
-### 4.3 Mandatory Devpost Submission Deliverables Checklist
-
-- [x] **Public Open-Source Repository:** Monorepo with root [MIT LICENSE](LICENSE) visible in GitHub metadata.
-- [x] **Under 3-Minute Demo Video:** Second-by-second timed script in [`docs/DEMO_VIDEO_SCRIPT.md`](docs/DEMO_VIDEO_SCRIPT.md).
-- [x] **1-Click Live Deploy Button:** Official Render deploy button integrated in README.
-- [x] **Pre-Authenticated Judge Experience:** Dedicated `/judge` portal with 4 zero-configuration evaluation triggers.
-- [x] **Grounded Architecture Guides:** Comprehensive documentation dossiers in `docs/` for PayPal, AG Grid, Render, and APIMatic.
-- [x] **Zero Mock Data Commitment:** Production database schema, Drizzle ORM, and 1,000 pre-seeded sandbox transactions.
-
----
-
-## 5. 🎬 3-Minute Hackathon Demo & Judge Walkthrough Guide
-
-Judges can evaluate the complete system in **under 3 minutes** using the pre-authenticated, zero-friction Judge Cockpit at:  
+Evaluators can test the entire system in **under 3 minutes** using the pre-authenticated, zero-friction Evaluation Cockpit at:  
 👉 **`http://localhost:3000/judge`** (or deployed URL: `/judge`)
 
 ```
 ====================================================================================
-                        AEGISPAY 3-MINUTE DEMO RUNBOOK
+                        AEGISPAY 3-MINUTE EVALUATION RUNBOOK
 ====================================================================================
 [0:00 - 0:45] ACT 1: ADVERSARIAL PROMPT INJECTION SHIELD
   Narrative : Autonomous shopping agent receives an injected prompt attempting a
@@ -318,7 +277,7 @@ Judges can evaluate the complete system in **under 3 minutes** using the pre-aut
 ```
 
 ### Live Sandbox Chaos Simulator (`/simulator`)
-The Chaos Simulator allows judges to inject authentic `PayPal-Mock-Response` headers into live Sandbox calls:
+The Chaos Simulator allows testing authentic `PayPal-Mock-Response` headers in live Sandbox calls:
 - `INSTRUMENT_DECLINED`: Verifies compensating Redis Lua rollbacks and financial ledger balance restoration.
 - `COMPLIANCE_VIOLATION`: Confirms policy rejections and immediate security logging.
 
@@ -401,7 +360,7 @@ pnpm --filter @aegispay/database run db:seed
 
 ---
 
-## 7. 💻 Local Development Quickstart
+## 7. 💻 Local Development & Quickstart
 
 ### Prerequisites
 - **Node.js** >= 20.x (Node 22 recommended)
@@ -431,7 +390,7 @@ pnpm dev
 
 The services will be available at:
 - **Buyer & Merchant Cockpit**: `http://localhost:3000`
-- **Pre-Authenticated Judge Lab**: `http://localhost:3000/judge`
+- **Pre-Authenticated Evaluation Lab**: `http://localhost:3000/judge`
 - **Fastify Financial Orchestrator**: `http://localhost:4000`
 - **Health & Integration Diagnostics**: `http://localhost:4000/api/integrations/verify`
 
@@ -469,7 +428,7 @@ aegispay/
 │   │   ├── src/
 │   │   │   ├── app/(buyer)/        # Conversational Chat, Flagship PDP, Search, Watchlist, History
 │   │   │   ├── app/(merchant)/     # AG Grid Enterprise, AG Studio 3 Canvas, Bryntum SLA Scheduler
-│   │   │   ├── app/judge/          # Pre-authenticated 3-minute Hackathon Evaluation Lab
+│   │   │   ├── app/judge/          # Pre-authenticated 3-minute Evaluation Lab
 │   │   │   ├── app/simulator/      # Chaos negative testing console (Mock Headers)
 │   │   │   ├── components/ag-studio/ # AG Studio 3 custom harnesses & widgets
 │   │   │   ├── components/bryntum/  # Bryntum SLA dispute schedule visualizer
@@ -549,9 +508,9 @@ AegisPay exposes 5 canonical checkout tools over Model Context Protocol (`POST /
 
 ---
 
-## 11. 📚 Documentation Index
+## 11. 📚 Documentation & Technical Dossiers
 
-Explore our comprehensive technical dossiers and guides:
+Explore our comprehensive technical guides and architectural dossiers:
 
 | Document | Description |
 | :--- | :--- |
@@ -559,17 +518,13 @@ Explore our comprehensive technical dossiers and guides:
 | [📊 AG Grid Enterprise & AG Studio 3 Guide](docs/AG_GRID.md) | Full documentation of our custom React cell renderers, DuckDB-WASM SSRM bridge, and studio canvas |
 | [☁️ Render Cloud Infrastructure Dossier](docs/RENDER.md) | Complete guide to our multi-service `render.yaml` Blueprint, Workflows, and Redis Lua spend enforcer |
 | [📐 APIMatic SDK Verification Dossier](docs/APIMATIC.md) | Verification and audit log of APIMatic-grounded `@paypal/paypal-server-sdk` initialization |
-| [🎬 3-Minute Video Demo Script](docs/DEMO_VIDEO_SCRIPT.md) | Second-by-second video presentation script for the Devpost hackathon submission |
+| [🎬 3-Minute Video Demo Script](docs/DEMO_VIDEO_SCRIPT.md) | Second-by-second video presentation script for the evaluation walkthrough |
 
 ---
 
-## 12. 📜 License & Acknowledgements
+## 12. 📜 License & Compliance
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
-
-### Hackathon Team & Acknowledgements
-- Built with pride for the **Build What's Next with PayPal and AI Global Hackathon 2026**.
-- Special thanks to the sponsor teams at **PayPal**, **AG Grid**, **Channel3**, **APIMatic**, **Bryntum**, and **Render** for developer tooling and sponsor prize challenges.
 
 <div align="center">
   <sub>AegisPay 🛡️ — Built with Next.js 15, Fastify 4, Render Workflows, AG Grid Enterprise, and PayPal Rails.</sub>
