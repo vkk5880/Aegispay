@@ -29,6 +29,7 @@ import {
   eq,
   desc,
   sql,
+  inArray,
 } from '@aegispay/database';
 
 const logger = createLogger('API:Services:Financial').child('UserMemory');
@@ -73,7 +74,7 @@ const memoryPrefsStore = new Map<string, UserPreferences>();
 const purchaseHistoryStore = new Map<string, PurchaseLogEntry[]>();
 
 function sanitizeUserId(userId: string): string {
-  const cleaned = (userId || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+  const cleaned = (userId || '').replace(/[^a-zA-Z0-9_\-@.+]/g, '');
   return cleaned.slice(0, 64) || 'demo';
 }
 
@@ -318,10 +319,15 @@ export async function getPurchaseHistoryAsync(userId: string = 'demo', limit: nu
   try {
     const db = getUserMemoryDb();
     if (db) {
+      const targetUserIds = [safeId];
+      if (safeId === 'sb-buyer@personal.example.com' || safeId === 'demo' || safeId === 'guest') {
+        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+      }
+
       const rows = await db
         .select()
         .from(purchaseHistoryTable)
-        .where(eq(purchaseHistoryTable.user_id, safeId))
+        .where(inArray(purchaseHistoryTable.user_id, Array.from(new Set(targetUserIds))))
         .orderBy(desc(purchaseHistoryTable.created_at))
         .limit(limit);
 
@@ -713,10 +719,15 @@ export async function getWatchlist(userId: string = 'sb-buyer@personal.example.c
     const db = getUserMemoryDb();
     if (db && typeof (db as any).select === 'function') {
       await ensureWatchlistTable(db);
+      const targetUserIds = [safeId];
+      if (safeId === 'sb-buyer@personal.example.com' || safeId === 'demo' || safeId === 'usr_pp_buyer' || safeId === 'guest') {
+        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+      }
+
       const rows = await db
         .select()
         .from(buyerWatchlist)
-        .where(eq(buyerWatchlist.user_id, safeId))
+        .where(inArray(buyerWatchlist.user_id, Array.from(new Set(targetUserIds))))
         .orderBy(desc(buyerWatchlist.created_at));
 
       if (Array.isArray(rows)) {
@@ -759,11 +770,20 @@ export async function removeFromWatchlist(userId: string = 'sb-buyer@personal.ex
   logger.info('Removing item from price-drop watchlist', { userId: safeId, identifier });
   let removed = false;
 
-  const items = watchlistStore.get(safeId) || [];
-  const filtered = items.filter(i => i.id !== identifier && i.title.toLowerCase() !== identifier.toLowerCase());
-  if (filtered.length !== items.length) {
-    watchlistStore.set(safeId, filtered);
-    removed = true;
+  const targetUserIds = [safeId];
+  if (safeId === 'sb-buyer@personal.example.com' || safeId === 'demo' || safeId === 'usr_pp_buyer' || safeId === 'guest') {
+    targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+  }
+
+  for (const uid of Array.from(new Set(targetUserIds))) {
+    const items = watchlistStore.get(uid) || [];
+    const filtered = items.filter(
+      (i) => i.id !== identifier && i.title.toLowerCase() !== identifier.toLowerCase() && (i.query ? i.query.toLowerCase() !== identifier.toLowerCase() : true)
+    );
+    if (filtered.length !== items.length) {
+      watchlistStore.set(uid, filtered);
+      removed = true;
+    }
   }
 
   try {
@@ -773,7 +793,7 @@ export async function removeFromWatchlist(userId: string = 'sb-buyer@personal.ex
       await db
         .delete(buyerWatchlist)
         .where(
-          sql`${buyerWatchlist.user_id} = ${safeId} AND (${buyerWatchlist.id} = ${identifier} OR LOWER(${buyerWatchlist.title}) = LOWER(${identifier}))`
+          sql`${inArray(buyerWatchlist.user_id, Array.from(new Set(targetUserIds)))} AND (${buyerWatchlist.id} = ${identifier} OR LOWER(${buyerWatchlist.title}) = LOWER(${identifier}) OR ${buyerWatchlist.query} = ${identifier})`
         );
       removed = true;
       logger.info('Successfully removed item from PostgreSQL buyer_watchlist', { userId: safeId, identifier });

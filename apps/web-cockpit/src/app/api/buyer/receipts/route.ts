@@ -26,7 +26,10 @@ export async function GET(req: Request) {
         cache: 'no-store',
       });
       if (res.ok) {
-        return NextResponse.json(await res.json());
+        const data = await res.json();
+        if (Array.isArray(data.receipts) && data.receipts.length > 0) {
+          return NextResponse.json(data);
+        }
       }
     } catch (err: any) {
       apiLogger.warn('Upstream orchestrator unreachable for receipts; checking database', {
@@ -35,20 +38,26 @@ export async function GET(req: Request) {
     }
   }
 
-  // Direct PostgreSQL query for receipts when orchestrator is unavailable
+  // Direct PostgreSQL query for receipts when orchestrator is unavailable or returned no cached records
   if (process.env.DATABASE_URL) {
     try {
-      const { createDb, purchaseHistoryTable, eq, desc } = await import('@aegispay/database');
+      const { createDb, purchaseHistoryTable, inArray, desc } = await import('@aegispay/database');
       const db = createDb(process.env.DATABASE_URL);
+
+      const targetUserIds = [userId];
+      if (userId === 'sb-buyer@personal.example.com' || userId === 'demo' || userId === 'guest') {
+        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+      }
+
       const rows = await db
         .select()
         .from(purchaseHistoryTable)
-        .where(eq(purchaseHistoryTable.user_id, userId))
+        .where(inArray(purchaseHistoryTable.user_id, Array.from(new Set(targetUserIds))))
         .orderBy(desc(purchaseHistoryTable.created_at))
         .limit(50);
 
       if (rows && rows.length > 0) {
-        const receipts = rows.map((r, idx) => ({
+        const receipts = rows.map((r: any, idx: number) => ({
           receipt_number: r.receipt_number || 1000 + idx,
           product_title: r.title,
           amount_cents: r.price_cents,
@@ -56,6 +65,7 @@ export async function GET(req: Request) {
           tx_id: r.tx_id || r.order_id,
           chain_hash: r.hash || `0x${Buffer.from(r.order_id).toString('hex').padStart(64, '0')}`,
           timestamp: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+          status: r.escrow_status === 'FAILED' ? 'FAILED' : 'SUCCESS',
         }));
         return NextResponse.json({
           status: 'SUCCESS',

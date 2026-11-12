@@ -72,6 +72,11 @@ export const DEFAULT_ALLOWED_CATEGORIES = [
   'home',
   'apparel',
   'general',
+  'keyboards',
+  'monitors',
+  'power',
+  'creators',
+  'accessories',
 ];
 
 export const DEFAULT_ALLOWED_MERCHANTS = [
@@ -84,6 +89,27 @@ export const DEFAULT_ALLOWED_MERCHANTS = [
   'newegg.com',
   'target.com',
   'walmart.com',
+  'adorama.com',
+  'crutchfield.com',
+  'sweetwater.com',
+  'keychron.com',
+  'nuphy.com',
+  'razer.com',
+  'mechanicalkeyboards.com',
+  'epomaker.com',
+  'drop.com',
+  'microcenter.com',
+  'dell.com',
+  'hermanmiller.com',
+  'steelcase.com',
+  'autonomous.ai',
+  'grovemade.com',
+  'therooststand.com',
+  'upliftdesk.com',
+  'anker.com',
+  'satechi.net',
+  'sharge.com',
+  'belkin.com',
 ];
 
 export const DEFAULT_SANDBOX_USER: UserProfile = {

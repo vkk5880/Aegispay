@@ -27,7 +27,11 @@ export async function GET(req: Request) {
         cache: 'no-store',
       });
       if (res.ok) {
-        return NextResponse.json(await res.json());
+        const data = await res.json();
+        const incomingOrders = Array.isArray(data.orders) ? data.orders : (Array.isArray(data.history) ? data.history : []);
+        if (incomingOrders.length > 0) {
+          return NextResponse.json(data);
+        }
       }
     } catch (err: any) {
       apiLogger.warn('Upstream orchestrator unreachable for history; attempting direct database lookup', {
@@ -36,20 +40,33 @@ export async function GET(req: Request) {
     }
   }
 
-  // Direct PostgreSQL database query fallback when orchestrator is offline
+  // Direct PostgreSQL database query fallback when orchestrator is offline or returned no records
   if (process.env.DATABASE_URL) {
     try {
-      const { createDb, purchaseHistoryTable, eq, desc } = await import('@aegispay/database');
+      const { createDb, purchaseHistoryTable, inArray, eq, or, desc } = await import('@aegispay/database');
       const db = createDb(process.env.DATABASE_URL);
+
+      const targetUserIds = [userId];
+      if (userId === 'sb-buyer@personal.example.com' || userId === 'demo' || userId === 'guest') {
+        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+      }
+
+      const condition = orderId
+        ? or(
+            inArray(purchaseHistoryTable.user_id, Array.from(new Set(targetUserIds))),
+            eq(purchaseHistoryTable.order_id, orderId)
+          )
+        : inArray(purchaseHistoryTable.user_id, Array.from(new Set(targetUserIds)));
+
       const rows = await db
         .select()
         .from(purchaseHistoryTable)
-        .where(eq(purchaseHistoryTable.user_id, userId))
+        .where(condition)
         .orderBy(desc(purchaseHistoryTable.created_at))
         .limit(50);
 
       if (rows && rows.length > 0) {
-        const history = rows.map((r) => ({
+        const history = rows.map((r: any) => ({
           order_id: r.order_id,
           user_id: r.user_id,
           title: r.title,

@@ -26,6 +26,7 @@ import type { ProductCardData } from '@aegispay/shared-types';
 import { useMounted } from '@/hooks/useMounted';
 import { useUiMode } from '@/context/UiModeContext';
 import { useCart } from '@/context/CartContext';
+import { useAuth } from '@/context/AuthContext';
 import { DEFAULT_50_SEARCH_PRODUCTS } from '@/lib/searchCatalog';
 import { ProductImage } from '@/components/common/ProductImage';
 import { ProductDetailModal } from '@/components/buyer/ProductDetailModal';
@@ -58,6 +59,8 @@ export function SearchContent({
   const mounted = useMounted();
   const { showTechnicalDetails } = useUiMode();
   const { addToCart, openCart } = useCart();
+  const { user } = useAuth();
+  const activeUserId = user?.email || (user as any)?.id || user?.name || 'sb-buyer@personal.example.com';
   const queryParam = searchParams?.get('q') || '';
 
   const [query, setQuery] = useState<string>(queryParam);
@@ -70,34 +73,99 @@ export function SearchContent({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'composite' | 'price_asc' | 'rebate_desc'>('composite');
   const [selectedProductForModal, setSelectedProductForModal] = useState<ProductCardData | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
+
+  const showToast = (msg: string) => {
+    setNotification(msg);
+    setTimeout(() => setNotification(null), 3200);
+  };
+
+  // Sync saved items from server on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSavedItems() {
+      try {
+        const res = await fetch(`/api/buyer/watchlist?user_id=${encodeURIComponent(activeUserId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && Array.isArray(data.watchlist)) {
+            const map: Record<string, boolean> = {};
+            for (const item of data.watchlist) {
+              if (item.id) map[item.id] = true;
+              if (item.query) map[item.query] = true;
+              if (item.title) map[item.title] = true;
+            }
+            setSavedIds(map);
+          }
+        }
+      } catch {
+        // Silently preserve offline state
+      }
+    }
+    loadSavedItems();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeUserId]);
 
   const handleSaveToWatchlist = async (product: ProductCardData, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setSavedIds((prev) => ({ ...prev, [product.product_id]: true }));
-    try {
-      const userSession = typeof window !== 'undefined' ? localStorage.getItem('aegispay_user_session') : null;
-      const parsedUser = userSession ? JSON.parse(userSession) : null;
-      const userId = parsedUser?.email || parsedUser?.name || 'sb-buyer@personal.example.com';
-      const targetPriceCents =
-        product.compare_at_price_cents && product.compare_at_price_cents > product.price_cents
-          ? product.price_cents
-          : Math.round(product.price_cents * 0.9);
+    const isCurrentlySaved = Boolean(savedIds[product.product_id] || savedIds[product.title]);
 
-      await fetch('/api/buyer/watchlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          title: product.title,
-          current_price_cents: product.price_cents,
-          target_price_cents: targetPriceCents,
-          source: product.merchant_domain || 'web',
-          link: product.cleaned_url || '',
-          query: product.title,
-        }),
-      });
-    } catch {
-      // Local feedback
+    if (isCurrentlySaved) {
+      // Optimistic remove
+      setSavedIds((prev) => ({
+        ...prev,
+        [product.product_id]: false,
+        [product.title]: false,
+      }));
+      showToast(`Removed "${product.title.slice(0, 32)}..." from Watchlist.`);
+
+      try {
+        await fetch('/api/buyer/watchlist', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: activeUserId,
+            item_id: product.product_id,
+            title: product.title,
+          }),
+        });
+      } catch {
+        // Local fallback
+      }
+    } else {
+      // Optimistic save
+      setSavedIds((prev) => ({
+        ...prev,
+        [product.product_id]: true,
+        [product.title]: true,
+      }));
+      showToast(`Saved to Watchlist! Tracking price drops for "${product.title.slice(0, 32)}...".`);
+
+      try {
+        const targetPriceCents =
+          product.compare_at_price_cents && product.compare_at_price_cents > product.price_cents
+            ? product.price_cents
+            : Math.round(product.price_cents * 0.9);
+
+        await fetch('/api/buyer/watchlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: product.product_id,
+            user_id: activeUserId,
+            title: product.title,
+            current_price_cents: product.price_cents,
+            target_price_cents: targetPriceCents,
+            source: product.merchant_domain || 'web',
+            link: product.cleaned_url || '',
+            query: product.title,
+          }),
+        });
+      } catch {
+        // Local fallback
+      }
     }
   };
 
@@ -222,6 +290,14 @@ export function SearchContent({
 
   return (
     <div className="relative min-h-screen bg-slate-50 dark:bg-[#060b14] text-slate-900 dark:text-slate-100 pt-20 pb-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto w-full transition-colors">
+      {/* Toast Notification */}
+      {notification && (
+        <div className="fixed top-20 right-6 z-50 bg-cyan-950/95 border border-cyan-400 text-white text-xs px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md animate-fade-in font-mono flex items-center gap-2">
+          <Bookmark className="w-3.5 h-3.5 text-cyan-400" />
+          <span>{notification}</span>
+        </div>
+      )}
+
       {/* Header Bar */}
       <div className="mb-6 text-center flex flex-col items-center">
         <div className="mb-2.5 inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/40 px-3 py-0.5 text-xs font-semibold text-cyan-700 dark:text-cyan-400">
@@ -400,7 +476,7 @@ export function SearchContent({
           {filteredResults.map((product, idx) => {
             const isWinner = idx === 0 && selectedCategory === 'all';
             const isAdded = Boolean(addedIds[product.product_id]);
-            const isSaved = Boolean(savedIds[product.product_id]);
+            const isSaved = Boolean(savedIds[product.product_id] || savedIds[product.title]);
 
             return (
               <div

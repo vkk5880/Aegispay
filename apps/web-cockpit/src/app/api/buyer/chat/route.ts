@@ -303,9 +303,15 @@ export async function POST(req: Request) {
     },
   ];
 
-  // Resolve grounded products from active turn or sample catalog
+  // Resolve grounded products from active turn, catalog, cart items, or sample catalog
   const resolveProducts = (ids: string[]): import('@aegispay/shared-types').ProductCardData[] => {
     const list: import('@aegispay/shared-types').ProductCardData[] = [];
+    const rawItems: any[] = Array.isArray(body?.items)
+      ? body.items
+      : Array.isArray(body?.cart?.assigned_merchants)
+      ? body.cart.assigned_merchants.flatMap((m: any) => m.items || [])
+      : [];
+
     for (const id of ids) {
       const fromTurn = activeTurnProducts.find((p) => p.product_id === id);
       if (fromTurn) {
@@ -332,6 +338,39 @@ export async function POST(req: Request) {
         });
         continue;
       }
+
+      const fromCatalog = DEFAULT_50_SEARCH_PRODUCTS.find((p) => p.product_id === id);
+      if (fromCatalog) {
+        list.push(fromCatalog);
+        continue;
+      }
+
+      const fromCartItem = rawItems.find((it: any) => it.product_id === id);
+      if (fromCartItem) {
+        list.push({
+          product_id: fromCartItem.product_id,
+          title: fromCartItem.title || 'Cart Item',
+          description: fromCartItem.title || 'Cart Item',
+          category_id: fromCartItem.category_id || 'general',
+          price_cents: fromCartItem.price_cents || 0,
+          compare_at_price_cents: Math.round((fromCartItem.price_cents || 0) * 1.15),
+          commission_rebate_cents: fromCartItem.commission_rebate_cents || 0,
+          commission_rate: 0.1,
+          rating: fromCartItem.rating || 4.8,
+          review_count: 100,
+          merchant_domain: fromCartItem.merchant_domain || 'bestbuy.com',
+          merchant_credibility_score: 95,
+          stock_status: 'IN_STOCK',
+          delivery_window: '2-Day Express',
+          shipping_fee_cents: fromCartItem.free_shipping ? 0 : 500,
+          free_shipping: Boolean(fromCartItem.free_shipping),
+          specs: {},
+          image_url: fromCartItem.image_url || fromCartItem.cleaned_image_url || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&q=80',
+          cleaned_image_url: fromCartItem.cleaned_image_url || fromCartItem.image_url || 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=1024&q=80',
+        });
+        continue;
+      }
+
       const fromSample = sampleProducts.find((p) => p.product_id === id);
       if (fromSample) {
         list.push(fromSample);
@@ -546,6 +585,7 @@ export async function POST(req: Request) {
 
     const matched = selectedProductIds.length > 0 ? resolveProducts(selectedProductIds) : [];
     const buyProducts = matched.length > 0 ? matched : [sampleProducts[0], sampleProducts[1]];
+    const buyerUserId = req.headers.get('x-user-id') || 'demo';
 
     // Security Gate: Verify Allowed Categories & Allowed Merchants Whitelist
     const rawAllowedCats = body.allowed_category_ids || (req.headers.get('x-allowed-categories') ? req.headers.get('x-allowed-categories')?.split(',') : null);
@@ -564,8 +604,35 @@ export async function POST(req: Request) {
           categoryId: unauthorizedCategoryProduct.category_id,
           allowedCategories: rawAllowedCats,
         });
-        const blockedPayload: ChatResponsePayload = {
+
+        const failedOrderId = body.order_id || `ord_failed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        if (process.env.DATABASE_URL) {
+          try {
+            const { createDb, purchaseHistoryTable } = await import('@aegispay/database');
+            const db = createDb(process.env.DATABASE_URL);
+            await db.insert(purchaseHistoryTable).values({
+              user_id: buyerUserId,
+              order_id: failedOrderId,
+              title: `[FAILED] ${unauthorizedCategoryProduct.title} (Category Not Authorized)`,
+              price_cents: unauthorizedCategoryProduct.price_cents,
+              merchant_domain: unauthorizedCategoryProduct.merchant_domain || 'bestbuy.com',
+              cleaned_url: unauthorizedCategoryProduct.cleaned_image_url || unauthorizedCategoryProduct.image_url,
+              escrow_status: 'FAILED',
+              fulfillment_status: 'cancelled',
+              receipt_number: Math.floor(1000 + Math.random() * 9000),
+              tx_id: `FAILED-CAT-${unauthorizedCategoryProduct.category_id}`,
+              paypal_order_data: { error: 'ERR_CATEGORY_NOT_AUTHORIZED', status: 'FAILED' },
+            });
+          } catch (e: any) {
+            apiLogger.warn('Failed to record category policy rejection in database', { error: e?.message });
+          }
+        }
+
+        const blockedPayload: any = {
           action: 'CHAT',
+          order_id: failedOrderId,
+          order_status: 'FAILED',
+          failure_reason: `Category "${unauthorizedCategoryProduct.category_id}" is not in authorized list`,
           markdown: `### ⛔ Purchase Blocked: Category Not Authorized\n\nYour active spend mandate does not permit purchases in category **"${unauthorizedCategoryProduct.category_id}"** for item **${unauthorizedCategoryProduct.title}**.\n\n- **Authorized Categories:** \`${rawAllowedCats.join(', ')}\`\n- **Item Category:** \`${unauthorizedCategoryProduct.category_id}\`\n\n> 🛡️ *To allow this purchase, please update your Authorized Categories in Settings or during PayPal Sandbox Login.*`,
           products: [unauthorizedCategoryProduct],
           thought_trace: [
@@ -593,8 +660,35 @@ export async function POST(req: Request) {
           merchantDomain: unauthorizedMerchantProduct.merchant_domain,
           allowedMerchants: rawAllowedMerchants,
         });
-        const blockedPayload: ChatResponsePayload = {
+
+        const failedOrderId = body.order_id || `ord_failed_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        if (process.env.DATABASE_URL) {
+          try {
+            const { createDb, purchaseHistoryTable } = await import('@aegispay/database');
+            const db = createDb(process.env.DATABASE_URL);
+            await db.insert(purchaseHistoryTable).values({
+              user_id: buyerUserId,
+              order_id: failedOrderId,
+              title: `[FAILED] ${unauthorizedMerchantProduct.title} (Store Not In Whitelist)`,
+              price_cents: unauthorizedMerchantProduct.price_cents,
+              merchant_domain: unauthorizedMerchantProduct.merchant_domain || 'bestbuy.com',
+              cleaned_url: unauthorizedMerchantProduct.cleaned_image_url || unauthorizedMerchantProduct.image_url,
+              escrow_status: 'FAILED',
+              fulfillment_status: 'cancelled',
+              receipt_number: Math.floor(1000 + Math.random() * 9000),
+              tx_id: `FAILED-MERCHANT-${unauthorizedMerchantProduct.merchant_domain}`,
+              paypal_order_data: { error: 'ERR_MERCHANT_NOT_AUTHORIZED', status: 'FAILED' },
+            });
+          } catch (e: any) {
+            apiLogger.warn('Failed to record merchant whitelist rejection in database', { error: e?.message });
+          }
+        }
+
+        const blockedPayload: any = {
           action: 'CHAT',
+          order_id: failedOrderId,
+          order_status: 'FAILED',
+          failure_reason: `Store "${unauthorizedMerchantProduct.merchant_domain}" is not in authorized whitelist`,
           markdown: `### ⛔ Purchase Blocked: Store Not in Authorized Whitelist\n\nStore **\`${unauthorizedMerchantProduct.merchant_domain}\`** is not in your authorized merchant whitelist for item **${unauthorizedMerchantProduct.title}**.\n\n- **Allowed Stores Whitelist:** \`${rawAllowedMerchants.join(', ')}\`\n- **Attempted Store:** \`${unauthorizedMerchantProduct.merchant_domain}\`\n\n> 🛡️ *To allow purchasing from this store, add \`${unauthorizedMerchantProduct.merchant_domain}\` to your Authorized Store Whitelist in Settings or during PayPal Sandbox Login.*`,
           products: [unauthorizedMerchantProduct],
           thought_trace: [
@@ -616,12 +710,15 @@ export async function POST(req: Request) {
     const budgetCapCents = body.budget_cap_cents || 50000;
     const isWithinBudget = netExpenditureCents <= budgetCapCents;
 
-    const generatedOrderId = `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const generatedOrderId = body.order_id || `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const trackingNumber = `7890${Math.floor(10000000 + Math.random() * 90000000)}`;
     const primaryProduct = buyProducts[0] || sampleProducts[0];
-    const buyerUserId = req.headers.get('x-user-id') || 'demo';
+    const orderTitle = buyProducts.length > 1
+      ? `${primaryProduct.title} (+${buyProducts.length - 1} item${buyProducts.length > 2 ? 's' : ''})`
+      : primaryProduct.title;
+    const receiptNum = Math.floor(1000 + Math.random() * 9000);
 
-    // Automatically persist purchase to live PostgreSQL database if configured
+    // Automatically persist purchase (SUCCESS or FAILED) to live PostgreSQL database if configured
     if (process.env.DATABASE_URL) {
       try {
         const { createDb, purchaseHistoryTable } = await import('@aegispay/database');
@@ -632,24 +729,30 @@ export async function POST(req: Request) {
         await db.insert(purchaseHistoryTable).values({
           user_id: buyerUserId,
           order_id: generatedOrderId,
-          title: primaryProduct.title,
+          title: isWithinBudget ? orderTitle : `[FAILED] ${orderTitle} (Budget Exceeded)`,
           price_cents: netExpenditureCents,
           merchant_domain: primaryProduct.merchant_domain || 'bestbuy.com',
           cleaned_url: primaryProduct.cleaned_image_url || primaryProduct.image_url,
           score: primaryProduct.composite_score ? String(primaryProduct.composite_score) : '9.4',
-          tx_id: `PAYID-${generatedOrderId.toUpperCase()}`,
+          tx_id: isWithinBudget ? `PAYID-${generatedOrderId.toUpperCase()}` : `FAILED-BUDGET-EXCEEDED`,
           reservation_id: `res_2pc_verified_${Date.now().toString(36)}`,
-          escrow_status: 'HELD',
-          receipt_number: Math.floor(1000 + Math.random() * 9000),
+          escrow_status: isWithinBudget ? 'HELD' : 'FAILED',
+          receipt_number: receiptNum,
           hash,
           carrier: 'FedEx Priority',
           tracking_number: trackingNumber,
-          fulfillment_status: 'processing',
+          fulfillment_status: isWithinBudget ? 'processing' : 'cancelled',
+          paypal_order_data: {
+            status: isWithinBudget ? 'COMPLETED' : 'FAILED',
+            reason: isWithinBudget ? undefined : 'ERR_BUDGET_EXCEEDED',
+            items: buyProducts.map((p) => ({ title: p.title, price_cents: p.price_cents, merchant_domain: p.merchant_domain })),
+          },
         });
         apiLogger.info('Persisted purchase to PostgreSQL purchase_history table', {
           orderId: generatedOrderId,
           userId: buyerUserId,
           amountCents: netExpenditureCents,
+          status: isWithinBudget ? 'HELD' : 'FAILED',
         });
       } catch (dbErr: any) {
         apiLogger.warn('Direct database persist in chat buy route failed', { error: dbErr?.message });
@@ -658,8 +761,13 @@ export async function POST(req: Request) {
 
     const trackingUrl = `/history?order_id=${encodeURIComponent(generatedOrderId)}`;
 
-    const mockPayload: ChatResponsePayload = {
+    const mockPayload: any = {
       action: 'BUY',
+      order_id: generatedOrderId,
+      order_status: isWithinBudget ? 'SUCCESS' : 'FAILED',
+      receipt_number: receiptNum,
+      tracking_number: trackingNumber,
+      tracking_url: trackingUrl,
       markdown: `### Pre-Purchase Verification & Knapsack Cart Summary\n\n✅ **Two-Phase Commit (2PC) Stock Reservation:** \`res_2pc_verified_${Date.now().toString(36)}\` (Held)\n✅ **Items Included (${buyProducts.length}):** ${buyProducts.map((p) => p.title).join(', ')}\n\n#### Financial Settlement Breakdown:\n- **Gross Subtotal:** $${(grossSubtotalCents / 100).toFixed(2)}\n- **Instant Commission Rebate:** -$${(rebateCents / 100).toFixed(2)}\n- **Estimated Sales Tax:** $${(taxCents / 100).toFixed(2)}\n- **Shipping Fee:** $${(shippingCents / 100).toFixed(2)}${shippingSavedCents > 0 ? ` (🎉 Saved $${(shippingSavedCents / 100).toFixed(2)} with multi-item bundling)` : ''}\n- **Net Buyer Expenditure:** **$${(netExpenditureCents / 100).toFixed(2)}**\n- **Budget Cap:** $${(budgetCapCents / 100).toFixed(2)} (${isWithinBudget ? '✅ Within Budget' : '⚠️ Exceeds Budget'})\n- **Order ID:** \`${generatedOrderId}\`\n- **Carrier:** FedEx Priority (\`${trackingNumber}\`)\n- [Track Order in Purchase History](${trackingUrl})\n\n*Merchant settlement is decoupled: merchants will be authorized full retail amount, with commission rebate applied as an instant platform subsidy.*`,
       products: buyProducts,
       cart: {

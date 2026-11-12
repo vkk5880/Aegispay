@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Star,
@@ -20,6 +20,7 @@ import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
 import { useUiMode } from '@/context/UiModeContext';
 import { useCart } from '@/context/CartContext';
+import { useAuth } from '@/context/AuthContext';
 import { getProductImageUrl } from '@/lib/productImageHelper';
 import { ProductDetailModal } from './ProductDetailModal';
 
@@ -50,10 +51,40 @@ export function ProductCard({
 }: ProductCardProps) {
   const { showTechnicalDetails } = useUiMode();
   const { addToCart, openCart } = useCart();
+  const { user } = useAuth();
+  const activeUserId = user?.email || (user as any)?.id || user?.name || 'sb-buyer@personal.example.com';
   const [added, setAdded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+
+  // Sync saved status on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function checkSavedStatus() {
+      try {
+        const res = await fetch(`/api/buyer/watchlist?user_id=${encodeURIComponent(activeUserId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && Array.isArray(data.watchlist)) {
+            const found = data.watchlist.some(
+              (w: any) =>
+                (product.product_id && w.id === product.product_id) ||
+                (product.title && w.title.toLowerCase() === product.title.toLowerCase()) ||
+                (product.product_id && w.query === product.product_id)
+            );
+            if (found) setIsSaved(true);
+          }
+        }
+      } catch {
+        // Silently retain current state
+      }
+    }
+    checkSavedStatus();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeUserId, product.product_id, product.title]);
 
   // Optional Variant Options (Sizes / Colors / Models)
   const variants: string[] =
@@ -101,34 +132,52 @@ export function ProductCard({
     e.stopPropagation();
     if (onSaveWatchlist) {
       onSaveWatchlist(product);
-      setIsSaved(true);
+      setIsSaved((prev) => !prev);
       return;
     }
-    try {
-      setIsSaved(true);
-      const userSession = typeof window !== 'undefined' ? localStorage.getItem('aegispay_user_session') : null;
-      const parsedUser = userSession ? JSON.parse(userSession) : null;
-      const userId = parsedUser?.email || parsedUser?.name || 'sb-buyer@personal.example.com';
-      const targetPriceCents =
-        product.compare_at_price_cents && product.compare_at_price_cents > product.price_cents
-          ? product.price_cents
-          : Math.round(product.price_cents * 0.9);
 
-      await fetch('/api/buyer/watchlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          user_id: userId,
-          title: product.title,
-          current_price_cents: product.price_cents,
-          target_price_cents: targetPriceCents,
-          source: product.merchant_domain || 'web',
-          link: product.cleaned_url || '',
-          query: product.title,
-        }),
-      });
-    } catch {
-      // Best-effort local feedback
+    if (isSaved) {
+      // Toggle OFF
+      setIsSaved(false);
+      try {
+        await fetch('/api/buyer/watchlist', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: activeUserId,
+            item_id: product.product_id,
+            title: product.title,
+          }),
+        });
+      } catch {
+        // Local fallback
+      }
+    } else {
+      // Toggle ON
+      setIsSaved(true);
+      try {
+        const targetPriceCents =
+          product.compare_at_price_cents && product.compare_at_price_cents > product.price_cents
+            ? product.price_cents
+            : Math.round(product.price_cents * 0.9);
+
+        await fetch('/api/buyer/watchlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: product.product_id,
+            user_id: activeUserId,
+            title: product.title,
+            current_price_cents: product.price_cents,
+            target_price_cents: targetPriceCents,
+            source: product.merchant_domain || 'web',
+            link: product.cleaned_url || '',
+            query: product.title,
+          }),
+        });
+      } catch {
+        // Best-effort local feedback
+      }
     }
   };
 
