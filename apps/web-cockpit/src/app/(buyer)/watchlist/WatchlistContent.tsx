@@ -11,6 +11,7 @@ import {
   Clock,
   ShoppingBag,
   Search,
+  ExternalLink,
 } from 'lucide-react';
 import { useMounted } from '@/hooks/useMounted';
 import { useUiMode } from '@/context/UiModeContext';
@@ -44,13 +45,6 @@ export function WatchlistContent({
   const [loading, setLoading] = useState<boolean>(false);
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [notification, setNotification] = useState<string | null>(null);
-  const [isAddOpen, setIsAddOpen] = useState<boolean>(false);
-
-  // New item form
-  const [newTitle, setNewTitle] = useState('');
-  const [newCurrentPrice, setNewCurrentPrice] = useState('');
-  const [newTargetPrice, setNewTargetPrice] = useState('');
-  const [newSource, setNewSource] = useState('amazon.com');
 
   const showToast = (msg: string) => {
     setNotification(msg);
@@ -138,74 +132,6 @@ export function WatchlistContent({
     }
   };
 
-  const handleAddItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const currCents = Math.round(parseFloat(newCurrentPrice || '0') * 100);
-    const targCents = Math.round(parseFloat(newTargetPrice || '0') * 100);
-
-    if (!newTitle.trim() || targCents <= 0) {
-      if (typeof window !== 'undefined') {
-        alert('Please provide a valid product title and target price.');
-      }
-      return;
-    }
-
-    const payload = {
-      user_id: activeUserId,
-      title: newTitle.trim(),
-      current_price_cents: currCents > 0 ? currCents : Math.round(targCents * 1.15),
-      target_price_cents: targCents,
-      source: newSource.trim() || 'amazon.com',
-    };
-
-    try {
-      const res = await fetch('/api/buyer/watchlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.watchlist_item) {
-          setItems((prev) => [data.watchlist_item, ...prev.filter((i) => i.id !== data.watchlist_item.id)]);
-        }
-      } else {
-        const fallbackItem: WatchlistItem = {
-          id: `wch_${Date.now()}`,
-          user_id: activeUserId,
-          title: payload.title,
-          current_price_cents: payload.current_price_cents,
-          target_price_cents: payload.target_price_cents,
-          source: payload.source,
-          added_at: new Date().toISOString(),
-          last_checked: new Date().toISOString(),
-          triggered: payload.current_price_cents <= payload.target_price_cents,
-        };
-        setItems((prev) => [fallbackItem, ...prev]);
-      }
-    } catch {
-      const fallbackItem: WatchlistItem = {
-        id: `wch_${Date.now()}`,
-        user_id: activeUserId,
-        title: payload.title,
-        current_price_cents: payload.current_price_cents,
-        target_price_cents: payload.target_price_cents,
-        source: payload.source,
-        added_at: new Date().toISOString(),
-        last_checked: new Date().toISOString(),
-        triggered: payload.current_price_cents <= payload.target_price_cents,
-      };
-      setItems((prev) => [fallbackItem, ...prev]);
-    }
-
-    setIsAddOpen(false);
-    setNewTitle('');
-    setNewCurrentPrice('');
-    setNewTargetPrice('');
-    showToast(`Added "${payload.title}" to price-drop watchlist!`);
-  };
-
   const formatPrice = (cents?: number | null) => {
     const val = typeof cents === 'number' && !Number.isNaN(cents) ? cents : 0;
     return (val / 100).toLocaleString('en-US', {
@@ -267,86 +193,15 @@ export function WatchlistContent({
                 : 'Check Prices Now'}
             </span>
           </button>
-          <button
-            onClick={() => setIsAddOpen(true)}
+          <Link
+            href="/search"
             className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Item</span>
-          </button>
+          </Link>
         </div>
       </div>
-
-      {/* Add Modal */}
-      {isAddOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-6 shadow-2xl text-slate-900 dark:text-white">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Add Product to Price Watchlist</h3>
-            <form onSubmit={handleAddItem} className="space-y-4">
-              <div>
-                <label className="text-xs text-slate-600 dark:text-slate-400 block mb-1">Product Title</label>
-                <input
-                  type="text"
-                  required
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="e.g. Sony WH-1000XM5 Headphones"
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-slate-600 dark:text-slate-400 block mb-1">Current Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={newCurrentPrice}
-                    onChange={(e) => setNewCurrentPrice(e.target.value)}
-                    placeholder="348.00"
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-600 dark:text-slate-400 block mb-1">Target Price ($)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={newTargetPrice}
-                    onChange={(e) => setNewTargetPrice(e.target.value)}
-                    placeholder="320.00"
-                    className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-slate-600 dark:text-slate-400 block mb-1">Source / Merchant</label>
-                <input
-                  type="text"
-                  value={newSource}
-                  onChange={(e) => setNewSource(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl text-sm text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddOpen(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-xs font-semibold cursor-pointer border border-slate-200 dark:border-slate-700"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold cursor-pointer shadow-xs"
-                >
-                  Save Watch Item
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* Items List, Loading Spinner, or Empty State */}
       {mounted && loading && items.length === 0 ? (
@@ -364,13 +219,13 @@ export function WatchlistContent({
             Add products you are tracking to receive autonomous price-drop alerts and enable 1-click escrow auto-execution.
           </p>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setIsAddOpen(true)}
+            <Link
+              href="/search"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Add First Item</span>
-            </button>
+            </Link>
             <Link
               href="/search"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold transition-all border border-slate-200 dark:border-slate-700 shadow-2xs"
@@ -409,7 +264,14 @@ export function WatchlistContent({
                     )}
                   </div>
                   <h3 className="text-sm sm:text-base font-bold text-slate-900 dark:text-white mb-1 leading-snug">
-                    {item.title}
+                    <Link
+                      href={item.id?.startsWith('prod_') ? `/products/${encodeURIComponent(item.id)}` : `/search?q=${encodeURIComponent(item.query || item.title)}`}
+                      className="hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors inline-flex items-center gap-1.5"
+                      title="View product details"
+                    >
+                      <span>{item.title}</span>
+                      <ExternalLink className="w-3.5 h-3.5 text-slate-400 opacity-60 hover:opacity-100" />
+                    </Link>
                   </h3>
                   <p className="text-xs text-slate-600 dark:text-slate-400">
                     Target Price: <strong className="text-slate-900 dark:text-white font-mono">{formatPrice(item.target_price_cents)}</strong> ·{' '}
@@ -425,15 +287,17 @@ export function WatchlistContent({
                     </span>
                   </div>
 
-                  {item.triggered && (
-                    <Link
-                      href={`/search?q=${encodeURIComponent(item.query || item.title)}`}
-                      className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <ShoppingBag className="w-3.5 h-3.5" />
-                      <span>{showTechnicalDetails ? 'Auto-Buy Now' : 'Buy at Target Price'}</span>
-                    </Link>
-                  )}
+                  <Link
+                    href={item.id?.startsWith('prod_') ? `/products/${encodeURIComponent(item.id)}` : `/search?q=${encodeURIComponent(item.query || item.title)}`}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer ${
+                      item.triggered
+                        ? 'bg-gradient-to-r from-emerald-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                    <span>{item.triggered ? (showTechnicalDetails ? 'Auto-Buy Now' : 'Buy at Target') : 'View Offer'}</span>
+                  </Link>
 
                   <button
                     onClick={() => handleRemove(item.id, item.title)}
