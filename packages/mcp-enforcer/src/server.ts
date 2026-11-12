@@ -800,3 +800,12 @@ export async function serveStdio(
   console.error('AegisPay MCP Enforcer Server running via serveStdio');
   logger.info('serveStdio server connected successfully');
 }
+
+// Auto-start if executed directly from command line (Node/TSX)
+if (process.argv[1] && (process.argv[1].endsWith('server.js') || process.argv[1].endsWith('server.ts'))) {
+  runServer().catch((err) => {
+    logger.error('Failed to start MCP server via direct execution:', err);
+    process.exit(1);
+  });
+}
+

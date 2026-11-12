@@ -4,6 +4,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "aegispay-mcp": "./bin/mcp-enforcer.mjs"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w",

@@ -17,6 +17,7 @@ import { chatRoutes } from './routes/chat.routes.js';
 import { reconciliationRoutes } from './routes/reconciliation.routes.js';
 import { invoicingRoutes } from './routes/invoicing.routes.js';
 import { merchantCatalogRoutes } from './routes/merchant.catalog.js';
+import { llmGatewayRoutes } from './routes/llm.gateway.js';
 import { http402Plugin } from './middleware/http402-interceptor.js';
 
 dotenv.config();
@@ -160,6 +161,7 @@ export async function buildApp() {
   await fastify.register(reconciliationRoutes);
   await fastify.register(invoicingRoutes);
   await fastify.register(merchantCatalogRoutes);
+  await fastify.register(llmGatewayRoutes);
 
   // Root health route
   fastify.get('/', async () => {
