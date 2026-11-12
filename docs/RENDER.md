@@ -3,8 +3,8 @@
 **Target Track:** Render Sponsor Prize ($1,000 Platform Credits & Grand Partner Recognition)  
 **Competition:** PayPal AI Global Hackathon 2026 ("Build What's Next with PayPal and AI")  
 **Project:** AegisPay (PayPal Agentic Autonomous Clearinghouse & Multi-Modal Cockpit)  
-**Live Blueprint:** [`render.yaml`](file:///home/vku588050/paypal-agentic-cockpit/render.yaml)  
-**Workflows Engine:** [`apps/workflows`](file:///home/vku588050/paypal-agentic-cockpit/apps/workflows) (`@renderinc/sdk` v1.8.0)  
+**Live Blueprint:** [`render.yaml`](render.yaml)  
+**Workflows Engine:** [`apps/workflows`](apps/workflows) (`@renderinc/sdk` v1.8.0)  
 
 ---
 
@@ -193,7 +193,7 @@ The Fastify route `/api/integrations/verify` inspects live container telemetry:
 
 ## 7. 1-Click Deployment Guide for Judges
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vku588050/paypal-agentic-cockpit)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vkk5880/Aegispay)
 
 1. Click the **Deploy to Render** button above.
 2. Provide your PayPal Sandbox Credentials (`PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`).

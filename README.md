@@ -3,7 +3,7 @@
 
 <div align="center">
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/vkk5880/paypal-agentic-cockpit)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge&logo=githubactions&logoColor=white)](https://github.com/vkk5880/Aegispay)
 [![TypeScript 5.7](https://img.shields.io/badge/TypeScript-5.7-blue?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Next.js 15](https://img.shields.io/badge/Next.js-15.0-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
 [![Fastify 4](https://img.shields.io/badge/Fastify-4.28-black?style=for-the-badge&logo=fastify&logoColor=white)](https://fastify.dev/)
@@ -15,7 +15,7 @@
 **A bank-grade clearinghouse bridging autonomous AI consumer agents with merchant commerce rails.**  
 Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atomic Redis Lua budget enforcers, 72-hour price-drop escrow holds, and multimodal computer vision dispute arbitration.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vkk5880/paypal-agentic-cockpit)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vkk5880/Aegispay)
 
 [Live Cockpit](http://localhost:3000) • [Evaluation & Chaos Lab](http://localhost:3000/judge) • [Negative Testing Simulator](http://localhost:3000/simulator) • [PayPal Integration Dossier](docs/PAYPAL_INTEGRATION.md) • [AG Grid Architecture](docs/AG_GRID.md)
 
@@ -562,7 +562,7 @@ AegisPay is engineered for one-click deployment on **Render** via Infrastructure
 
 1. Click the **Deploy to Render** button:
    
-   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vkk5880/paypal-agentic-cockpit)
+   [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/vkk5880/Aegispay)
 
 2. In the Render Dashboard:
    - Provide your environment variables (or let Render generate secrets).
@@ -642,8 +642,8 @@ pnpm --filter @aegispay/database run db:seed
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/vkk5880/paypal-agentic-cockpit.git
-cd paypal-agentic-cockpit
+git clone https://github.com/vkk5880/Aegispay.git
+cd Aegispay
 
 # 2. Copy environment configuration
 cp .env.example .env

@@ -89,7 +89,7 @@ AegisPay introduces an industry-first integration: **connecting AG Grid's Server
 
 ## 4. Deep-Dive: AG Studio 3 Multi-Agent Harness & Natural Language Commands
 
-Located on the primary merchant cockpit page at [`/merchant`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/app/(merchant)/merchant/page.tsx), AegisPay mounts the active **AG Studio 3** canvas powered by `setupStudioHarness()`.
+Located on the primary merchant cockpit page at [`/merchant`](apps/web-cockpit/src/app/(merchant)/merchant/page.tsx), AegisPay mounts the active **AG Studio 3** canvas powered by `setupStudioHarness()`.
 
 ### Custom Multi-Agent AI Harness:
 - **Lead Agent**: Direct LLM Runner with multi-agent delegation across `['planning', 'data', 'page', 'widget', 'paypal_arbiter']`.
@@ -150,13 +150,13 @@ To explore every AG Grid and AG Studio feature in the live running application:
 
 ## 6. Monorepo File Map
 
-- Central Enterprise Module Registry: [`apps/web-cockpit/src/lib/ag-grid/enterpriseModules.ts`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/lib/ag-grid/enterpriseModules.ts)
-- Dynamic Quartz Theming Engine: [`apps/web-cockpit/src/lib/ag-grid/useAgGridTheme.ts`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/lib/ag-grid/useAgGridTheme.ts)
-- DuckDB-WASM SSRM Bridge: [`apps/web-cockpit/src/lib/ag-grid/DuckDbServerSideDatasource.ts`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/lib/ag-grid/DuckDbServerSideDatasource.ts)
-- Main Enterprise DataGrid Component: [`apps/web-cockpit/src/components/merchant/DataGrid.tsx`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/merchant/DataGrid.tsx)
-- Master/Detail Order View: [`apps/web-cockpit/src/components/ag-grid/details/OrderDetailView.tsx`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/ag-grid/details/OrderDetailView.tsx)
-- Master/Detail Dispute View: [`apps/web-cockpit/src/components/ag-grid/details/DisputeDetailView.tsx`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/ag-grid/details/DisputeDetailView.tsx)
-- Custom Cell Renderers: [`apps/web-cockpit/src/components/ag-grid/renderers/`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/ag-grid/renderers/)
-- AG Studio 3 Harness & Agent Runner: [`apps/web-cockpit/src/components/ag-studio/studioHarness.ts`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/ag-studio/studioHarness.ts)
-- Live AG Studio Canvas Component: [`apps/web-cockpit/src/components/ag-studio/LiveStudioCanvas.tsx`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/ag-studio/LiveStudioCanvas.tsx)
-- Automated Test Suite: [`apps/web-cockpit/src/components/ag-grid/agGridIntegration.test.ts`](file:///home/vku588050/paypal-agentic-cockpit/apps/web-cockpit/src/components/ag-grid/agGridIntegration.test.ts)
+- Central Enterprise Module Registry: [`apps/web-cockpit/src/lib/ag-grid/enterpriseModules.ts`](apps/web-cockpit/src/lib/ag-grid/enterpriseModules.ts)
+- Dynamic Quartz Theming Engine: [`apps/web-cockpit/src/lib/ag-grid/useAgGridTheme.ts`](apps/web-cockpit/src/lib/ag-grid/useAgGridTheme.ts)
+- DuckDB-WASM SSRM Bridge: [`apps/web-cockpit/src/lib/ag-grid/DuckDbServerSideDatasource.ts`](apps/web-cockpit/src/lib/ag-grid/DuckDbServerSideDatasource.ts)
+- Main Enterprise DataGrid Component: [`apps/web-cockpit/src/components/merchant/DataGrid.tsx`](apps/web-cockpit/src/components/merchant/DataGrid.tsx)
+- Master/Detail Order View: [`apps/web-cockpit/src/components/ag-grid/details/OrderDetailView.tsx`](apps/web-cockpit/src/components/ag-grid/details/OrderDetailView.tsx)
+- Master/Detail Dispute View: [`apps/web-cockpit/src/components/ag-grid/details/DisputeDetailView.tsx`](apps/web-cockpit/src/components/ag-grid/details/DisputeDetailView.tsx)
+- Custom Cell Renderers: [`apps/web-cockpit/src/components/ag-grid/renderers/`](apps/web-cockpit/src/components/ag-grid/renderers/)
+- AG Studio 3 Harness & Agent Runner: [`apps/web-cockpit/src/components/ag-studio/studioHarness.ts`](apps/web-cockpit/src/components/ag-studio/studioHarness.ts)
+- Live AG Studio Canvas Component: [`apps/web-cockpit/src/components/ag-studio/LiveStudioCanvas.tsx`](apps/web-cockpit/src/components/ag-studio/LiveStudioCanvas.tsx)
+- Automated Test Suite: [`apps/web-cockpit/src/components/ag-grid/agGridIntegration.test.ts`](apps/web-cockpit/src/components/ag-grid/agGridIntegration.test.ts)
