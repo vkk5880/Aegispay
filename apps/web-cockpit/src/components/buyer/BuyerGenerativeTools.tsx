@@ -27,6 +27,8 @@ import {
   Clock,
   Layers,
   X,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { BattleArena } from './BattleArena';
@@ -255,6 +257,34 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
     ];
   }
 
+  const [isMinimized, setIsMinimized] = useState(false);
+
+  if (isMinimized) {
+    return (
+      <div className="bg-white dark:bg-[#070e1c] border border-cyan-500/30 rounded-xl p-3 flex items-center justify-between text-xs shadow-xs transition-all">
+        <div className="flex items-center gap-2 truncate">
+          <Scale className="w-4 h-4 text-cyan-500 shrink-0" />
+          <span className="font-bold text-slate-900 dark:text-white">
+            Comparison Matrix ({products.length} products)
+          </span>
+          {matrix?.winner_product_id && (
+            <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 text-[9px] font-bold">
+              Top Pick Identified
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsMinimized(false)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-100 cursor-pointer shadow-2xs"
+        >
+          <span>Expand Matrix</span>
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white dark:bg-[#070e1c] border border-cyan-500/30 rounded-xl overflow-hidden shadow-xs">
       <div className="px-4 py-3 bg-gradient-to-r from-cyan-500/10 to-blue-500/10 border-b border-cyan-500/20 flex items-center justify-between">
@@ -264,9 +294,19 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
             Side-by-Side Comparison Matrix
           </h4>
         </div>
-        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
-          {products.length} Products Evaluated
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30">
+            {products.length} Products Evaluated
+          </span>
+          <button
+            type="button"
+            onClick={() => setIsMinimized(true)}
+            className="p-1 rounded text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer"
+            title="Slide to min"
+          >
+            <ChevronUp className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {matrix?.rationale && (
@@ -558,6 +598,82 @@ export function SideBySideProductColumns({
 
 // --- assistant-ui Generative Tool Visualizers ---
 
+export function CollapsibleProductCatalogView({
+  products,
+  promoCode,
+  query,
+}: {
+  products: ProductCardData[];
+  promoCode?: string;
+  query?: string;
+}) {
+  const [isMinimized, setIsMinimized] = useState(false);
+  const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
+
+  if (isMinimized) {
+    return (
+      <div className="my-2 p-2.5 rounded-xl bg-slate-100/90 dark:bg-[#070e1c] border border-cyan-500/30 flex items-center justify-between text-xs shadow-xs transition-all">
+        <div className="flex items-center gap-2 min-w-0 truncate">
+          <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
+          <span className="font-semibold text-slate-900 dark:text-white truncate">
+            {products.length} Products Found
+          </span>
+          {query && (
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate hidden sm:inline">
+              for "{query}"
+            </span>
+          )}
+          {promoCode && (
+            <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 hidden md:inline">
+              {promoCode}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsMinimized(false)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-cyan-600 dark:text-cyan-400 hover:bg-slate-50 cursor-pointer shadow-2xs transition-colors shrink-0"
+        >
+          <span>View Products</span>
+          <ChevronDown className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-2 space-y-2">
+      <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
+        <div className="flex items-center gap-1.5">
+          <span>Discovered {products.length} catalog items</span>
+          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">• Promo: {promoCode}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setIsMinimized(true)}
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer"
+          title="Minimize product grid"
+        >
+          <span>Slide to min</span>
+          <ChevronUp className="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+        {products.map((product) => (
+          <GenerativeProductCard
+            key={product.product_id}
+            product={product}
+            isSelected={selectedProducts.some((p) => p.product_id === product.product_id)}
+            onToggleSelect={onToggleSelectProduct}
+            onAskAi={onAskAi}
+            onAction={onAction}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /**
  * 1. search_catalog Tool UI
  * Renders loading skeleton while querying Channel3, and interactive ProductCard grid upon result.
@@ -565,7 +681,6 @@ export function SideBySideProductColumns({
 export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, SearchCatalogOutput>({
   toolName: 'search_catalog',
   render: ({ args, result, status }) => {
-    const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
     const isRunning = Boolean((status as any)?.type === 'running' || !result);
     const query = args?.query || 'catalog search';
 
@@ -595,24 +710,11 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
     const products = Array.isArray(result?.products) ? result.products : [];
     const promoCode = (result as any)?.promo_code || 'PAYPAL-HACKATHON-2026';
     return (
-      <div className="my-2 space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
-          <span>Discovered {products.length} catalog items</span>
-          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">Promo: {promoCode}</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-          {products.map((product) => (
-            <GenerativeProductCard
-              key={product.product_id}
-              product={product}
-              isSelected={selectedProducts.some((p) => p.product_id === product.product_id)}
-              onToggleSelect={onToggleSelectProduct}
-              onAskAi={onAskAi}
-              onAction={onAction}
-            />
-          ))}
-        </div>
-      </div>
+      <CollapsibleProductCatalogView
+        products={products}
+        promoCode={promoCode}
+        query={query}
+      />
     );
   },
 });
@@ -624,7 +726,6 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
 export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, SearchCatalogOutput>({
   toolName: 'discover_products',
   render: ({ args, result, status }) => {
-    const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
     const isRunning = Boolean((status as any)?.type === 'running' || !result);
     const query = args?.query || 'catalog search';
 
@@ -654,24 +755,11 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
     const products = Array.isArray(result?.products) ? result.products : [];
     const promoCode = (result as any)?.promo_code || 'PAYPAL-HACKATHON-2026';
     return (
-      <div className="my-2 space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
-          <span>Discovered {products.length} catalog items</span>
-          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">Promo: {promoCode}</span>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
-          {products.map((product) => (
-            <GenerativeProductCard
-              key={product.product_id}
-              product={product}
-              isSelected={selectedProducts.some((p) => p.product_id === product.product_id)}
-              onToggleSelect={onToggleSelectProduct}
-              onAskAi={onAskAi}
-              onAction={onAction}
-            />
-          ))}
-        </div>
-      </div>
+      <CollapsibleProductCatalogView
+        products={products}
+        promoCode={promoCode}
+        query={query}
+      />
     );
   },
 });

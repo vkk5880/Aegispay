@@ -94,22 +94,22 @@ export function Navbar() {
       {/* Top subtle radiant border light */}
       <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent pointer-events-none" />
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-13 sm:h-14 flex items-center justify-between">
         {/* Brand Logo with 3D Orbital Rings */}
-        <Link href="/" className="flex items-center gap-3 group select-none">
+        <Link href="/" className="flex items-center gap-2.5 group select-none">
           <NavbarLogo />
           <div>
-            <span className="font-black text-base tracking-tight text-slate-900 dark:text-white flex items-center gap-1 group-hover:opacity-95 transition-opacity">
+            <span className="font-black text-sm sm:text-base tracking-tight text-slate-900 dark:text-white flex items-center gap-1 group-hover:opacity-95 transition-opacity leading-tight">
               AEGIS<span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-600 to-blue-600 dark:from-cyan-400 dark:to-blue-400">PAY</span>
             </span>
-            <span className="text-[10px] font-mono tracking-wider uppercase block text-slate-500 dark:text-slate-400 font-medium">
+            <span className="text-[9px] font-mono tracking-wider uppercase block text-slate-500 dark:text-slate-400 font-medium leading-none mt-0.5">
               {showTechnicalDetails ? 'Autonomous Commerce Cockpit' : 'Smart Shopping & Savings'}
             </span>
           </div>
         </Link>
 
-        {/* Desktop Navigation Links (Icon-focused with hover tooltip) */}
-        <nav className="hidden lg:flex items-center gap-1.5 bg-slate-100/80 dark:bg-[#060b14]/80 p-1.5 rounded-2xl border border-slate-200/70 dark:border-white/10 shadow-inner">
+        {/* Desktop Navigation Links (Icon-focused with horizontal spacing on large screens, compact vertically) */}
+        <nav className="hidden lg:flex items-center gap-2 xl:gap-3.5 bg-slate-100/80 dark:bg-[#060b14]/80 px-2.5 py-1 rounded-xl border border-slate-200/70 dark:border-white/10 shadow-inner">
           {navLinks.map((link) => {
             const Icon = link.icon;
             const isActive =
@@ -122,7 +122,7 @@ export function Navbar() {
                 key={link.href}
                 href={link.href}
                 aria-label={link.label}
-                className={`group relative flex items-center justify-center p-2 sm:p-2.5 xl:p-2.5 rounded-xl transition-all duration-200 ${
+                className={`group relative flex items-center justify-center px-3 py-1.5 sm:px-3.5 xl:px-4.5 rounded-lg transition-all duration-200 ${
                   isActive
                     ? 'bg-white dark:bg-[#0e172a] text-cyan-700 dark:text-cyan-300 border border-slate-200 dark:border-cyan-500/30 shadow-xs shadow-black/5 dark:shadow-cyan-950/30 font-bold'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-white/50 dark:hover:bg-slate-800/40'
@@ -144,7 +144,7 @@ export function Navbar() {
         </nav>
 
         {/* Right Section: Auth Button, DevModeToggle, ThemeToggle, Mobile Hamburger */}
-        <div className="flex items-center gap-1.5 sm:gap-2 xl:gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5 xl:gap-3.5">
           {/* PayPal Auth Action Button / Read-Only Tracking Indicator */}
           {isTrackingMode ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 font-bold text-xs sm:text-sm font-mono shadow-xs">

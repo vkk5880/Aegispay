@@ -31,6 +31,7 @@ import {
   Key,
   Columns,
   X,
+  Sliders,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
@@ -97,6 +98,8 @@ export interface ConversationalAgentChatProps {
   userApiKey?: string;
   cartItemCount?: number;
   cartSubtotalCents?: number;
+  isSidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export function ConversationalAgentChat({
@@ -112,6 +115,8 @@ export function ConversationalAgentChat({
   userApiKey,
   cartItemCount = 0,
   cartSubtotalCents = 0,
+  isSidebarOpen = true,
+  onToggleSidebar,
 }: ConversationalAgentChatProps) {
   const { user } = useAuth();
   const { showTechnicalDetails } = useUiMode();
@@ -401,7 +406,7 @@ export function ConversationalAgentChat({
         <PrepareCheckoutToolUI />
 
         {/* Responsive Cockpit Container: Split-Screen Desktop & Mobile Drawer */}
-        <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 h-[calc(100dvh-13rem)] min-h-[480px] max-h-[720px] bg-white/80 dark:bg-[#070d1a]/90 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden backdrop-blur-md shadow-xl transition-all">
+        <div className="flex flex-col lg:flex-row h-full w-full bg-white/70 dark:bg-[#070d1a]/90 overflow-hidden backdrop-blur-md transition-all">
           {/* Main Left Panel: Conversation Thread & Input Bar */}
           <div
             className={`flex flex-col h-full transition-all duration-300 ${
@@ -409,13 +414,27 @@ export function ConversationalAgentChat({
             }`}
           >
             {/* Thread Header Toolbar */}
-            <div className="px-5 py-3.5 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-[#081124] dark:to-[#0a152e] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-3">
+            <div className="px-3 sm:px-5 py-2.5 sm:py-3 bg-gradient-to-r from-slate-50 to-slate-100 dark:from-[#081124] dark:to-[#0a152e] border-b border-slate-200 dark:border-slate-800/80 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3">
+                {onToggleSidebar && (
+                  <button
+                    type="button"
+                    onClick={onToggleSidebar}
+                    className="p-1.5 sm:p-2 rounded-lg text-slate-600 dark:text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                    title={isSidebarOpen ? 'Collapse Budget & Menu' : 'Expand Budget & Menu'}
+                  >
+                    <Sliders className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                    <span className="hidden sm:inline text-xs font-semibold">
+                      {isSidebarOpen ? 'Hide Menu' : 'Budget & Menu'}
+                    </span>
+                  </button>
+                )}
+
                 <div className="relative">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
-                    <Bot className="w-4 h-4" />
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-gradient-to-tr from-cyan-600 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
+                    <Bot className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </div>
-                  <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
+                  <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-900" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">

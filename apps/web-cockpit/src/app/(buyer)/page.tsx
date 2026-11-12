@@ -11,6 +11,7 @@ import { PayPalV6SdkMount } from '@/components/buyer/PayPalV6SdkMount';
 import { HitlApprovalModal, HitlPushApprovalRequest } from '@/components/buyer/HitlApprovalModal';
 import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransmuter';
 import { ConversationalAgentChat } from '@/components/buyer/ConversationalAgentChat';
+import { BuyerSidebar } from '@/components/buyer/BuyerSidebar';
 import { SpendAllowanceHeader } from '@/components/buyer/SpendAllowanceHeader';
 import { UserSettingsDrawer, UserSettings, DEFAULT_USER_SETTINGS } from '@/components/buyer/UserSettingsDrawer';
 import { UnifiedCartDrawer } from '@/components/buyer/UnifiedCartDrawer';
@@ -23,6 +24,7 @@ import {
   ShieldCheck,
   ShoppingBag,
   MessageSquare,
+  X,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
@@ -60,6 +62,16 @@ export default function BuyerPortalPage() {
   // User Settings State & Drawer
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+
+  // Left Collapsible Sidebar state & Developer Modal state
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isDevModalOpen, setIsDevModalOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setIsSidebarOpen(false);
+    }
+  }, []);
 
   // Deep Observability Lifecycle Mount Logging
   useEffect(() => {
@@ -367,48 +379,25 @@ export default function BuyerPortalPage() {
   );
 
   return (
-    <div className="flex-1 flex flex-col transition-colors">
-      {/* Consumer Protection Status Bar */}
-      <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-[#070d18]/70 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-              {showTechnicalDetails ? 'AegisPay Autonomous Consumer Portal' : 'AegisPay Smart Shopping'}
-            </span>
-            <span className="text-slate-300 dark:text-slate-700">|</span>
-            <span className="text-xs text-slate-600 dark:text-slate-400">
-              {showTechnicalDetails
-                ? 'One-Time Vault v3 Onboarded • Decoupled Platform Rebates'
-                : '1-Click PayPal Checkout • Instant Cashback & Savings'}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3 font-mono text-xs">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-emerald-700 dark:text-emerald-400 font-medium">
-              {showTechnicalDetails ? 'Atomic Spend Enforcer Active' : 'Budget Protection Active'}
-            </span>
-          </div>
-        </div>
-      </div>
-
+    <div className="flex-1 flex flex-col h-[calc(100dvh-3.25rem)] sm:h-[calc(100dvh-3.5rem)] max-h-[calc(100dvh-3.25rem)] sm:max-h-[calc(100dvh-3.5rem)] overflow-hidden transition-colors relative">
       {/* Toast Notification */}
       {notification && (
-        <div className="fixed top-20 right-6 z-50 bg-cyan-900/95 dark:bg-cyan-950/95 border border-cyan-400 dark:border-cyan-500/50 text-white dark:text-cyan-200 text-xs px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md animate-fade-in font-mono">
+        <div className="fixed top-16 right-6 z-50 bg-cyan-900/95 dark:bg-cyan-950/95 border border-cyan-400 dark:border-cyan-500/50 text-white dark:text-cyan-200 text-xs px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md animate-fade-in font-mono">
           {notification}
         </div>
       )}
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-3 sm:py-4 space-y-3 sm:space-y-4">
-        {/* Persistent Spend Allowance Header Bar */}
-        <SpendAllowanceHeader
+      {/* Main Fullscreen Split-Layout: Left Collapsible Sidebar + Right Fixed Chatbox */}
+      <div className="flex-1 min-h-0 flex flex-row w-full h-full overflow-hidden relative">
+        {/* Left Collapsible Sidebar with Vertical Budget & User Quick Navigation */}
+        <BuyerSidebar
+          isOpen={isSidebarOpen}
+          onToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           maxBudgetCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
           spentCents={spentCents}
-          isConfigured={isAuthorized || (showTechnicalDetails && !!activeMandate)}
+          cartItemCount={cartItemCount}
           onOpenSettings={() => {
-            logger.info('[BuyerPage:SettingsDrawer] Opening user settings drawer from spend header');
+            logger.info('[BuyerPage:SettingsDrawer] Opening user settings drawer from sidebar');
             setIsSettingsOpen(true);
           }}
           onConnectPayPal={async () => {
@@ -422,77 +411,135 @@ export default function BuyerPortalPage() {
               openProfileSidebar();
             }
           }}
+          onOpenCart={() => {
+            if (isTrackingMode) {
+              showNotification('Cart access and purchases are disabled in read-only tracking mode.');
+              return;
+            }
+            logger.info('[BuyerPage:CartDrawer] Opening cart drawer from sidebar');
+            setIsCartOpen(true);
+          }}
         />
 
-        {/* Main Consumer Shopping Concierge Chat */}
-        <section className="space-y-3 sm:space-y-4">
-          <ConversationalAgentChat
-            budgetCapCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
-            zipCode={userSettings.zipCode}
-            developerModeEnabled={userSettings.developerModeEnabled}
-            selectedModel={userSettings.aiModel}
-            userApiKey={userSettings.userApiKey}
-            cartItemCount={cartItemCount}
-            cartSubtotalCents={optimizationData.net_buyer_expenditure_cents}
-            onOpenCart={() => {
-              if (isTrackingMode) {
-                showNotification('Cart access and purchases are disabled in read-only tracking mode.');
-                return;
-              }
-              logger.info('[BuyerPage:CartDrawer] Opening cart drawer from chat recommendation');
-              setIsCartOpen(true);
-            }}
-            onPurchaseConfirmed={(result) => {
-              logger.info('[BuyerPage:Purchase] Purchase confirmed from chat flow', {
-                orderId: result.orderId,
-                authorizedCents: result.authorizedCents,
-              });
-              recordPurchaseSpend(result.authorizedCents);
-              showNotification(`1-Click Vaulted Order ${result.orderId} Authorized!`);
-            }}
-            onSelectProductForBuy={handleSelectProductForBuy}
-            onSelectProductForDetails={(p) => {
-              logger.debug('[BuyerPage:Details] Product details inspected from chat', {
-                productId: p.product_id,
-                title: p.title,
-              });
-              showNotification(`Loaded technical specifications for ${p.title}`);
-            }}
-            onSelectProductForCompare={(p) => {
-              logger.debug('[BuyerPage:Compare] Comparison matrix viewed from chat', {
-                productId: p.product_id,
-                title: p.title,
-              });
-              showNotification(`Generated side-by-side comparison matrix for ${p.title}`);
-            }}
-          />
-        </section>
-
-        {/* Spending Limits & Cryptographic Hardware Signer (Visible only when Dev Mode is ON) */}
-        {showTechnicalDetails && (
-          <div className="pt-2">
-            <details className="group border border-slate-200 dark:border-slate-800 rounded-2xl bg-white/70 dark:bg-[#070e1c]/70 p-4 transition-colors">
-              <summary className="cursor-pointer text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between list-none">
-                <span className="flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                  <span>
-                    ▾ Inspect Cryptographic Proofs & Hardware Spend Signer (Ed25519) — For Auditors
+        {/* Right Main Chatbox Area (Fixed screen, does not slide) */}
+        <main className="flex-1 min-w-0 h-full flex flex-col overflow-hidden relative bg-white/40 dark:bg-[#060b14]/40">
+          {/* Developer Mode Top Window Banner (Opens Modal Window, doesn't shift chatbox) */}
+          {showTechnicalDetails && (
+            <div className="px-3 sm:px-4 py-1.5 bg-gradient-to-r from-cyan-950/70 via-slate-900/70 to-blue-950/70 border-b border-cyan-500/20 flex items-center justify-between text-xs text-cyan-300 shrink-0 backdrop-blur-md">
+              <div className="flex items-center gap-2 min-w-0 truncate">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+                <span className="font-mono text-[11px] font-bold truncate">
+                  Developer & Auditor Mode Active
+                </span>
+                {activeMandate && (
+                  <span className="hidden md:inline font-mono text-[10px] text-cyan-400/80">
+                    ({activeMandate.mandate_id})
                   </span>
-                </span>
-                <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
-                  {activeMandate?.mandate_id || 'Active Hardware Key'}
-                </span>
-              </summary>
-              <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
-                <CryptographicMandateSigner
-                  onMandateGenerated={handleMandateGenerated}
-                  externalBudgetCents={externalBudgetCents}
-                />
+                )}
               </div>
-            </details>
+              <button
+                type="button"
+                onClick={() => setIsDevModalOpen(true)}
+                className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-mono text-[11px] flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">Inspect Hardware Signer (Ed25519)</span>
+                <span className="sm:hidden">Hardware Signer</span>
+              </button>
+            </div>
+          )}
+
+          {/* Fixed Chatbox (fills entire height smoothly, only message content scrolls) */}
+          <div className="flex-1 min-h-0 h-full overflow-hidden">
+            <ConversationalAgentChat
+              budgetCapCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
+              zipCode={userSettings.zipCode}
+              developerModeEnabled={userSettings.developerModeEnabled}
+              selectedModel={userSettings.aiModel}
+              userApiKey={userSettings.userApiKey}
+              cartItemCount={cartItemCount}
+              cartSubtotalCents={optimizationData.net_buyer_expenditure_cents}
+              isSidebarOpen={isSidebarOpen}
+              onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+              onOpenCart={() => {
+                if (isTrackingMode) {
+                  showNotification('Cart access and purchases are disabled in read-only tracking mode.');
+                  return;
+                }
+                logger.info('[BuyerPage:CartDrawer] Opening cart drawer from chat recommendation');
+                setIsCartOpen(true);
+              }}
+              onPurchaseConfirmed={(result) => {
+                logger.info('[BuyerPage:Purchase] Purchase confirmed from chat flow', {
+                  orderId: result.orderId,
+                  authorizedCents: result.authorizedCents,
+                });
+                recordPurchaseSpend(result.authorizedCents);
+                showNotification(`1-Click Vaulted Order ${result.orderId} Authorized!`);
+              }}
+              onSelectProductForBuy={handleSelectProductForBuy}
+              onSelectProductForDetails={(p) => {
+                logger.debug('[BuyerPage:Details] Product details inspected from chat', {
+                  productId: p.product_id,
+                  title: p.title,
+                });
+                showNotification(`Loaded technical specifications for ${p.title}`);
+              }}
+              onSelectProductForCompare={(p) => {
+                logger.debug('[BuyerPage:Compare] Comparison matrix viewed from chat', {
+                  productId: p.product_id,
+                  title: p.title,
+                });
+                showNotification(`Generated side-by-side comparison matrix for ${p.title}`);
+              }}
+            />
           </div>
-        )}
-      </main>
+        </main>
+      </div>
+
+      {/* Developer Hardware Signer Modal Window (Closes on outside click or X button) */}
+      {showTechnicalDetails && isDevModalOpen && (
+        <div
+          onClick={() => setIsDevModalOpen(false)}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl max-h-[85vh] overflow-y-auto bg-white dark:bg-[#091122] border border-cyan-500/40 rounded-2xl p-5 shadow-2xl relative space-y-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-600 dark:text-cyan-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+                    Cryptographic Proofs & Hardware Spend Signer (Ed25519)
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                    Deterministic SPKI Mandate Signing for Autonomous Agents
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDevModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <CryptographicMandateSigner
+              onMandateGenerated={(mandate) => {
+                handleMandateGenerated(mandate);
+                setIsDevModalOpen(false);
+              }}
+              externalBudgetCents={externalBudgetCents}
+            />
+          </div>
+        </div>
+      )}
 
       {/* User Settings Drawer */}
       <UserSettingsDrawer
@@ -577,12 +624,6 @@ export default function BuyerPortalPage() {
         }}
       />
 
-      {/* Footer */}
-      <footer className="border-t border-slate-200 dark:border-slate-800 py-6 bg-slate-100 dark:bg-[#080d19]/80 text-center text-xs text-slate-600 dark:text-slate-400 font-mono transition-colors">
-        {showTechnicalDetails
-          ? 'AegisPay Architecture • Autonomous Dual-Sided Agentic Commerce Platform • Build What\'s Next with PayPal 2026'
-          : 'AegisPay • Smart Shopping Assistant & Cashback • Protected by PayPal 2026'}
-      </footer>
     </div>
   );
 }
