@@ -22,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
@@ -42,7 +42,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="bg-slate-50 dark:bg-[#060b14] text-slate-900 dark:text-slate-100 antialiased min-h-screen flex flex-col transition-colors duration-200">
+      <body className="bg-slate-50 dark:bg-[#060b14] text-slate-900 dark:text-slate-100 antialiased h-full min-h-screen flex flex-col transition-colors duration-200">
         <ThemeProvider>
           <UiModeProvider>
             <AuthProvider>

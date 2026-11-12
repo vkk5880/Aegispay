@@ -461,7 +461,7 @@ export function ConversationalAgentChat({
         <div className="flex-1 flex flex-col lg:flex-row h-full w-full min-h-0 min-w-0 bg-white/70 dark:bg-[#070d1a]/90 overflow-hidden backdrop-blur-md transition-all">
           {/* Main Left Panel: Conversation Thread & Input Bar */}
           <div
-            className={`flex-1 flex flex-col h-full min-h-0 min-w-0 transition-all duration-300 ${
+            className={`flex-1 min-h-0 flex flex-col min-w-0 overflow-hidden transition-all duration-300 ${
               isSidePanelOpen ? 'lg:w-3/5 w-full' : 'w-full'
             }`}
           >
@@ -574,8 +574,11 @@ export function ConversationalAgentChat({
             </div>
 
             {/* assistant-ui Thread Messages Viewport */}
-            <ThreadPrimitive.Root className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
-              <ThreadPrimitive.Viewport className="flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain px-3 sm:px-5 py-4 space-y-4 scroll-smooth">
+            <ThreadPrimitive.Root className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden relative">
+              <ThreadPrimitive.Viewport
+                className="flex-1 min-h-0 min-w-0 h-0 overflow-y-auto overscroll-contain px-3 sm:px-5 py-4 space-y-4 scroll-smooth"
+                style={{ minHeight: 0 }}
+              >
                 <ThreadPrimitive.Messages
                   components={{
                     Message: () => (
@@ -690,19 +693,21 @@ export function ConversationalAgentChat({
               </ThreadPrimitive.Viewport>
 
               {/* Follow-up Quick Suggestion Chips */}
-              <div className="px-5 py-2 bg-slate-50/50 dark:bg-[#080f20]/50 border-t border-slate-100 dark:border-slate-800/60 flex flex-wrap gap-1.5 shrink-0">
-                {promptSuggestions.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => handleSendMessage(suggestion)}
-                    className="px-2.5 py-1 rounded-full bg-white dark:bg-slate-800 hover:bg-cyan-500/10 text-slate-600 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[11px] font-medium transition-all border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1"
-                  >
-                    <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
-                    <span>{suggestion}</span>
-                  </button>
-                ))}
-              </div>
+              {promptSuggestions.length > 0 && (
+                <div className="px-5 py-2 bg-slate-50/50 dark:bg-[#080f20]/50 border-t border-slate-100 dark:border-slate-800/60 flex flex-wrap gap-1.5 shrink-0">
+                  {promptSuggestions.map((suggestion, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSendMessage(suggestion)}
+                      className="px-2.5 py-1 rounded-full bg-white dark:bg-slate-800 hover:bg-cyan-500/10 text-slate-600 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[11px] font-medium transition-all border border-slate-200 dark:border-slate-700 shadow-2xs cursor-pointer active:scale-95 flex items-center gap-1"
+                    >
+                      <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
+                      <span>{suggestion}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
 
               {/* Phase 3 Interactive Multi-Chip ChatInputBar */}
               <div className="shrink-0 min-w-0 z-20">
