@@ -1112,7 +1112,29 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   // MCP Streamable HTTP JSON-RPC 2.0 Binding (/mcp) (docs/mcp-binding.md)
   // Conforming to MCP TypeScript SDK v2 & 2026-07-28 Protocol Revision
   // =========================================================================
-  const validateHost = hostHeaderValidation(['api.aegispay.com', 'localhost', '127.0.0.1', '::1', '[::1]']);
+  const allowedHostnames = [
+    'api.aegispay.com',
+    'localhost',
+    '127.0.0.1',
+    '::1',
+    '[::1]',
+    process.env.RENDER_EXTERNAL_HOSTNAME,
+    ...(process.env.ALLOWED_HOSTS ? process.env.ALLOWED_HOSTS.split(',').map((h) => h.trim()) : []),
+  ].filter(Boolean) as string[];
+
+  const validateHost = (req: any, res: any): boolean => {
+    const rawHost = req.headers?.host || '';
+    const hostname = rawHost.split(':')[0].toLowerCase();
+    if (
+      allowedHostnames.includes(hostname) ||
+      hostname.endsWith('.onrender.com') ||
+      hostname.endsWith('.cloudshell.dev')
+    ) {
+      return true;
+    }
+    const officialValidator = hostHeaderValidation(allowedHostnames);
+    return officialValidator(req, res);
+  };
   const mcpServerInstance = createMCPServer();
   const mcpHandler = createMcpHandler(() => mcpServerInstance);
   const nodeHandler = toNodeHandler(mcpHandler);

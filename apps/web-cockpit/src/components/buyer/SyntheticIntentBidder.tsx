@@ -50,29 +50,63 @@ export function SyntheticIntentBidder({
   const handleMintVaultBid = async () => {
     setIsMinting(true);
     try {
-      const voucherId = `syn_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
-      const setupTokenId = `vault_setup_${Date.now()}`;
-
-      // Merchant margin floor allows 12% discount or 80% of saved customer acquisition cost
       const allowedDiscount = Math.max(0.10, commissionRebateRate * 0.8);
       const merchantFloorCents = Math.round(basketTotalCents * (1 - allowedDiscount));
       const autoCleared = budgetCapCents >= merchantFloorCents;
 
-      // Simulated latency
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      let result: any = null;
 
-      const result = {
-        voucher_id: voucherId,
-        mandate_id: mandate?.mandate_id || 'vch_default_9f8a',
-        paypal_vault_setup_token_id: setupTokenId,
-        buyer_bid_cents: budgetCapCents,
-        retail_offer_cents: basketTotalCents,
-        overage_percentage: overagePercentage,
-        merchant_min_floor_cents: merchantFloorCents,
-        auto_cleared: autoCleared,
-        negotiation_status: autoCleared ? 'ACCEPTED_AND_CAPTURED' : 'OPEN_BID',
-        resulting_paypal_order_id: autoCleared ? `ORD-SYN-${Date.now()}` : undefined,
-      };
+      try {
+        const res = await fetch('/api/buyer/synthetic-bid', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mandate_id: mandate?.mandate_id || 'vch_default_9f8a',
+            buyer_bid_cents: budgetCapCents,
+            retail_offer_cents: basketTotalCents,
+            merchant_domain: merchantDomain,
+          }),
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.bid) {
+            result = {
+              voucher_id: json.bid.voucher_id,
+              mandate_id: json.bid.mandate_id,
+              paypal_vault_setup_token_id: json.bid.paypal_vault_setup_token_id,
+              buyer_bid_cents: json.bid.buyer_bid_cents,
+              retail_offer_cents: json.bid.retail_offer_cents,
+              overage_percentage: overagePercentage,
+              merchant_min_floor_cents: merchantFloorCents,
+              auto_cleared: autoCleared,
+              negotiation_status: autoCleared ? 'ACCEPTED_AND_CAPTURED' : 'OPEN_BID',
+              resulting_paypal_order_id: autoCleared ? `ORD-SYN-${Date.now()}` : undefined,
+            };
+          }
+        }
+      } catch (networkErr) {
+        console.warn('Backend synthetic bid endpoint unavailable; using local simulation fallback', networkErr);
+      }
+
+      if (!result) {
+        const voucherId = `syn_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+        const setupTokenId = `vault_setup_${Date.now()}`;
+        await new Promise((resolve) => setTimeout(resolve, 600));
+
+        result = {
+          voucher_id: voucherId,
+          mandate_id: mandate?.mandate_id || 'vch_default_9f8a',
+          paypal_vault_setup_token_id: setupTokenId,
+          buyer_bid_cents: budgetCapCents,
+          retail_offer_cents: basketTotalCents,
+          overage_percentage: overagePercentage,
+          merchant_min_floor_cents: merchantFloorCents,
+          auto_cleared: autoCleared,
+          negotiation_status: autoCleared ? 'ACCEPTED_AND_CAPTURED' : 'OPEN_BID',
+          resulting_paypal_order_id: autoCleared ? `ORD-SYN-${Date.now()}` : undefined,
+        };
+      }
 
       setBidResult(result);
       setBidSubmitted(true);
