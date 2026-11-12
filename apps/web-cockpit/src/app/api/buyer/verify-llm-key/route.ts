@@ -13,7 +13,7 @@ export async function POST(req: Request) {
     );
   }
 
-  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://127.0.0.1:4000';
 
   // Try verifying via orchestrator first
   try {

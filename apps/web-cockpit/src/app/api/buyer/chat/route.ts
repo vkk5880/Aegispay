@@ -104,7 +104,7 @@ async function searchChannel3Live(query: string, limit = 50): Promise<import('@a
 }
 
 export async function POST(req: Request) {
-  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://127.0.0.1:4000';
   const body = await req.json();
   const isStreamRequested = Boolean(
     body.stream ||
@@ -565,7 +565,7 @@ export async function POST(req: Request) {
           allowedCategories: rawAllowedCats,
         });
         const blockedPayload: ChatResponsePayload = {
-          action: 'DISCOVER',
+          action: 'CHAT',
           markdown: `### ⛔ Purchase Blocked: Category Not Authorized\n\nYour active spend mandate does not permit purchases in category **"${unauthorizedCategoryProduct.category_id}"** for item **${unauthorizedCategoryProduct.title}**.\n\n- **Authorized Categories:** \`${rawAllowedCats.join(', ')}\`\n- **Item Category:** \`${unauthorizedCategoryProduct.category_id}\`\n\n> 🛡️ *To allow this purchase, please update your Authorized Categories in Settings or during PayPal Sandbox Login.*`,
           products: [unauthorizedCategoryProduct],
           thought_trace: [
@@ -594,7 +594,7 @@ export async function POST(req: Request) {
           allowedMerchants: rawAllowedMerchants,
         });
         const blockedPayload: ChatResponsePayload = {
-          action: 'DISCOVER',
+          action: 'CHAT',
           markdown: `### ⛔ Purchase Blocked: Store Not in Authorized Whitelist\n\nStore **\`${unauthorizedMerchantProduct.merchant_domain}\`** is not in your authorized merchant whitelist for item **${unauthorizedMerchantProduct.title}**.\n\n- **Allowed Stores Whitelist:** \`${rawAllowedMerchants.join(', ')}\`\n- **Attempted Store:** \`${unauthorizedMerchantProduct.merchant_domain}\`\n\n> 🛡️ *To allow purchasing from this store, add \`${unauthorizedMerchantProduct.merchant_domain}\` to your Authorized Store Whitelist in Settings or during PayPal Sandbox Login.*`,
           products: [unauthorizedMerchantProduct],
           thought_trace: [

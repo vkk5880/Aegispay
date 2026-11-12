@@ -897,7 +897,8 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+      const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
       const geminiResponse = await fetch(geminiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

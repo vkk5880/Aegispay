@@ -251,7 +251,8 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
     const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (apiKey) {
       try {
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
         const parts: any[] = [];
         if (prompt) {
           parts.push({

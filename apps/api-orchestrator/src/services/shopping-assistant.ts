@@ -21,6 +21,14 @@ import {
 } from '@aegispay/shared-types';
 
 export const mastraLogger = createLogger('Mastra:Assistant');
+
+// Ensure Google AI provider keys are aliased if GEMINI_API_KEY was provided
+if (!process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
+  process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
+}
+if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && process.env.GEMINI_API_KEY) {
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
+}
 import { Agent } from '@mastra/core/agent';
 import { createWorkflow, createStep } from '@mastra/core/workflows';
 import { z } from 'zod';

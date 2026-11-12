@@ -88,8 +88,9 @@ export async function POST(req: NextRequest): Promise<NextResponse<AudioTranscri
       audioBytesApprox: Math.round((audioBase64.length * 3) / 4),
     });
 
-    // Call Google's free Gemini Flash multimodal audio API (gemini-2.5-flash or gemini-1.5-flash)
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+    // Call Google's free Gemini Flash multimodal audio API (gemini-3.5-flash-lite or gemini-3.8-flash)
+    const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(geminiUrl, {
       method: 'POST',

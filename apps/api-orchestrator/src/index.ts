@@ -21,6 +21,14 @@ import { http402Plugin } from './middleware/http402-interceptor.js';
 
 dotenv.config();
 
+// Ensure Google/Mastra AI provider keys are aliased if only GEMINI_API_KEY was supplied
+if (!process.env.GOOGLE_API_KEY && process.env.GEMINI_API_KEY) {
+  process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
+}
+if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY && process.env.GEMINI_API_KEY) {
+  process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
+}
+
 export const orchestratorLogger = createLogger('API:Orchestrator');
 
 export async function buildApp() {

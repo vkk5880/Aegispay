@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ sessionId: string }> }
 ) {
   const { sessionId } = await params;
-  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://127.0.0.1:4000';
   apiLogger.debug(`GET /api/buyer/chat/sessions/${sessionId} received`);
 
   try {

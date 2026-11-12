@@ -3,7 +3,7 @@ import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
 export async function GET() {
-  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://127.0.0.1:4000';
   apiLogger.debug('GET /api/integrations/verify checking upstream orchestrator...');
 
   try {

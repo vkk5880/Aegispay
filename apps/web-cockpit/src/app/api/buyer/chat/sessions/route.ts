@@ -9,7 +9,7 @@ export async function GET(req: Request) {
     req.headers.get('x-user-id') ||
     'demo';
 
-  const orchestratorUrl = getApiBaseUrl() || 'http://localhost:4000';
+  const orchestratorUrl = getApiBaseUrl() || 'http://127.0.0.1:4000';
   apiLogger.debug('GET /api/buyer/chat/sessions received');
 
   try {
