@@ -14,6 +14,7 @@ import { toNodeHandler, hostHeaderValidation } from '@modelcontextprotocol/node'
 import { defaultTaxEstimator } from '../services/tax-estimator.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
+import { authenticateUser } from '../middleware/auth.js';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 
 export const logger = createLogger('API:Routes:ACP');
@@ -1168,7 +1169,7 @@ export const acpRoutes: FastifyPluginAsync = async (fastify) => {
   /**
    * POST /acp/payment_handler
    */
-  fastify.post('/acp/payment_handler', async (request, reply) => {
+  fastify.post('/acp/payment_handler', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('Executing ACP payment handler request', { body: sanitizeForLogging(request.body) });
     const parseResult = ACPPaymentHandlerExecuteSchema.safeParse(request.body);
     if (!parseResult.success) {

@@ -147,7 +147,24 @@ export class AtomicSpendEnforcer {
     this.dbFallback = dbFallback;
   }
 
-  async reserveBudget(redisClient: Redis, params: ReservationParams): Promise<ReservationResult> {
+  async reserveBudget(
+    clientOrParams: Redis | ReservationParams,
+    paramsOptional?: ReservationParams
+  ): Promise<ReservationResult> {
+    let redisClient: Redis | null = null;
+    let params: ReservationParams;
+
+    if (paramsOptional) {
+      redisClient = clientOrParams as Redis;
+      params = paramsOptional;
+    } else if (clientOrParams && 'mandate_id' in (clientOrParams as any)) {
+      redisClient = this.defaultRedis;
+      params = clientOrParams as ReservationParams;
+    } else {
+      redisClient = clientOrParams as Redis;
+      params = paramsOptional!;
+    }
+
     const endTimer = logger.time(`RedisLua:reserveBudget:${params.mandate_id}`);
     logger.info('Executing atomic Redis Lua reserveBudget', sanitizeForLogging(params));
 
@@ -159,6 +176,24 @@ export class AtomicSpendEnforcer {
       return {
         success: false,
         error_code: 'ERR_INVALID_SPEND_AMOUNT'
+      };
+    }
+
+    if (!redisClient) {
+      const isProduction = process.env.NODE_ENV === 'production';
+      if (isProduction) {
+        logger.error('Redis Lua reservation rejected: active Redis client strictly required in production');
+        endTimer('Redis fail-closed');
+        return {
+          success: false,
+          error_code: 'ERR_FAIL_CLOSED_REDIS_REQUIRED'
+        };
+      }
+      logger.warn('Executing reserveBudget in local mock mode without active Redis client');
+      endTimer('Local mock reservation granted');
+      return {
+        success: true,
+        new_spent: params.requested_cents
       };
     }
 

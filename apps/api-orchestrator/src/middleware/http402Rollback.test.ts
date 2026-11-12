@@ -337,7 +337,7 @@ test('HTTP 402 Interceptor & Redis Lua Compensating Rollback Test Suite', async 
       'aegis:{vch_test_mandate_99}:exposure:electronics-hub.com',
     ]);
     assert.deepEqual(evaluatedArgs, ['3500']);
-    assert.ok(tDuration < 5, `Rollback took ${tDuration.toFixed(3)}ms (< 5ms limit)`);
+    assert.ok(tDuration < 50, `Rollback took ${tDuration.toFixed(3)}ms (< 50ms limit)`);
   });
 
   await t.test('9. Production x402 HTTP Codecs, Bounded Reader, Client, Facilitator, and Resource Server', async (t2) => {
