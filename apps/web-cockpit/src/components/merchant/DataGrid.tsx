@@ -221,14 +221,32 @@ export function DataGrid({
     // Restore saved layout state if available in localStorage
     try {
       if (typeof window !== 'undefined') {
+        // Clean up legacy colliding 'default' key if it exists
+        localStorage.removeItem('aegispay_grid_layout_default');
+
         const saved = localStorage.getItem(`aegispay_grid_layout_${tableNameResolved}`);
         if (saved) {
           const { columnState, filterModel } = JSON.parse(saved);
           if (columnState && Array.isArray(columnState)) {
-            params.api.applyColumnState({ state: columnState, applyOrder: true });
+            const currentCols = new Set(params.api.getAllGridColumns().map((c) => c.getColId()));
+            const matchingCount = columnState.filter((s: any) => currentCols.has(s.colId)).length;
+            // Only apply if at least half of current columns are represented in the state
+            if (matchingCount > 0 && matchingCount >= currentCols.size * 0.4) {
+              params.api.applyColumnState({ state: columnState, applyOrder: true });
+            } else {
+              logger.warn('[DataGrid] Skipping mismatched saved column state for table', {
+                tableName: tableNameResolved,
+                matchingCount,
+                totalCurrent: currentCols.size,
+              });
+            }
           }
           if (filterModel && typeof filterModel === 'object') {
-            params.api.setFilterModel(filterModel);
+            const currentCols = new Set(params.api.getAllGridColumns().map((c) => c.getColId()));
+            const hasMatchingFilter = Object.keys(filterModel).some((key) => currentCols.has(key));
+            if (hasMatchingFilter) {
+              params.api.setFilterModel(filterModel);
+            }
           }
           logger.info('[DataGrid] Restored saved grid layout', { tableName: tableNameResolved });
         }
@@ -260,8 +278,10 @@ export function DataGrid({
       if (typeof window !== 'undefined') {
         localStorage.removeItem(storageKey);
       }
+      setSearch('');
       gridApi.resetColumnState();
       gridApi.setFilterModel(null);
+      gridApi.setQuickFilter('');
       setActionNotice('Grid layout reset to factory defaults');
       setTimeout(() => setActionNotice(null), 3000);
       logger.info('[DataGrid] Reset grid layout state to defaults', { storageKey });
@@ -269,6 +289,16 @@ export function DataGrid({
       logger.warn('[DataGrid] Failed to reset layout state', err);
     }
   }, [gridApi, tableNameResolved]);
+
+  const handleClearAllFilters = useCallback(() => {
+    setSearch('');
+    if (gridApi) {
+      gridApi.setFilterModel(null);
+      gridApi.setQuickFilter('');
+    }
+    setActionNotice('Filters and search cleared');
+    setTimeout(() => setActionNotice(null), 3000);
+  }, [gridApi]);
 
   const sanitizedSearch = sanitizeQuickFilter(search);
 
@@ -595,15 +625,23 @@ export function DataGrid({
             ))}
           </div>
 
-          {/* Reset Layout State Button */}
+          {/* Clear Filters / Reset Buttons */}
+          <button
+            type="button"
+            onClick={handleClearAllFilters}
+            title="Clear all column filters and search text"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#080d1a] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-xs font-medium transition-all cursor-pointer shadow-xs"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Clear Filters</span>
+          </button>
           <button
             type="button"
             onClick={handleResetLayout}
             title="Reset Grid Layout & Column States to Defaults"
             className="hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-[#080d1a] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 text-xs font-medium transition-all cursor-pointer shadow-xs"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset</span>
+            <span>Reset Layout</span>
           </button>
         </div>
 

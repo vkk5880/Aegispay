@@ -16,6 +16,7 @@ export function EndpointPage({
   columns,
   headerAction,
   embedded = false,
+  tableName,
 }: {
   title: string;
   calls: string[];
@@ -25,8 +26,10 @@ export function EndpointPage({
   columns: ColDef<Row>[];
   headerAction?: React.ReactNode;
   embedded?: boolean;
+  tableName?: string;
 }) {
   const { showTechnicalDetails } = useUiMode();
+  const resolvedTableName = tableName || title.toLowerCase().replace(/[^a-z0-9]+/g, '_');
 
   if (embedded) {
     return (
@@ -53,7 +56,7 @@ export function EndpointPage({
 
         {/* AG Grid Data Table */}
         <div className="flex min-h-[500px] flex-1 flex-col">
-          <DataGrid rows={rows} columns={columns} />
+          <DataGrid rows={rows} columns={columns} tableName={resolvedTableName} />
         </div>
       </div>
     );
@@ -108,7 +111,7 @@ export function EndpointPage({
       </div>
 
       <div className="flex min-h-[520px] flex-1 flex-col">
-        <DataGrid rows={rows} columns={columns} />
+        <DataGrid rows={rows} columns={columns} tableName={resolvedTableName} />
       </div>
     </div>
   );
