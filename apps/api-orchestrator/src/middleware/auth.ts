@@ -251,23 +251,27 @@ export async function authenticateUser(request: FastifyRequest, reply: FastifyRe
     hasSessionTokenHeader: Boolean(sessionTokenHeader),
   });
 
-  // Check SIWX bypass
+  // Check SIWX (Sign-In-With-X) wallet proof - strictly restricted to test environment only
   const siwxHeader = request.headers['sign-in-with-x'] || request.headers['SIGN-IN-WITH-X'];
   if (typeof siwxHeader === 'string' && siwxHeader.trim().length > 0) {
-    logger.info('Sign-In-With-X (SIWX) wallet proof detected in auth middleware; bypassing user auth', {
-      path,
-      siwxPreview: `${siwxHeader.trim().slice(0, 16)}...`,
-    });
-    const siwxUser: AuthUser = {
-      id: 'siwx-wallet-user',
-      tenantId: 'tenant-siwx-wallet',
-      role: 'buyer',
-      isAnonymous: false,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + 86400,
-    };
-    request.user = siwxUser;
-    return;
+    if (process.env.NODE_ENV === 'test') {
+      logger.info('Sign-In-With-X (SIWX) wallet proof simulated in test environment', {
+        path,
+        siwxPreview: `${siwxHeader.trim().slice(0, 16)}...`,
+      });
+      const siwxUser: AuthUser = {
+        id: 'siwx-wallet-user',
+        tenantId: 'tenant-siwx-wallet',
+        role: 'buyer',
+        isAnonymous: false,
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 86400,
+      };
+      request.user = siwxUser;
+      return;
+    } else {
+      logger.warn('Sign-In-With-X unverified header rejected in production/live environment', { path });
+    }
   }
 
   let rawToken: string | undefined;
@@ -317,10 +321,12 @@ export async function authenticateUser(request: FastifyRequest, reply: FastifyRe
     logger.warn('Presented session token was invalid or expired', { path });
   }
 
-  const isTestOrDev = process.env.NODE_ENV === 'test' || process.env.NODE_ENV !== 'production';
+  const isProduction = process.env.NODE_ENV === 'production';
+  const isTestOrDev = process.env.NODE_ENV === 'test' || !isProduction;
   const isDemoMode = process.env.NEXT_PUBLIC_DEMO_MODE === 'true';
   const isGuestHeader = request.headers['x-guest-session'] === 'true';
-  const isGuestAllowed = isTestOrDev || isDemoMode || isGuestHeader;
+  // Strict Security: In production, guest bypass headers are strictly disallowed unless DEMO_MODE is explicitly enabled
+  const isGuestAllowed = isTestOrDev || isDemoMode || (isGuestHeader && !isProduction);
 
   logger.debug('Evaluating guest authorization permissions', {
     isTestOrDev,

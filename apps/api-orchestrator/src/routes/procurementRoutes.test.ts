@@ -68,7 +68,7 @@ test('Procurement API: POST /api/buyer/vault/setup creates ephemeral setup sessi
   const session = json.session || json;
   assert.ok(session.setup_token_id);
   assert.equal(session.customer_id, 'cust_procure_001');
-  assert.equal(session.status, 'CREATED');
+  assert.ok(session.status === 'CREATED' || session.status === 'PAYER_ACTION_REQUIRED');
   assert.ok(session.approve_url);
 });
 

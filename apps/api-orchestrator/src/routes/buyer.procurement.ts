@@ -7,7 +7,7 @@ import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultSyntheticIntentEngine } from '../services/synthetic-intent.js';
 import { defaultCounterBidEngine } from '../services/counter-bid-engine.js';
 import { defaultVaultOnboardingService } from '../services/vault-onboarding.js';
-import { defaultAtomicSpendEnforcer } from '@aegispay/mcp-enforcer';
+import { defaultAtomicSpendEnforcer, verifySessionMandateSignature } from '@aegispay/mcp-enforcer';
 import { SpendMandateSchema } from '@aegispay/shared-types';
 import { renderWorkflowClient } from '../services/render-workflow-client.js';
 import { authenticateUser, createOrderTrackingToken } from '../middleware/auth.js';
@@ -33,6 +33,7 @@ const KnapsackRequestSchema = z.object({
 const AuthorizeRequestSchema = z.object({
   mandate_id: z.string().min(1).max(32),
   zip_code: z.string().max(10).optional(),
+  mandate: SpendMandateSchema.optional(),
   purchase_units: z.array(
     z.object({
       reference_id: z.string(),
@@ -387,6 +388,59 @@ export const buyerProcurementRoutes: FastifyPluginAsync = async (fastify) => {
       totalRequestedCents,
       zipCode: zip_code || 'unspecified',
     });
+
+    // Custodian Gate Stage 2: Ed25519 signature verification if mandate object is presented
+    if (parseResult.data.mandate) {
+      const isSigValid = await verifySessionMandateSignature(parseResult.data.mandate);
+      if (!isSigValid) {
+        logger.error('Order authorization rejected: Invalid Ed25519 session mandate signature', { mandateId: mandate_id });
+        routeTimer('Signature verification failed');
+        return reply.status(422).send({
+          error: 'ED25519_SIGNATURE_VERIFICATION_FAILED',
+          message: 'The Ed25519 session mandate signature is invalid or has expired.',
+        });
+      }
+
+      if (totalRequestedCents > parseResult.data.mandate.max_total_spend_cents) {
+        logger.error('Order authorization rejected: Spend exceeds mandate budget cap', {
+          mandateId: mandate_id,
+          totalRequestedCents,
+          cap: parseResult.data.mandate.max_total_spend_cents,
+        });
+        routeTimer('Budget cap exceeded');
+        return reply.status(422).send({
+          error: 'ERR_EXCEEDS_TOTAL_MANDATE_BUDGET',
+          message: `Requested spend ($${(totalRequestedCents / 100).toFixed(2)}) exceeds authorized mandate budget of $${(parseResult.data.mandate.max_total_spend_cents / 100).toFixed(2)}.`,
+        });
+      }
+    }
+
+    // Custodian Gate Stage 4: Single-Threaded Atomic Redis Lua spend reservation
+    const primaryMerchantDomain = (purchase_units[0] as any)?.payee?.email_address
+      ? (purchase_units[0] as any).payee.email_address.split('@')[1]
+      : 'bestbuy.com';
+    const primaryCategory = (purchase_units[0] as any)?.items?.[0]?.category || 'electronics';
+
+    const reservation = await defaultAtomicSpendEnforcer.reserveBudget({
+      mandate_id,
+      merchant_domain: primaryMerchantDomain,
+      requested_cents: totalRequestedCents,
+      current_unix_ms: Date.now(),
+      category_id: primaryCategory,
+      merchant_anomaly_score: 50,
+    });
+
+    if (!reservation.success) {
+      logger.warn('Atomic Redis Lua budget reservation rejected during order authorization', {
+        mandateId: mandate_id,
+        errorCode: reservation.error_code,
+      });
+      routeTimer('Budget reservation rejected');
+      return reply.status(422).send({
+        error: reservation.error_code || 'ERR_BUDGET_RESERVATION_FAILED',
+        message: `Budget reservation failed: ${reservation.error_code}`,
+      });
+    }
 
     // Step 1: 2PC Pre-Flight Stock Verification across all items
     const stockItemsToVerify: Array<{ product_id: string; quantity: number }> = [];
