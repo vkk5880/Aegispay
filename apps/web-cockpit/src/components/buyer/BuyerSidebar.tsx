@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import {
   Lock,
@@ -13,12 +13,15 @@ import {
   Store,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   X,
   LogIn,
   AlertCircle,
   ExternalLink,
   Wallet,
   Zap,
+  Code,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
@@ -46,9 +49,10 @@ export function BuyerSidebar({
   onOpenCart,
   cartItemCount = 0,
 }: BuyerSidebarProps) {
-  const { showTechnicalDetails } = useUiMode();
+  const { showTechnicalDetails, toggleTechnicalDetails } = useUiMode();
   const auth = useAuth();
   const { totalItemsCount } = useCart();
+  const [isQuickAccessOpen, setIsQuickAccessOpen] = useState<boolean>(true);
 
   const isUserLoggedIn = auth.isLoggedIn;
   const isPaymentAuthorized = auth.isLoggedIn && auth.isAuthorized;
@@ -80,8 +84,8 @@ export function BuyerSidebar({
       <aside
         className={`
           fixed lg:static top-0 bottom-0 left-0 z-50 lg:z-10
-          h-full bg-white dark:bg-[#070e1c] border-r border-slate-200/80 dark:border-white/10
-          flex flex-col transition-all duration-300 ease-in-out
+          h-full min-h-0 max-h-full bg-white dark:bg-[#070e1c] border-r border-slate-200/80 dark:border-white/10
+          flex flex-col transition-all duration-300 ease-in-out overflow-hidden
           ${
             isOpen
               ? 'w-72 xl:w-80 shadow-2xl lg:shadow-none translate-x-0'
@@ -91,7 +95,7 @@ export function BuyerSidebar({
       >
         {/* Expanded Content View */}
         {isOpen ? (
-          <div className="flex-1 flex flex-col h-full overflow-hidden">
+          <div className="flex-1 min-h-0 flex flex-col h-full overflow-hidden">
             {/* Header / Collapse Toolbar */}
             <div className="p-3.5 border-b border-slate-200/80 dark:border-white/10 flex items-center justify-between shrink-0 bg-slate-50/50 dark:bg-[#060c18]/50">
               <div className="flex items-center gap-2">
@@ -121,7 +125,7 @@ export function BuyerSidebar({
             </div>
 
             {/* Scrollable Body: Budget Cards & User Actions */}
-            <div className="flex-1 overflow-y-auto p-3.5 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 space-y-4 touch-pan-y">
               {/* Account / PayPal Status Card */}
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-[#0a1224] border border-slate-200/70 dark:border-white/10 space-y-2">
                 <div className="flex items-center justify-between">
@@ -276,66 +280,115 @@ export function BuyerSidebar({
                 </button>
               </div>
 
-              {/* User Related App Navigation Links */}
-              <div className="space-y-1.5 pt-2 border-t border-slate-200/80 dark:border-white/10">
-                <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold block mb-1">
-                  Quick Access
-                </span>
-
-                {/* Multi-Store Cart */}
+              {/* User Related App Navigation Links (Collapsible) */}
+              <div className="pt-2 border-t border-slate-200/80 dark:border-white/10">
                 <button
                   type="button"
-                  onClick={onOpenCart}
-                  className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors cursor-pointer"
+                  onClick={() => setIsQuickAccessOpen(!isQuickAccessOpen)}
+                  className="w-full flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400 font-bold mb-1 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer py-1 select-none"
+                  title={isQuickAccessOpen ? 'Collapse Quick Access' : 'Expand Quick Access'}
                 >
-                  <div className="flex items-center gap-2.5">
-                    <ShoppingBag className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                    <span>Consolidated Cart</span>
-                  </div>
-                  {effectiveCartCount > 0 ? (
-                    <span className="px-1.5 py-0.5 rounded-full bg-cyan-600 text-white text-[10px] font-mono font-bold">
-                      {effectiveCartCount}
-                    </span>
+                  <span className="flex items-center gap-1.5">
+                    <span>Quick Access</span>
+                    {effectiveCartCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-cyan-600 text-white text-[9px] font-mono font-bold">
+                        {effectiveCartCount}
+                      </span>
+                    )}
+                  </span>
+                  {isQuickAccessOpen ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
                   ) : (
-                    <span className="text-[10px] text-slate-400">Empty</span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                   )}
                 </button>
 
-                {/* Orders & Receipts */}
-                <Link
-                  href="/history"
-                  className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    <span>Orders & Receipts</span>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </Link>
+                {isQuickAccessOpen && (
+                  <div className="space-y-1.5 animate-fade-in">
+                    {/* Multi-Store Cart */}
+                    <button
+                      type="button"
+                      onClick={onOpenCart}
+                      className="w-full p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ShoppingBag className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                        <span>Consolidated Cart</span>
+                      </div>
+                      {effectiveCartCount > 0 ? (
+                        <span className="px-1.5 py-0.5 rounded-full bg-cyan-600 text-white text-[10px] font-mono font-bold">
+                          {effectiveCartCount}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">Empty</span>
+                      )}
+                    </button>
 
-                {/* Saved Watchlist */}
-                <Link
-                  href="/watchlist"
-                  className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Bookmark className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                    <span>Saved Watchlist</span>
-                  </div>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </Link>
+                    {/* Orders & Receipts */}
+                    <Link
+                      href="/history"
+                      className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <span>Orders & Receipts</span>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
 
-                {/* Merchant Portal */}
-                <Link
-                  href="/merchant"
-                  className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Store className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                    <span>Seller Dashboard</span>
+                    {/* Saved Watchlist */}
+                    <Link
+                      href="/watchlist"
+                      className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Bookmark className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                        <span>Saved Watchlist</span>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
+
+                    {/* Merchant Portal */}
+                    <Link
+                      href="/merchant"
+                      className="p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent hover:border-slate-200 dark:hover:border-white/10 text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Store className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        <span>Seller Dashboard</span>
+                      </div>
+                      <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                    </Link>
                   </div>
-                  <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
-                </Link>
+                )}
+              </div>
+
+              {/* Developer & Inspector Mode Strip */}
+              <div className="pt-2 border-t border-slate-200/80 dark:border-white/10">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#0a1224] border border-slate-200/70 dark:border-white/10 flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Code className="w-4 h-4 text-amber-500 shrink-0" />
+                    <div className="min-w-0">
+                      <span className="text-[11px] font-bold text-slate-800 dark:text-slate-200 block leading-tight truncate">
+                        Developer Mode
+                      </span>
+                      <span className="text-[9px] text-slate-500 dark:text-slate-400 font-mono block">
+                        {showTechnicalDetails ? 'Inspector active' : 'Shopper view'}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleTechnicalDetails}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold cursor-pointer transition-colors border shrink-0 ${
+                      showTechnicalDetails
+                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 border-amber-500/40 hover:bg-amber-500/30'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-300 dark:border-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    {showTechnicalDetails ? 'ON' : 'OFF'}
+                  </button>
+                </div>
               </div>
             </div>
 

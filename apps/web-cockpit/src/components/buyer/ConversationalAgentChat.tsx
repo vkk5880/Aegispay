@@ -63,6 +63,41 @@ import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
 // Maximum allowed products for side-by-side comparison
 export const MAX_SELECTED_PRODUCTS = 4;
 
+export const DEMO_COMPARISON_PRODUCTS: ProductCardData[] = [
+  {
+    product_id: 'ch3_anc_headphone_01',
+    title: 'AcousticPro ANC Studio Headphones (Midnight)',
+    price_cents: 28000,
+    merchant_domain: 'audio-gear-direct.com',
+    rating: '4.9',
+    free_shipping: true,
+    commission_rebate_cents: 3150,
+    merchant_credibility_score: 98,
+    image_url: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=400&q=80',
+    specs: {
+      battery_life: '36 hours',
+      anc_modes: 'Hybrid ANC (40dB)',
+      connectivity: 'Bluetooth 5.3 + 3.5mm lossless',
+    },
+  },
+  {
+    product_id: 'ch3_usb_dac_amp',
+    title: 'Hi-Fi 32-bit USB Audio DAC/Amp Interface',
+    price_cents: 11000,
+    merchant_domain: 'nordic-workspaces.io',
+    rating: '4.8',
+    free_shipping: true,
+    commission_rebate_cents: 1755,
+    merchant_credibility_score: 95,
+    image_url: 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?w=400&q=80',
+    specs: {
+      resolution: '32-bit / 384kHz DSD256',
+      output_power: '240mW @ 32 ohms',
+      connectivity: 'USB-C to 3.5mm / 4.4mm balanced',
+    },
+  },
+];
+
 // Re-export for 100% backward compatibility
 export { GenerativeProductCard as ProductCard, ComparisonMatrixCard, SideBySideProductColumns };
 export type { GenerativeProductCardProps as ProductCardProps, ComparisonMatrixCardProps, SideBySideProductColumnsProps } from './BuyerGenerativeTools';
@@ -125,6 +160,7 @@ export function ConversationalAgentChat({
   const [inputMessage, setInputMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<ProductCardData[]>([]);
+  const [discoveredProducts, setDiscoveredProducts] = useState<ProductCardData[]>([]);
   const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
 
   // Active comparison & cart state for the Cockpit Drawer
@@ -255,6 +291,7 @@ export function ConversationalAgentChat({
     onTurnProductsReceived: (products) => {
       const safeProducts = Array.isArray(products) ? products : [];
       logger.info('[BuyerChat:TurnProducts] Grounded turn products bound to context', { count: safeProducts.length });
+      setDiscoveredProducts(safeProducts);
       activeTurnProductsRef.current = safeProducts.map((p, idx) => ({
         index: idx + 1,
         product_id: p.product_id,
@@ -406,10 +443,10 @@ export function ConversationalAgentChat({
         <PrepareCheckoutToolUI />
 
         {/* Responsive Cockpit Container: Split-Screen Desktop & Mobile Drawer */}
-        <div className="flex flex-col lg:flex-row h-full w-full bg-white/70 dark:bg-[#070d1a]/90 overflow-hidden backdrop-blur-md transition-all">
+        <div className="flex flex-col lg:flex-row h-full w-full min-h-0 min-w-0 bg-white/70 dark:bg-[#070d1a]/90 overflow-hidden backdrop-blur-md transition-all">
           {/* Main Left Panel: Conversation Thread & Input Bar */}
           <div
-            className={`flex flex-col h-full transition-all duration-300 ${
+            className={`flex flex-col h-full min-h-0 min-w-0 transition-all duration-300 ${
               isSidePanelOpen ? 'lg:w-3/5 w-full' : 'w-full'
             }`}
           >
@@ -522,8 +559,8 @@ export function ConversationalAgentChat({
             </div>
 
             {/* assistant-ui Thread Messages Viewport */}
-            <ThreadPrimitive.Root className="flex flex-col flex-1 overflow-hidden">
-              <ThreadPrimitive.Viewport className="flex-1 overflow-y-auto px-5 py-4 space-y-4 scroll-smooth">
+            <ThreadPrimitive.Root className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+              <ThreadPrimitive.Viewport className="flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain px-3 sm:px-5 py-4 space-y-4 scroll-smooth">
                 <ThreadPrimitive.Messages
                   components={{
                     Message: () => (
@@ -653,7 +690,7 @@ export function ConversationalAgentChat({
               </div>
 
               {/* Phase 3 Interactive Multi-Chip ChatInputBar */}
-              <div className="p-3 bg-white dark:bg-[#081124] border-t border-slate-200 dark:border-slate-800 shrink-0">
+              <div className="p-2.5 sm:p-3 bg-white dark:bg-[#081124] border-t border-slate-200 dark:border-slate-800 shrink-0 min-w-0">
                 <ChatInputBar
                   inputMessage={inputMessage}
                   onInputChange={setInputMessage}
@@ -693,23 +730,34 @@ export function ConversationalAgentChat({
                 aria-hidden="true"
               />
 
-              <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] max-w-[92vw] lg:static lg:w-2/5 lg:max-w-none flex flex-col h-full border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070e1c] p-3 sm:p-4 overflow-y-auto space-y-3 shadow-2xl lg:shadow-none transition-all">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] max-w-[92vw] lg:static lg:w-2/5 lg:max-w-none flex flex-col h-full min-h-0 min-w-0 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070e1c] p-3 sm:p-4 overflow-y-auto overscroll-contain space-y-3 shadow-2xl lg:shadow-none transition-all">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800 shrink-0">
                   <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
                     <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
                     <span>Product Comparison ({selectedProducts.length}/4)</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsSidePanelOpen(false)}
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                    title="Close side panel"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {selectedProducts.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedProducts([])}
+                        className="text-[10px] text-slate-500 hover:text-rose-500 font-mono transition-colors cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setIsSidePanelOpen(false)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                      title="Close side panel"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
 
-                {/* Active Multi-Product Comparison: Pure Table Columns/Rows without middle icons or essay text */}
+                {/* 1. Multi-Product Comparison: 2 to 4 Products Selected */}
                 {selectedProducts.length >= 2 ? (
                   <div className="space-y-3">
                     <SideBySideProductColumns
@@ -722,13 +770,70 @@ export function ConversationalAgentChat({
                     <button
                       type="button"
                       onClick={handleCompareSelected}
-                      className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
                       <span>Ask AI to Compare Specs</span>
                     </button>
                   </div>
+                ) : selectedProducts.length === 1 ? (
+                  /* 2. Single Product Selected: Show details and prompt to add second item */
+                  <div className="space-y-3">
+                    <SideBySideProductColumns
+                      products={selectedProducts}
+                      onBuy={(winProd) => handleActionClick('BUY', winProd)}
+                      onRemove={() => setSelectedProducts([])}
+                    />
+                    <div className="p-3 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-500/30 text-xs space-y-2">
+                      <div className="flex items-center gap-2 font-bold text-cyan-800 dark:text-cyan-300">
+                        <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
+                        <span>Select 1 More Product to Compare</span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                        Add a 2nd product from the chat or the list below to unlock full side-by-side comparison.
+                      </p>
+                      {discoveredProducts.filter((p) => p.product_id !== selectedProducts[0].product_id).length > 0 ? (
+                        <div className="pt-2 space-y-1.5 border-t border-cyan-500/20">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-700 dark:text-cyan-400 font-bold block">
+                            Quick Add Contender:
+                          </span>
+                          {discoveredProducts
+                            .filter((p) => p.product_id !== selectedProducts[0].product_id)
+                            .slice(0, 3)
+                            .map((prod) => (
+                              <button
+                                key={prod.product_id}
+                                type="button"
+                                onClick={() => handleToggleSelectProduct(prod)}
+                                className="w-full p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-cyan-500 flex items-center justify-between text-left text-xs transition-colors cursor-pointer"
+                              >
+                                <span className="font-medium text-slate-800 dark:text-slate-200 truncate pr-2">
+                                  {prod.title}
+                                </span>
+                                <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono text-[11px] shrink-0">
+                                  + Compare
+                                </span>
+                              </button>
+                            ))}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const demoContender = DEMO_COMPARISON_PRODUCTS.find(
+                              (p) => p.product_id !== selectedProducts[0].product_id
+                            ) || DEMO_COMPARISON_PRODUCTS[1];
+                            handleToggleSelectProduct(demoContender);
+                          }}
+                          className="w-full py-1.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                        >
+                          <span>+ Add Contender to Compare</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ) : activeComparison ? (
+                  /* 3. Active Comparison Matrix from LLM tool call */
                   <div className="space-y-3">
                     <SideBySideProductColumns
                       products={activeComparison.products || []}
@@ -737,6 +842,7 @@ export function ConversationalAgentChat({
                     <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
                   </div>
                 ) : activeCart ? (
+                  /* 4. Active Cart Settlement */
                   <div className="space-y-3">
                     <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
                       <ShieldCheck className="w-4 h-4 text-emerald-500" />
@@ -749,17 +855,79 @@ export function ConversationalAgentChat({
                       onConfirmPurchase={handlePurchaseConfirmedInternal}
                     />
                   </div>
+                ) : discoveredProducts.length > 0 ? (
+                  /* 5. Discovered Products from Recent Chat Search */
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Discovered Products ({discoveredProducts.length})
+                      </span>
+                      {discoveredProducts.length >= 2 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedProducts(discoveredProducts.slice(0, 2))}
+                          className="px-2 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[11px] shadow-2xs transition-all cursor-pointer"
+                        >
+                          Compare Top 2
+                        </button>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {discoveredProducts.slice(0, 4).map((p) => (
+                        <div
+                          key={p.product_id}
+                          className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={p.cleaned_image_url || p.image_url}
+                              alt={p.title}
+                              className="w-10 h-10 rounded-lg object-cover shrink-0 border border-slate-200 dark:border-slate-700"
+                            />
+                            <div className="min-w-0">
+                              <h5 className="font-semibold text-xs text-slate-800 dark:text-slate-200 truncate">
+                                {p.title}
+                              </h5>
+                              <span className="text-[11px] font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                                {formatCents(p.price_cents - (p.commission_rebate_cents || 0))}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectProduct(p)}
+                            className="px-2 py-1 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-cyan-600 dark:text-cyan-400 font-bold text-xs hover:bg-cyan-50 cursor-pointer shadow-2xs shrink-0"
+                          >
+                            + Compare
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500 dark:text-slate-400 space-y-3">
-                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+                  /* 6. Default Welcome & Demo Comparison State (Never Blank!) */
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-slate-500 dark:text-slate-400 space-y-4">
+                    <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shadow-sm">
                       <Scale className="w-6 h-6" />
                     </div>
-                    <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                      Select Products to Compare
-                    </h4>
-                    <p className="text-xs max-w-xs leading-relaxed">
-                      Click the checkbox on 2 to 4 products in the chat to open a clean side-by-side spec comparison table here.
-                    </p>
+                    <div>
+                      <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                        Side-by-Side Comparison Arena
+                      </h4>
+                      <p className="text-xs max-w-xs leading-relaxed text-slate-500 dark:text-slate-400 mt-1">
+                        Select 2 to 4 products in the chat to compare prices, cashback rebates, and tech specs side-by-side.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedProducts(DEMO_COMPARISON_PRODUCTS)}
+                      className="py-2 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Load Demo Comparison</span>
+                    </button>
                   </div>
                 )}
               </div>

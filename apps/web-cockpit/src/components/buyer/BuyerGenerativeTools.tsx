@@ -92,7 +92,7 @@ export function GenerativeProductCard({
 
   return (
     <div
-      className={`bg-white dark:bg-[#080f20] border rounded-xl overflow-hidden shadow-2xs hover:shadow-xs transition-all flex flex-row items-center p-2 sm:p-2.5 gap-2 sm:gap-2.5 group relative ${
+      className={`bg-white dark:bg-[#080f20] border rounded-xl overflow-hidden shadow-2xs hover:shadow-xs transition-all flex flex-row items-center p-2 sm:p-2.5 gap-2 sm:gap-2.5 group relative w-full min-w-0 max-w-full ${
         isSelected
           ? 'border-cyan-500 dark:border-cyan-400 ring-2 ring-cyan-500/30 bg-cyan-50/20 dark:bg-cyan-950/20'
           : 'border-slate-200 dark:border-slate-800 hover:border-cyan-500/40'
@@ -642,23 +642,23 @@ export function CollapsibleProductCatalogView({
   }
 
   return (
-    <div className="my-2 space-y-2">
+    <div className="my-2 space-y-2 w-full min-w-0 max-w-full">
       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
-        <div className="flex items-center gap-1.5">
-          <span>Discovered {products.length} catalog items</span>
-          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">• Promo: {promoCode}</span>
+        <div className="flex items-center gap-1.5 min-w-0 truncate">
+          <span className="truncate">Discovered {products.length} catalog items</span>
+          <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold shrink-0">• Promo: {promoCode}</span>
         </div>
         <button
           type="button"
           onClick={() => setIsMinimized(true)}
-          className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer"
+          className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium text-slate-500 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer shrink-0"
           title="Minimize product grid"
         >
           <span>Slide to min</span>
           <ChevronUp className="w-3.5 h-3.5" />
         </button>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2 w-full min-w-0 max-w-full">
         {products.map((product) => (
           <GenerativeProductCard
             key={product.product_id}
@@ -786,22 +786,22 @@ export const FilterTurnProductsToolUI = makeAssistantToolUI<FilterTurnProductsIn
 
     const products = Array.isArray(result?.products) ? result.products : [];
     return (
-      <div className="my-2 space-y-2">
+      <div className="my-2 space-y-2 w-full min-w-0 max-w-full">
         <div className="p-2 rounded-lg bg-cyan-50/60 dark:bg-cyan-950/30 border border-cyan-500/30 text-xs flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-cyan-700 dark:text-cyan-300 font-mono text-[11px]">
-            <Layers className="w-3.5 h-3.5" />
-            <span>
+          <div className="flex items-center gap-1.5 text-cyan-700 dark:text-cyan-300 font-mono text-[11px] min-w-0 truncate">
+            <Layers className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">
               Filtered <strong>{result?.filtered_count ?? products.length}</strong> item(s) in-memory (&lt;2ms)
               {result?.applied_criteria ? ` matching "${result.applied_criteria}"` : ''}
             </span>
           </div>
           {args?.sort_by && (
-            <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+            <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 shrink-0">
               Sort: {args.sort_by}
             </span>
           )}
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-2 w-full min-w-0 max-w-full">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}

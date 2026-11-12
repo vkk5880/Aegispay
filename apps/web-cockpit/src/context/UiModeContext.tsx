@@ -42,7 +42,8 @@ const isTestEnv =
 const isProdEnv =
   typeof process !== 'undefined' &&
   process.env.NODE_ENV === 'production' &&
-  process.env.NEXT_PUBLIC_DEV_TOOLS !== 'true';
+  process.env.NEXT_PUBLIC_DEV_TOOLS !== 'true' &&
+  process.env.NEXT_PUBLIC_STRICT_PROD === 'true';
 
 const defaultContext: UiModeContextType = {
   isProduction: isProdEnv,

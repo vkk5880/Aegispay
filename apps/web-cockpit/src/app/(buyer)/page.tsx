@@ -14,7 +14,7 @@ import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransm
 import { ConversationalAgentChat } from '@/components/buyer/ConversationalAgentChat';
 import { BuyerSidebar } from '@/components/buyer/BuyerSidebar';
 import { SpendAllowanceHeader } from '@/components/buyer/SpendAllowanceHeader';
-import { UserSettingsDrawer, UserSettings, DEFAULT_USER_SETTINGS } from '@/components/buyer/UserSettingsDrawer';
+import { UserSettingsDrawer, UserSettings, DEFAULT_USER_SETTINGS, COMMERCE_MODELS } from '@/components/buyer/UserSettingsDrawer';
 import { UnifiedCartDrawer, OrderConfirmationData } from '@/components/buyer/UnifiedCartDrawer';
 import type { SessionMandate, ProductCardData } from '@aegispay/shared-types';
 import {
@@ -26,6 +26,10 @@ import {
   ShoppingBag,
   MessageSquare,
   X,
+  Sliders,
+  Code,
+  Bot,
+  Key,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
@@ -70,6 +74,7 @@ export default function BuyerPortalPage() {
   // Left Collapsible Sidebar state & Developer Modal state
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   const [isDevModalOpen, setIsDevModalOpen] = useState<boolean>(false);
+  const [devModalTab, setDevModalTab] = useState<'signer' | 'settings'>('signer');
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
@@ -441,15 +446,32 @@ export default function BuyerPortalPage() {
                   </span>
                 )}
               </div>
-              <button
-                type="button"
-                onClick={() => setIsDevModalOpen(true)}
-                className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-mono text-[11px] flex items-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0"
-              >
-                <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-                <span className="hidden sm:inline">Inspect Hardware Signer (Ed25519)</span>
-                <span className="sm:hidden">Hardware Signer</span>
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDevModalTab('settings');
+                    setIsDevModalOpen(true);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-mono text-[11px] flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-amber-400" />
+                  <span className="hidden sm:inline">Developer Settings</span>
+                  <span className="sm:hidden">Settings</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDevModalTab('signer');
+                    setIsDevModalOpen(true);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-mono text-[11px] flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="hidden sm:inline">Hardware Signer</span>
+                  <span className="sm:hidden">Signer</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -501,7 +523,7 @@ export default function BuyerPortalPage() {
         </main>
       </div>
 
-      {/* Developer Hardware Signer Modal Window (Closes on outside click or X button) */}
+      {/* Developer Hardware Signer & Settings Modal Window (Closes on outside click or X button) */}
       {showTechnicalDetails && isDevModalOpen && (
         <div
           onClick={() => setIsDevModalOpen(false)}
@@ -518,10 +540,10 @@ export default function BuyerPortalPage() {
                 </div>
                 <div>
                   <h3 className="font-bold text-sm text-slate-900 dark:text-white">
-                    Cryptographic Proofs & Hardware Spend Signer (Ed25519)
+                    Developer & Auditor Cockpit
                   </h3>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                    Deterministic SPKI Mandate Signing for Autonomous Agents
+                    Deterministic SPKI Mandates, LLM Configuration & Hardware Spend Signer
                   </p>
                 </div>
               </div>
@@ -534,13 +556,111 @@ export default function BuyerPortalPage() {
               </button>
             </div>
 
-            <CryptographicMandateSigner
-              onMandateGenerated={(mandate) => {
-                handleMandateGenerated(mandate);
-                setIsDevModalOpen(false);
-              }}
-              externalBudgetCents={externalBudgetCents}
-            />
+            {/* Modal Window Tabs */}
+            <div className="flex border-b border-slate-200 dark:border-slate-800 gap-4 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setDevModalTab('signer')}
+                className={`pb-2 transition-colors border-b-2 cursor-pointer ${
+                  devModalTab === 'signer'
+                    ? 'border-cyan-500 text-cyan-600 dark:text-cyan-400 font-bold'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Hardware Signer (Ed25519)
+              </button>
+              <button
+                type="button"
+                onClick={() => setDevModalTab('settings')}
+                className={`pb-2 transition-colors border-b-2 cursor-pointer ${
+                  devModalTab === 'settings'
+                    ? 'border-amber-500 text-amber-600 dark:text-amber-400 font-bold'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                Developer Settings & BYOK
+              </button>
+            </div>
+
+            {devModalTab === 'signer' ? (
+              <CryptographicMandateSigner
+                onMandateGenerated={(mandate) => {
+                  handleMandateGenerated(mandate);
+                  setIsDevModalOpen(false);
+                }}
+                externalBudgetCents={externalBudgetCents}
+              />
+            ) : (
+              <div className="space-y-4 animate-fade-in">
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-700 dark:text-amber-300">
+                  <span className="font-bold">Active LLM Reasoning Engine: </span>
+                  <span className="font-mono">{userSettings.aiModel || 'google/gemini-3.5-flash-lite'}</span>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-1">
+                    Select a model below. Default Google models use pre-configured platform credentials.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">
+                    Choose Commerce Reasoning Model
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {COMMERCE_MODELS.map((m) => {
+                      const isSelected = (userSettings.aiModel || 'google/gemini-3.5-flash-lite') === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setUserSettings((prev) => ({
+                              ...prev,
+                              aiModel: m.id,
+                              developerModeEnabled: true,
+                            }));
+                            showNotification(`Switched model to ${m.name}`);
+                          }}
+                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-amber-500 bg-amber-500/10 text-slate-900 dark:text-white ring-1 ring-amber-500/40'
+                              : 'border-slate-200 dark:border-slate-800 hover:border-amber-500/40 bg-slate-50/50 dark:bg-slate-900/30'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-bold text-xs">{m.name}</span>
+                            <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                              {m.provider}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                            {m.desc}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDevModalOpen(false);
+                      setIsSettingsOpen(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 cursor-pointer transition-colors"
+                  >
+                    Open Full Settings Drawer ↗
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsDevModalOpen(false)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-cyan-600 hover:bg-cyan-500 cursor-pointer shadow-xs transition-colors"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
