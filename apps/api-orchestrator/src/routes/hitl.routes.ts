@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { defaultHitlApprovalRegistry, HitlApprovalRequest } from '../services/hitl-approval.js';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+import { authenticateUser } from '../middleware/auth.js';
 
 export const logger = createLogger('API:Routes:HITL');
 
@@ -87,7 +88,7 @@ export const hitlRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/hitl/requests
    * Programmatically dispatch an approval request
    */
-  fastify.post('/api/hitl/requests', async (request, reply) => {
+  fastify.post('/api/hitl/requests', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('Received request to create HITL approval request', {
       body: sanitizeForLogging(request.body),
       query: request.query,
@@ -139,7 +140,7 @@ export const hitlRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/hitl/respond
    * Submits human decision for a pending approval
    */
-  fastify.post('/api/hitl/respond', async (request, reply) => {
+  fastify.post('/api/hitl/respond', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('Received operator decision for HITL approval', {
       body: sanitizeForLogging(request.body),
     });

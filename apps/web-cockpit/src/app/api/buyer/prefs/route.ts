@@ -2,12 +2,18 @@ import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
-export async function GET() {
+export async function GET(req: Request) {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const auth = req.headers.get('authorization');
+      if (auth) headers['Authorization'] = auth;
+      const sessionToken = req.headers.get('x-session-token');
+      if (sessionToken) headers['x-session-token'] = sessionToken;
+
       const res = await fetch(`${orchestratorUrl}/api/buyer/prefs`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         cache: 'no-store',
       });
       if (res.ok) {
@@ -32,9 +38,15 @@ export async function POST(req: Request) {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const auth = req.headers.get('authorization');
+      if (auth) headers['Authorization'] = auth;
+      const sessionToken = req.headers.get('x-session-token');
+      if (sessionToken) headers['x-session-token'] = sessionToken;
+
       const res = await fetch(`${orchestratorUrl}/api/buyer/prefs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       });
       if (res.ok) {

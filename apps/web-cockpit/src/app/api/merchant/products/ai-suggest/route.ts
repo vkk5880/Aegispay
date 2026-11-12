@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     if (apiKey) {
       try {
         const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
         const parts: any[] = [];
         if (prompt) {
           parts.push({
@@ -61,7 +61,10 @@ export async function POST(req: NextRequest) {
 
         const aiResponse = await fetch(geminiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify({
             contents: [{ parts }],
             generationConfig: {

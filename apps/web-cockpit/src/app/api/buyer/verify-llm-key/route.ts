@@ -42,8 +42,13 @@ export async function POST(req: Request) {
   // Direct fallback verification
   try {
     if (provider === 'google') {
-      const testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}&pageSize=1`;
-      const res = await fetch(testUrl, { method: 'GET' });
+      const testUrl = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1';
+      const res = await fetch(testUrl, {
+        method: 'GET',
+        headers: {
+          'x-goog-api-key': apiKey.trim(),
+        },
+      });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         const errMsg = errData?.error?.message || `Google API returned HTTP ${res.status}`;

@@ -4,6 +4,7 @@ import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { defaultSyntheticIntentEngine } from '../services/synthetic-intent.js';
 import { defaultCounterBidEngine } from '../services/counter-bid-engine.js';
 import { SpendMandateSchema } from '@aegispay/shared-types';
+import { authenticateUser } from '../middleware/auth.js';
 
 const logger = createLogger('API:Routes:IntentVouchers');
 
@@ -140,8 +141,8 @@ export const intentVoucherRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/intent-vouchers/broadcast & POST /api/vouchers/bids
    * Broadcasts a Synthetic Intent Voucher proposal with budget overage check and Vault token setup
    */
-  fastify.post('/api/intent-vouchers/broadcast', handleBroadcast);
-  fastify.post('/api/vouchers/bids', handleBroadcast);
+  fastify.post('/api/intent-vouchers/broadcast', { preHandler: [authenticateUser] }, handleBroadcast);
+  fastify.post('/api/vouchers/bids', { preHandler: [authenticateUser] }, handleBroadcast);
 
   const handleCounter = async (request: any, reply: any) => {
     const routeTimer = logger.time(`POST ${request.url}`);
@@ -224,8 +225,8 @@ export const intentVoucherRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/intent-vouchers/counter & POST /api/vouchers/counter-offer
    * Evaluates a 2-turn counter-bid negotiation between buyer agent and seller
    */
-  fastify.post('/api/intent-vouchers/counter', handleCounter);
-  fastify.post('/api/vouchers/counter-offer', handleCounter);
+  fastify.post('/api/intent-vouchers/counter', { preHandler: [authenticateUser] }, handleCounter);
+  fastify.post('/api/vouchers/counter-offer', { preHandler: [authenticateUser] }, handleCounter);
 
   const handleAccept = async (request: any, reply: any) => {
     const routeTimer = logger.time(`POST ${request.url}`);
@@ -276,8 +277,8 @@ export const intentVoucherRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/intent-vouchers/:id/accept & POST /api/vouchers/:id/accept
    * Merchant 1-click acceptance converting the vaulted setup token into an authorized PayPal order
    */
-  fastify.post('/api/intent-vouchers/:id/accept', handleAccept);
-  fastify.post('/api/vouchers/:id/accept', handleAccept);
+  fastify.post('/api/intent-vouchers/:id/accept', { preHandler: [authenticateUser] }, handleAccept);
+  fastify.post('/api/vouchers/:id/accept', { preHandler: [authenticateUser] }, handleAccept);
 
   /**
    * GET /api/intent-vouchers/:id & GET /api/vouchers/:id
@@ -310,6 +311,6 @@ export const intentVoucherRoutes: FastifyPluginAsync = async (fastify) => {
     });
   };
 
-  fastify.get('/api/intent-vouchers/:id', handleGetVoucher);
-  fastify.get('/api/vouchers/:id', handleGetVoucher);
+  fastify.get('/api/intent-vouchers/:id', { preHandler: [authenticateUser] }, handleGetVoucher);
+  fastify.get('/api/vouchers/:id', { preHandler: [authenticateUser] }, handleGetVoucher);
 };

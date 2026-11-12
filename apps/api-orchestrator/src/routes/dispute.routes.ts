@@ -5,6 +5,7 @@ import { defaultDisputeForensicsService } from '../services/dispute-forensics.js
 import { defaultDisputeMatrixService } from '../services/dispute-matrix.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { renderWorkflowClient } from '../services/render-workflow-client.js';
+import { authenticateUser } from '../middleware/auth.js';
 
 const logger = createLogger('API:Services:CatalogAndDisputes');
 
@@ -177,7 +178,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/:id/escalate
    * Escalates an informal INQUIRY to formal PayPal CLAIM adjudication
    */
-  fastify.post('/api/disputes/:id/escalate', async (request, reply) => {
+  fastify.post('/api/disputes/:id/escalate', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/:id/escalate] Inbound escalation request', {
       params: sanitizeForLogging(request.params),
       body: sanitizeForLogging(request.body),
@@ -239,7 +240,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/:id/offer
    * Proposes a settlement offer or partial compromise to the buyer
    */
-  fastify.post('/api/disputes/:id/offer', async (request, reply) => {
+  fastify.post('/api/disputes/:id/offer', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/:id/offer] Inbound settlement offer request', {
       params: sanitizeForLogging(request.params),
       body: sanitizeForLogging(request.body),
@@ -317,7 +318,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/:id/evidence
    * Submits evidence dossier (tracking, bounding box forensics, compiled PDF)
    */
-  fastify.post('/api/disputes/:id/evidence', async (request, reply) => {
+  fastify.post('/api/disputes/:id/evidence', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/:id/evidence] Inbound evidence submission request', {
       params: sanitizeForLogging(request.params),
       body: sanitizeForLogging(request.body),
@@ -419,7 +420,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/:id/appeal
    * Appeals a closed/lost dispute determination (POST /v1/customer/disputes/{id}/appeal)
    */
-  fastify.post('/api/disputes/:id/appeal', async (request, reply) => {
+  fastify.post('/api/disputes/:id/appeal', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/:id/appeal] Inbound dispute appeal request', {
       params: sanitizeForLogging(request.params),
       body: sanitizeForLogging(request.body),
@@ -472,7 +473,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/forensics/analyze-box
    * Analyzes defect bounding box coordinates and returns severity classification
    */
-  fastify.post('/api/disputes/forensics/analyze-box', async (request, reply) => {
+  fastify.post('/api/disputes/forensics/analyze-box', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/forensics/analyze-box] Inbound bounding box analysis request', {
       body: sanitizeForLogging(request.body),
     });
@@ -508,7 +509,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/forensics/analyze-exif
    * Detects image tamper signatures and editing tool traces
    */
-  fastify.post('/api/disputes/forensics/analyze-exif', async (request, reply) => {
+  fastify.post('/api/disputes/forensics/analyze-exif', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/forensics/analyze-exif] Inbound EXIF analysis request', {
       body: sanitizeForLogging(request.body),
     });
@@ -537,7 +538,7 @@ export const disputeRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/disputes/forensics/analyze
    * Evaluates vision defect bounding boxes, EXIF tamper detection, and liability matrix.
    */
-  fastify.post('/api/disputes/forensics/analyze', async (request, reply) => {
+  fastify.post('/api/disputes/forensics/analyze', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('[POST /api/disputes/forensics/analyze] Inbound comprehensive forensics analysis request', {
       body: sanitizeForLogging(request.body),
     });

@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { defaultPayPalClient, InvoiceDraftPayload } from '../services/paypal-apimatic.js';
+import { authenticateUser } from '../middleware/auth.js';
 
 const logger = createLogger('API:Routes:Invoicing');
 
@@ -79,7 +80,7 @@ const RemindInvoiceBodySchema = z.object({
 
 export const invoicingRoutes: FastifyPluginAsync = async (fastify) => {
   // POST /api/invoices/create
-  fastify.post('/api/invoices/create', async (request, reply) => {
+  fastify.post('/api/invoices/create', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/invoices/create');
     logger.debug('Received B2B draft invoice creation request', {
       body: sanitizeForLogging(request.body),
@@ -144,7 +145,7 @@ export const invoicingRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // POST /api/invoices/:id/send
-  fastify.post('/api/invoices/:id/send', async (request, reply) => {
+  fastify.post('/api/invoices/:id/send', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/invoices/:id/send');
     logger.debug('Received send invoice delivery request', {
       params: sanitizeForLogging(request.params),
@@ -265,7 +266,7 @@ export const invoicingRoutes: FastifyPluginAsync = async (fastify) => {
   });
 
   // POST /api/invoices/:id/remind
-  fastify.post('/api/invoices/:id/remind', async (request, reply) => {
+  fastify.post('/api/invoices/:id/remind', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/invoices/:id/remind');
     logger.debug('Received send invoice reminder notification request', {
       params: sanitizeForLogging(request.params),

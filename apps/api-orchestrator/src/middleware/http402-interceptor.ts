@@ -121,7 +121,12 @@ const DEFAULT_PROTECTED_PREFIXES = [
   '/api/checkout',
 ];
 
-const DEFAULT_SECRET = process.env.AEGIS_HMAC_SECRET || 'aegispay_test_secret_key_402';
+const DEFAULT_SECRET =
+  process.env.HTTP402_HMAC_SECRET ||
+  process.env.AEGIS_HMAC_SECRET ||
+  (process.env.NODE_ENV === 'production'
+    ? crypto.randomBytes(32).toString('hex')
+    : 'aegispay_test_secret_key_402');
 
 /**
  * Timing-safe string comparison preventing timing side-channel attacks

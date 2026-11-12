@@ -2,6 +2,7 @@ import { FastifyPluginAsync } from 'fastify';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { defaultDisputeMatrixService } from '../services/dispute-matrix.js';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
+import { authenticateUser } from '../middleware/auth.js';
 
 const logger = createLogger('API:Routes:Arbitration');
 
@@ -83,7 +84,7 @@ export const merchantArbitrationRoutes: FastifyPluginAsync = async (fastify) => 
    * POST /api/agents/arbiter/evaluate
    * Evaluates dispute with 2D (L, R) matrix and optional forensic PDF dossier generation
    */
-  fastify.post('/api/agents/arbiter/evaluate', async (request, reply) => {
+  fastify.post('/api/agents/arbiter/evaluate', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/agents/arbiter/evaluate');
     logger.debug('Received dispute forensics matrix evaluation request', {
       body: sanitizeForLogging(request.body),
@@ -179,7 +180,7 @@ export const merchantArbitrationRoutes: FastifyPluginAsync = async (fastify) => 
    * POST /api/agents/arbiter/execute
    * Executes the corresponding PayPal Dispute v1 action (e.g. provide evidence, make offer, refund, acknowledge return)
    */
-  fastify.post('/api/agents/arbiter/execute', async (request, reply) => {
+  fastify.post('/api/agents/arbiter/execute', { preHandler: [authenticateUser] }, async (request, reply) => {
     const routeTimer = logger.time('POST /api/agents/arbiter/execute');
     logger.debug('Received Dispute HATEOAS action execution request', {
       body: sanitizeForLogging(request.body),

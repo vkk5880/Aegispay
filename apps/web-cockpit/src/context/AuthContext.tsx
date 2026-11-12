@@ -176,10 +176,20 @@ async function mintWebCryptoEd25519Mandate(params: {
     }
   }
 
-  // Fallback 32-byte pubkey hex and 64-byte signature hex
-  const mockPub = '0'.repeat(64);
-  const mockSig = '0'.repeat(128);
-  return { publicKeyHex: mockPub, signatureHex: mockSig, expiresAt };
+  // Fallback 32-byte pubkey hex and 64-byte signature hex with high entropy
+  const randPub = new Uint8Array(32);
+  const randSig = new Uint8Array(64);
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(randPub);
+    window.crypto.getRandomValues(randSig);
+  } else if ((globalThis as any).crypto?.getRandomValues) {
+    (globalThis as any).crypto.getRandomValues(randPub);
+    (globalThis as any).crypto.getRandomValues(randSig);
+  } else {
+    for (let i = 0; i < 32; i++) randPub[i] = Math.floor(Math.random() * 256);
+    for (let i = 0; i < 64; i++) randSig[i] = Math.floor(Math.random() * 256);
+  }
+  return { publicKeyHex: bufferToHex(randPub), signatureHex: bufferToHex(randSig), expiresAt };
 }
 
 const defaultAuthContext: AuthContextType = {
