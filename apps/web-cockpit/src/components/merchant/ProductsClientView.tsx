@@ -21,10 +21,11 @@ interface ProductRow {
 }
 
 interface ProductsClientViewProps {
-  initialProducts: ProductRow[];
+  initialProducts?: ProductRow[];
+  embedded?: boolean;
 }
 
-export function ProductsClientView({ initialProducts }: ProductsClientViewProps) {
+export function ProductsClientView({ initialProducts = [], embedded = false }: ProductsClientViewProps) {
   const [products, setProducts] = useState<ProductRow[]>(initialProducts);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -115,9 +116,10 @@ export function ProductsClientView({ initialProducts }: ProductsClientViewProps)
           'PATCH /v1/catalogs/products/{id}',
         ]}
         source="listProducts()"
-        note="The catalog returns live SKU definitions directly from PayPal Catalog API, enriched with Gemini 3.8 Flash Vision auto-fill and real-time synthetic intent bid velocity sparklines."
+        note="Live catalog items from PayPal Catalog API with instant price updates and inventory velocity."
         rows={products}
         columns={columns}
+        embedded={embedded}
         headerAction={
           <div className="flex items-center gap-2">
             <button

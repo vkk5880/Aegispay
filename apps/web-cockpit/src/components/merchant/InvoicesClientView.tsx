@@ -8,10 +8,11 @@ import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
 
 interface InvoicesClientViewProps {
-  initialInvoices: any[];
+  initialInvoices?: any[];
+  embedded?: boolean;
 }
 
-export function InvoicesClientView({ initialInvoices }: InvoicesClientViewProps) {
+export function InvoicesClientView({ initialInvoices = [], embedded = false }: InvoicesClientViewProps) {
   const [invoices, setInvoices] = useState<any[]>(initialInvoices);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -60,9 +61,10 @@ export function InvoicesClientView({ initialInvoices }: InvoicesClientViewProps)
       title="Commercial Invoices"
       calls={['GET /v2/invoicing/invoices', 'GET /v2/invoicing/invoices/{id}']}
       source="listInvoices()"
-      note="The list endpoint omits line items, payments and refunds, so each invoice is then fetched in full. Amounts are in the invoice's own currency."
+      note="Commercial invoices issued to clients with payment terms, due dates, and settlement status."
       rows={invoices}
       columns={columns}
+      embedded={embedded}
       headerAction={
         <button
           onClick={fetchLiveInvoices}

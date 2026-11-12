@@ -13,6 +13,7 @@ import {
   type Row,
 } from './DataGrid.js';
 import { EndpointPage } from './EndpointPage.js';
+import { SellerExplainerCard } from './SellerExplainerCard.js';
 import BalancesPage from '../../app/(merchant)/merchant/balances/page.js';
 import InvoicesPage from '../../app/(merchant)/merchant/invoices/page.js';
 import PlansPage from '../../app/(merchant)/merchant/plans/page.js';
@@ -213,4 +214,41 @@ test('All 5 merchant report subpages load seamlessly under SSR without errors', 
   assert.ok(txHtml.includes('Transaction Search (Last 31 Days)'));
   assert.ok(txHtml.includes('GET /v1/reporting/transactions'));
   assert.ok(txHtml.includes('searchTransactions(start, end)'));
+});
+
+test('SellerExplainerCard renders welcome message, 4 feature pillars, and dismiss button', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(SellerExplainerCard, {})
+  );
+
+  assert.ok(html.includes('Welcome to your Seller Hub'));
+  assert.ok(html.includes('Sales &amp; Revenue Overview') || html.includes('Sales & Revenue Overview'));
+  assert.ok(html.includes('Resolution Center &amp; Returns') || html.includes('Resolution Center & Returns'));
+  assert.ok(html.includes('Products &amp; Subscription Plans') || html.includes('Products & Subscription Plans'));
+  assert.ok(html.includes('Invoices &amp; Fast Payouts') || html.includes('Invoices & Fast Payouts'));
+  assert.ok(html.includes('Got it, Dismiss'));
+});
+
+test('EndpointPage renders sleek embedded layout when embedded prop is true', () => {
+  const rows = [{ currency: 'USD', total: 1000 }];
+  const columns = [{ field: 'currency', headerName: 'Currency' }];
+
+  const html = renderToStaticMarkup(
+    React.createElement(EndpointPage, {
+      title: 'Commercial Invoices',
+      calls: ['GET /v2/invoicing/invoices'],
+      source: 'listInvoices()',
+      note: 'Embedded invoice table test note',
+      rows,
+      columns,
+      embedded: true,
+    })
+  );
+
+  assert.ok(html.includes('Commercial Invoices'));
+  assert.ok(html.includes('1 Record'));
+  assert.ok(html.includes('Embedded invoice table test note'));
+  assert.ok(html.includes('Search all columns…'));
+  // Should NOT render the full page back-link when embedded
+  assert.ok(!html.includes('Back to Seller Portal'));
 });

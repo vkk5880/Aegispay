@@ -15,7 +15,13 @@ export interface DashboardReportMetrics {
   recentTxCount?: number;
 }
 
-export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: DashboardReportMetrics }) {
+export function DashboardReports({
+  metrics: initialMetrics = {},
+  onSelectTab,
+}: {
+  metrics?: DashboardReportMetrics;
+  onSelectTab?: (tab: string) => void;
+}) {
   const { showTechnicalDetails } = useUiMode();
   const [metrics, setMetrics] = React.useState<DashboardReportMetrics>(initialMetrics);
 
@@ -55,6 +61,7 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
       trend: 'PayPal Live Catalog',
       badge: 'Channel3 Synced',
       href: '/merchant/products',
+      tabKey: 'products',
       icon: Package,
       gradient: 'from-blue-600 to-cyan-600',
       glow: 'glow-blue',
@@ -66,6 +73,7 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
       trend: 'PayPal Subscriptions',
       badge: 'Auto-Renew',
       href: '/merchant/plans',
+      tabKey: 'plans',
       icon: Repeat,
       gradient: 'from-indigo-600 to-purple-600',
       glow: 'glow-purple',
@@ -77,6 +85,7 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
       trend: 'Invoicing API v2',
       badge: 'Net 30',
       href: '/merchant/invoices',
+      tabKey: 'invoices',
       icon: FileText,
       gradient: 'from-emerald-600 to-teal-600',
       glow: 'glow-emerald',
@@ -88,6 +97,7 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
       trend: 'Reporting API',
       badge: 'Vault Protected',
       href: '/merchant/balances',
+      tabKey: 'balances',
       icon: Wallet,
       gradient: 'from-amber-500 to-orange-600',
       glow: 'glow-amber',
@@ -99,6 +109,7 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
       trend: 'PayPal Ledger',
       badge: 'DuckDB-WASM',
       href: '/merchant/transactions',
+      tabKey: 'transactions',
       icon: ArrowLeftRight,
       gradient: 'from-rose-600 to-pink-600',
       glow: 'glow-rose',
@@ -138,12 +149,16 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
             <Link
               key={card.title}
               href={card.href}
-              onClick={() => {
+              onClick={(e) => {
                 logger.info('[DashboardReports] Report card navigation clicked', {
                   title: card.title,
                   href: card.href,
                   currentCount: card.count,
                 });
+                if (onSelectTab && card.tabKey) {
+                  e.preventDefault();
+                  onSelectTab(card.tabKey);
+                }
               }}
               className="group relative p-4 rounded-2xl border border-slate-200/80 dark:border-white/10 bg-white/90 dark:bg-[#0c1424]/90 backdrop-blur-xl hover:border-cyan-500/40 dark:hover:border-cyan-500/40 transition-all duration-300 hover:shadow-xl hover:shadow-cyan-500/5 dark:hover:shadow-cyan-950/20 hover:-translate-y-0.5 flex flex-col justify-between overflow-hidden"
             >

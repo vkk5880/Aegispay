@@ -15,6 +15,7 @@ export function EndpointPage({
   rows,
   columns,
   headerAction,
+  embedded = false,
 }: {
   title: string;
   calls: string[];
@@ -23,8 +24,40 @@ export function EndpointPage({
   rows: Row[];
   columns: ColDef<Row>[];
   headerAction?: React.ReactNode;
+  embedded?: boolean;
 }) {
   const { showTechnicalDetails } = useUiMode();
+
+  if (embedded) {
+    return (
+      <div className="space-y-4">
+        {/* Sleek Embedded Header Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200/70 dark:border-white/5">
+          <div>
+            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+              <span>{title}</span>
+              <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25">
+                {rows.length} {rows.length === 1 ? 'Record' : 'Records'}
+              </span>
+            </h2>
+            {note && (
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 max-w-2xl leading-relaxed">
+                {note}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            {headerAction}
+          </div>
+        </div>
+
+        {/* AG Grid Data Table */}
+        <div className="flex min-h-[500px] flex-1 flex-col">
+          <DataGrid rows={rows} columns={columns} />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto w-full transition-colors">
       {/* Header Banner Card */}

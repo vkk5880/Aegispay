@@ -23,7 +23,13 @@ const FX_RATES: Record<string, number> = {
   JPY: 0.0066,
 };
 
-export function BalancesClientView({ initialBalances }: { initialBalances: BalanceRow[] }) {
+export function BalancesClientView({
+  initialBalances = [],
+  embedded = false,
+}: {
+  initialBalances?: BalanceRow[];
+  embedded?: boolean;
+}) {
   const [balances, setBalances] = useState<BalanceRow[]>(initialBalances);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -122,6 +128,7 @@ export function BalancesClientView({ initialBalances }: { initialBalances: Balan
       note="The merchant account's balance across each held currency, reflecting available reserves, withheld escrow amounts, live FX estimated clearing values, and 30-day settlement trajectory."
       rows={balances}
       columns={columns}
+      embedded={embedded}
       headerAction={
         <button
           onClick={fetchLiveBalances}

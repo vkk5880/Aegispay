@@ -8,7 +8,8 @@ import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
 
 interface TransactionsClientViewProps {
-  initialTransactions: any[];
+  initialTransactions?: any[];
+  embedded?: boolean;
 }
 
 const FX_RATES: Record<string, number> = {
@@ -19,7 +20,7 @@ const FX_RATES: Record<string, number> = {
   JPY: 0.0066,
 };
 
-export function TransactionsClientView({ initialTransactions }: TransactionsClientViewProps) {
+export function TransactionsClientView({ initialTransactions = [], embedded = false }: TransactionsClientViewProps) {
   const [transactions, setTransactions] = useState<any[]>(initialTransactions);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -142,6 +143,7 @@ export function TransactionsClientView({ initialTransactions }: TransactionsClie
       note="The reporting endpoint returns 31-day activity across all currencies, enriched with real-time multi-currency FX margin calculations, carrier delivery scans, and Master/Detail purchase unit breakdowns."
       rows={transactions}
       columns={columns}
+      embedded={embedded}
       headerAction={
         <button
           onClick={fetchLiveTransactions}

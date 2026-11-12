@@ -21,10 +21,11 @@ interface PlanRow {
 }
 
 interface PlansClientViewProps {
-  initialPlans: PlanRow[];
+  initialPlans?: PlanRow[];
+  embedded?: boolean;
 }
 
-export function PlansClientView({ initialPlans }: PlansClientViewProps) {
+export function PlansClientView({ initialPlans = [], embedded = false }: PlansClientViewProps) {
   const [plans, setPlans] = useState<PlanRow[]>(initialPlans);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -92,6 +93,7 @@ export function PlansClientView({ initialPlans }: PlansClientViewProps) {
       note="A plan's billing cycles hold its recurring price: an optional TRIAL cycle followed by the REGULAR cycle that bills until cancelled."
       rows={plans}
       columns={columns}
+      embedded={embedded}
       headerAction={
         <button
           onClick={fetchLivePlans}
