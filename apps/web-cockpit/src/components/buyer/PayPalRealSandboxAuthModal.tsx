@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   X,
   ShieldCheck,
@@ -193,49 +193,50 @@ export function PayPalRealSandboxAuthModal({
     setPreauthAmountInput(String(amount));
   };
 
-  // Listen for popup window message events
+  // Handle successful PayPal Sandbox vault authorization
+  const handleVaultSuccess = useCallback(async (payload: any) => {
+    logger.info('[PayPalAuthModal:Success] Received verified vault session', payload);
+    setStatusMessage('PayPal Sandbox Authorization confirmed!');
+    setIsLoading(false);
+
+    // Close popup window if still open
+    if (popupWindowRef && !popupWindowRef.closed) {
+      try {
+        popupWindowRef.close();
+      } catch {}
+    }
+
+    // Update local session via login callback with configured categories & merchants
+    const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
+    const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
+
+    await loginWithPayPal({
+      name: payload?.user?.name || user?.name || 'PayPal Sandbox Buyer',
+      email: payload?.user?.email || user?.email || emailInput,
+      allowedCategories: effectiveCats,
+      allowedMerchants: effectiveMerchants,
+    });
+
+    // If pre-authorization was selected, authorize with chosen amount and security policy
+    if (enablePreauth && preauthAmount > 0) {
+      await authorizePayment(
+        Math.round(preauthAmount * 100),
+        effectiveCats,
+        effectiveMerchants
+      );
+    }
+
+    // Close login prompt and refresh UI
+    onClose();
+  }, [popupWindowRef, selectedCategories, whitelistMode, selectedMerchants, loginWithPayPal, user, emailInput, enablePreauth, preauthAmount, authorizePayment, onClose]);
+
+  // Listen for popup window message events, BroadcastChannel, and storage events
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-
       if (event.data?.type === 'PAYPAL_VAULT_SUCCESS') {
         const payload = event.data.data;
-        logger.info('[PayPalAuthModal:Message] Received vault success from popup', payload);
-        setStatusMessage('PayPal Sandbox Authorization confirmed!');
-        setIsLoading(false);
-
-        // Close popup window if still open
-        if (popupWindowRef && !popupWindowRef.closed) {
-          popupWindowRef.close();
-        }
-
-        // Update local session via login callback with configured categories & merchants
-        const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
-        const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
-
-        await loginWithPayPal({
-          name: payload.user?.name || user?.name || 'PayPal Sandbox Buyer',
-          email: payload.user?.email || user?.email || emailInput,
-          allowedCategories: effectiveCats,
-          allowedMerchants: effectiveMerchants,
-        });
-
-        // If pre-authorization was selected, authorize with chosen amount and security policy
-        if (enablePreauth && preauthAmount > 0) {
-          await authorizePayment(
-            Math.round(preauthAmount * 100),
-            effectiveCats,
-            effectiveMerchants
-          );
-        }
-
-        // Close login prompt and refresh UI
-        onClose();
-        setTimeout(() => {
-          if (typeof window !== 'undefined') {
-            window.location.reload();
-          }
-        }, 200);
+        logger.info('[PayPalAuthModal:Message] Received vault success from postMessage', payload);
+        await handleVaultSuccess(payload);
       } else if (
         event.data?.type === 'PAYPAL_VAULT_CANCELLED' ||
         event.data?.type === 'PAYPAL_VAULT_ERROR' ||
@@ -244,16 +245,56 @@ export function PayPalRealSandboxAuthModal({
         logger.warn('[PayPalAuthModal:Message] User cancelled or failed PayPal sandbox login');
         setIsLoading(false);
         if (popupWindowRef && !popupWindowRef.closed) {
-          popupWindowRef.close();
+          try { popupWindowRef.close(); } catch {}
         }
-        // Requirement: Close login prompt even if failed
         onClose();
       }
     };
 
     window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [loginWithPayPal, authorizePayment, onClose, user, emailInput, enablePreauth, preauthAmount, popupWindowRef]);
+
+    // BroadcastChannel cross-tab listener (works even when window.opener is severed by cross-origin redirects)
+    let authChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        authChannel = new BroadcastChannel('aegispay_auth_channel');
+        authChannel.onmessage = async (event) => {
+          if (event.data?.type === 'PAYPAL_VAULT_SUCCESS') {
+            logger.info('[PayPalAuthModal:BroadcastChannel] Received vault success', event.data.data);
+            await handleVaultSuccess(event.data.data);
+          } else if (event.data?.type === 'PAYPAL_VAULT_CANCELLED' || event.data?.type === 'PAYPAL_VAULT_ERROR') {
+            setIsLoading(false);
+            if (popupWindowRef && !popupWindowRef.closed) {
+              try { popupWindowRef.close(); } catch {}
+            }
+            onClose();
+          }
+        };
+      } catch {}
+    }
+
+    // localStorage storage event listener
+    const handleStorage = async (event: StorageEvent) => {
+      if (event.key === 'aegispay_auth_sync' && event.newValue) {
+        try {
+          const parsed = JSON.parse(event.newValue);
+          if (parsed.type === 'PAYPAL_VAULT_SUCCESS' && parsed.data) {
+            logger.info('[PayPalAuthModal:StorageSync] Received vault success via storage', parsed.data);
+            await handleVaultSuccess(parsed.data);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      if (authChannel) {
+        try { authChannel.close(); } catch {}
+      }
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [handleVaultSuccess, popupWindowRef, onClose]);
 
   if (!isOpen) return null;
 
@@ -298,8 +339,12 @@ export function PayPalRealSandboxAuthModal({
 
       setPopupWindowRef(popup);
 
-      // Polling check to close login prompt when popup closes
+      // Active Polling & Window-close check
+      let pollCount = 0;
       const checkInterval = setInterval(async () => {
+        pollCount++;
+
+        // Case 1: Popup was closed by user or window.close()
         if (!popup || popup.closed) {
           clearInterval(checkInterval);
           setIsLoading(false);
@@ -314,32 +359,39 @@ export function PayPalRealSandboxAuthModal({
               });
               const verifyData = await verifyRes.json();
               if (verifyData.isAuthorized) {
-                setStatusMessage('Authorization confirmed via PayPal Sandbox API!');
-                const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
-                const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
-
-                await loginWithPayPal({
-                  ...verifyData.user,
-                  allowedCategories: effectiveCats,
-                  allowedMerchants: effectiveMerchants,
-                });
-                if (enablePreauth && preauthAmount > 0) {
-                  await authorizePayment(
-                    Math.round(preauthAmount * 100),
-                    effectiveCats,
-                    effectiveMerchants
-                  );
-                }
-                onClose();
-                setTimeout(() => {
-                  if (typeof window !== 'undefined') window.location.reload();
-                }, 200);
+                await handleVaultSuccess(verifyData);
                 return;
               }
             } catch {}
           }
-          // Close login prompt if closed without success
           onClose();
+          return;
+        }
+
+        // Case 2: Active background check every 2 seconds WHILE POPUP IS STILL OPEN
+        if (data.setupTokenId && pollCount % 2 === 0) {
+          try {
+            const verifyRes = await fetch('/api/auth/paypal/verify-vault-session', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ setupTokenId: data.setupTokenId }),
+            });
+            const verifyData = await verifyRes.json();
+            if (verifyData.success && verifyData.isAuthorized) {
+              clearInterval(checkInterval);
+              if (popup && !popup.closed) {
+                try { popup.close(); } catch {}
+              }
+              await handleVaultSuccess(verifyData);
+              return;
+            }
+          } catch {}
+        }
+
+        // Stop polling after 120 seconds
+        if (pollCount > 80) {
+          clearInterval(checkInterval);
+          setIsLoading(false);
         }
       }, 1500);
     } catch (err: any) {

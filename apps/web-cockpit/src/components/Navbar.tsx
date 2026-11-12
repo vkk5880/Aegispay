@@ -121,6 +121,7 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
+                prefetch={link.href === '/history' ? false : undefined}
                 aria-label={link.label}
                 className={`group relative flex items-center justify-center px-3 py-1.5 sm:px-3.5 xl:px-4.5 rounded-lg transition-all duration-200 ${
                   isActive
@@ -319,6 +320,7 @@ export function Navbar() {
               <Link
                 key={link.href}
                 href={link.href}
+                prefetch={link.href === '/history' ? false : undefined}
                 onClick={() => setMobileMenuOpen(false)}
                 className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
                   isActive

@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const userId =
@@ -28,7 +34,7 @@ export async function GET(req: Request) {
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.receipts) && data.receipts.length > 0) {
-          return NextResponse.json(data);
+          return NextResponse.json(data, { headers: NO_CACHE_HEADERS });
         }
       }
     } catch (err: any) {
@@ -46,7 +52,7 @@ export async function GET(req: Request) {
 
       const targetUserIds = [userId];
       if (userId === 'sb-buyer@personal.example.com' || userId === 'demo' || userId === 'guest') {
-        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+        targetUserIds.push('demo', 'guest', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
       }
 
       const rows = await db
@@ -70,7 +76,7 @@ export async function GET(req: Request) {
         return NextResponse.json({
           status: 'SUCCESS',
           receipts,
-        });
+        }, { headers: NO_CACHE_HEADERS });
       }
     } catch (dbErr: any) {
       apiLogger.warn('Direct database query for receipts encountered error', { error: dbErr?.message });
@@ -81,5 +87,5 @@ export async function GET(req: Request) {
   return NextResponse.json({
     status: 'SUCCESS',
     receipts: [],
-  });
+  }, { headers: NO_CACHE_HEADERS });
 }

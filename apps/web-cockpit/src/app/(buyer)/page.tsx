@@ -32,6 +32,7 @@ import {
   Key,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { saveClientOrder } from '@/lib/orderStorageHelper';
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth } from '@/context/AuthContext';
 
@@ -501,6 +502,16 @@ export default function BuyerPortalPage() {
                   authorizedCents: result.authorizedCents,
                 });
                 recordPurchaseSpend(result.authorizedCents);
+                saveClientOrder({
+                  order_id: result.orderId,
+                  user_id: user?.email || 'demo',
+                  title: (result as any).cart?.assigned_merchants?.[0]?.items?.[0]?.title || `Vaulted Order #${result.orderId}`,
+                  price_cents: result.authorizedCents,
+                  merchant_domain: (result as any).cart?.assigned_merchants?.[0]?.merchant_domain || 'bestbuy.com',
+                  cleaned_url: (result as any).cart?.assigned_merchants?.[0]?.items?.[0]?.image_url,
+                  escrow_status: 'HELD',
+                  fulfillment_status: 'processing',
+                });
                 showNotification(`1-Click Vaulted Order ${result.orderId} Authorized!`);
               }}
               onSelectProductForBuy={handleSelectProductForBuy}
@@ -759,6 +770,19 @@ export default function BuyerPortalPage() {
 
             if (!isFailed) {
               recordPurchaseSpend(totalCents);
+              saveClientOrder({
+                order_id: finalOrderId,
+                user_id: effectiveUserId,
+                title: firstItem?.title ? (allItems.length > 1 ? `${firstItem.title} (+${allItems.length - 1} items)` : firstItem.title) : 'Smart Cart Purchase',
+                price_cents: totalCents,
+                merchant_domain: firstMerchant?.merchant_domain || 'bestbuy.com',
+                cleaned_url: firstItem?.image_url,
+                receipt_number: finalReceiptNumber,
+                tracking_number: finalTrackingNumber,
+                carrier: 'FedEx Priority',
+                escrow_status: 'HELD',
+                fulfillment_status: 'processing',
+              });
               setOptimizationData({
                 assigned_merchants: [],
                 gross_subtotal_cents: 0,

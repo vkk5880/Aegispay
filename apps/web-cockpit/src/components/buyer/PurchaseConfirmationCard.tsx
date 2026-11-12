@@ -19,6 +19,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
+import { saveClientOrder } from '@/lib/orderStorageHelper';
 import type { KnapsackOptimizationData } from './KnapsackSplitVisualizer';
 import { generateBundlingExplanation } from './UnifiedCartDrawer';
 import { useAuth } from '@/context/AuthContext';
@@ -172,6 +173,20 @@ export function PurchaseConfirmationCard({
       setStatus('SUCCESS');
       setLastActionMsg(`Order ${generatedOrderId} confirmed!`);
       recordPurchaseSpend(netTotalCents);
+      saveClientOrder({
+        order_id: generatedOrderId,
+        user_id: user?.email || 'demo',
+        title: merchants[0]?.items[0]?.title
+          ? (merchants[0].items.length > 1
+              ? `${merchants[0].items[0].title} (+${merchants[0].items.length - 1} items)`
+              : merchants[0].items[0].title)
+          : 'Cart Purchase',
+        price_cents: netTotalCents,
+        merchant_domain: merchants[0]?.merchant_domain || 'bestbuy.com',
+        cleaned_url: merchants[0]?.items[0]?.image_url,
+        escrow_status: 'HELD',
+        fulfillment_status: 'processing',
+      });
 
       if (onConfirmPurchase) {
         onConfirmPurchase({

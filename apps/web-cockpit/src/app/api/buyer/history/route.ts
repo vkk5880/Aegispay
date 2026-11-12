@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { getApiBaseUrl } from '@/lib/utils';
 import { apiLogger } from '@/lib/logger';
 
+const NO_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+  Pragma: 'no-cache',
+  Expires: '0',
+};
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const userId =
@@ -30,7 +36,7 @@ export async function GET(req: Request) {
         const data = await res.json();
         const incomingOrders = Array.isArray(data.orders) ? data.orders : (Array.isArray(data.history) ? data.history : []);
         if (incomingOrders.length > 0) {
-          return NextResponse.json(data);
+          return NextResponse.json(data, { headers: NO_CACHE_HEADERS });
         }
       }
     } catch (err: any) {
@@ -48,7 +54,7 @@ export async function GET(req: Request) {
 
       const targetUserIds = [userId];
       if (userId === 'sb-buyer@personal.example.com' || userId === 'demo' || userId === 'guest') {
-        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+        targetUserIds.push('demo', 'guest', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
       }
 
       const condition = orderId
@@ -88,7 +94,7 @@ export async function GET(req: Request) {
           status: 'SUCCESS',
           orders: history,
           history,
-        });
+        }, { headers: NO_CACHE_HEADERS });
       }
     } catch (dbErr: any) {
       apiLogger.warn('Direct database query for history encountered error', { error: dbErr?.message });
@@ -142,7 +148,7 @@ export async function GET(req: Request) {
               status: 'SUCCESS',
               orders: singleOrder,
               history: singleOrder,
-            });
+            }, { headers: NO_CACHE_HEADERS });
           }
         }
       }
@@ -156,5 +162,5 @@ export async function GET(req: Request) {
     status: 'SUCCESS',
     orders: [],
     history: [],
-  });
+  }, { headers: NO_CACHE_HEADERS });
 }

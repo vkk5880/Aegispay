@@ -21,23 +21,42 @@ function VaultCallbackContent() {
 
     if (isCancelled) {
       setStatus('cancelled');
+      try {
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          const ch = new BroadcastChannel('aegispay_auth_channel');
+          ch.postMessage({ type: 'PAYPAL_VAULT_CANCELLED' });
+          ch.close();
+        }
+      } catch {}
+      try {
+        localStorage.setItem('aegispay_auth_sync', JSON.stringify({ type: 'PAYPAL_VAULT_CANCELLED', timestamp: Date.now() }));
+      } catch {}
       if (window.opener) {
-        window.opener.postMessage({ type: 'PAYPAL_VAULT_CANCELLED' }, window.location.origin);
-        setTimeout(() => window.close(), 600);
+        try { window.opener.postMessage({ type: 'PAYPAL_VAULT_CANCELLED' }, '*'); } catch {}
       }
+      setTimeout(() => { try { window.close(); } catch {} }, 400);
       return;
     }
 
     if (!setupTokenId) {
       setStatus('error');
       setErrorMessage('No PayPal approval session ID was returned in the callback URL.');
+      try {
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          const ch = new BroadcastChannel('aegispay_auth_channel');
+          ch.postMessage({ type: 'PAYPAL_VAULT_ERROR', message: 'No PayPal approval session ID was returned.' });
+          ch.close();
+        }
+      } catch {}
       if (window.opener) {
-        window.opener.postMessage(
-          { type: 'PAYPAL_VAULT_ERROR', message: 'No PayPal approval session ID was returned in the callback URL.' },
-          window.location.origin
-        );
-        setTimeout(() => window.close(), 800);
+        try {
+          window.opener.postMessage(
+            { type: 'PAYPAL_VAULT_ERROR', message: 'No PayPal approval session ID was returned in the callback URL.' },
+            '*'
+          );
+        } catch {}
       }
+      setTimeout(() => { try { window.close(); } catch {} }, 800);
       return;
     }
 
@@ -55,7 +74,7 @@ function VaultCallbackContent() {
           setStatus('success');
           setUserData(data.user);
 
-          // Save session locally
+          // 1. Save session to localStorage
           try {
             const existingRaw = localStorage.getItem('aegispay_user_session');
             const existing = existingRaw ? JSON.parse(existingRaw) : {};
@@ -68,57 +87,84 @@ function VaultCallbackContent() {
               authorizedAt: Date.now(),
             };
             localStorage.setItem('aegispay_user_session', JSON.stringify(merged));
+            localStorage.setItem('aegispay_auth_sync', JSON.stringify({
+              type: 'PAYPAL_VAULT_SUCCESS',
+              data,
+              timestamp: Date.now(),
+            }));
           } catch {}
 
-          // Notify opener window if in popup
+          // 2. BroadcastChannel to notify main window across tabs
+          try {
+            if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+              const ch = new BroadcastChannel('aegispay_auth_channel');
+              ch.postMessage({ type: 'PAYPAL_VAULT_SUCCESS', data });
+              ch.close();
+            }
+          } catch {}
+
+          // 3. Post message to window.opener if accessible
           if (window.opener) {
-            window.opener.postMessage(
-              {
-                type: 'PAYPAL_VAULT_SUCCESS',
-                data,
-              },
-              window.location.origin
-            );
-            setTimeout(() => {
-              window.close();
-            }, 600);
-          } else {
-            // Standalone redirect
-            setTimeout(() => {
-              router.push('/');
-            }, 1500);
+            try {
+              window.opener.postMessage(
+                {
+                  type: 'PAYPAL_VAULT_SUCCESS',
+                  data,
+                },
+                '*'
+              );
+            } catch {}
           }
+
+          // 4. Close this tab automatically
+          try { window.close(); } catch {}
+          setTimeout(() => { try { window.close(); } catch {} }, 300);
+          setTimeout(() => { try { window.close(); } catch {} }, 1000);
         } else {
           setStatus('error');
           setErrorMessage(data.message || 'PayPal Sandbox verification failed.');
+          try {
+            if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+              const ch = new BroadcastChannel('aegispay_auth_channel');
+              ch.postMessage({ type: 'PAYPAL_VAULT_ERROR', message: data.message });
+              ch.close();
+            }
+          } catch {}
           if (window.opener) {
-            window.opener.postMessage(
-              {
-                type: 'PAYPAL_VAULT_ERROR',
-                message: data.message || 'PayPal Sandbox verification failed.',
-              },
-              window.location.origin
-            );
-            setTimeout(() => {
-              window.close();
-            }, 800);
+            try {
+              window.opener.postMessage(
+                {
+                  type: 'PAYPAL_VAULT_ERROR',
+                  message: data.message || 'PayPal Sandbox verification failed.',
+                },
+                '*'
+              );
+            } catch {}
           }
+          setTimeout(() => { try { window.close(); } catch {} }, 800);
         }
       } catch (err: any) {
         setStatus('error');
         setErrorMessage(err?.message || 'Network error verifying PayPal session.');
+        try {
+          if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+            const ch = new BroadcastChannel('aegispay_auth_channel');
+            ch.postMessage({ type: 'PAYPAL_VAULT_ERROR', message: err?.message });
+            ch.close();
+          }
+        } catch {}
         if (window.opener) {
-          window.opener.postMessage(
-            {
-              type: 'PAYPAL_VAULT_ERROR',
-              message: err?.message || 'Network error verifying PayPal session.',
-            },
-            window.location.origin
-          );
-          setTimeout(() => {
-            window.close();
-          }, 800);
+          try {
+            window.opener.postMessage(
+              {
+                type: 'PAYPAL_VAULT_ERROR',
+                message: err?.message || 'Network error verifying PayPal session.',
+              },
+              '*'
+            );
+          } catch {}
         }
+        setTimeout(() => { try { window.close(); } catch {} }, 800);
       }
     }
 
@@ -152,8 +198,24 @@ function VaultCallbackContent() {
         </div>
 
         {status === 'success' && (
-          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
-            Vault Setup Token Approved • Synchronizing...
+          <div className="space-y-4">
+            <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs font-mono">
+              Vault Setup Token Approved • Synchronized with AegisPay
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try { window.close(); } catch {}
+                setTimeout(() => { router.push('/'); }, 300);
+              }}
+              className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white font-bold text-sm shadow-lg shadow-emerald-500/20 transition-all cursor-pointer flex items-center justify-center gap-2 active:scale-98"
+            >
+              <span>Authorization Complete • Close Tab</span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+            </button>
+            <p className="text-xs text-slate-400">
+              Your session is active in the main window. You can safely close this tab.
+            </p>
           </div>
         )}
 

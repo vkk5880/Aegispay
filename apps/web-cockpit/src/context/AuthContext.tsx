@@ -270,7 +270,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         error: String(e),
       });
     }
+
+    // Cross-tab Synchronization via BroadcastChannel and localStorage events
+    let authChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        authChannel = new BroadcastChannel('aegispay_auth_channel');
+        authChannel.onmessage = (event) => {
+          if (event.data?.type === 'PAYPAL_VAULT_SUCCESS') {
+            const data = event.data.data;
+            if (data?.user) {
+              const updatedUser: UserProfile = {
+                name: data.user.name || 'PayPal Sandbox Buyer',
+                email: data.user.email || 'sb-buyer@personal.example.com',
+                isAuthorized: true,
+                vaultSetupTokenId: data.setupTokenId,
+                paymentTokenId: data.paymentTokenId,
+                spentCents: 0,
+                allowedCategories: DEFAULT_ALLOWED_CATEGORIES,
+                allowedMerchants: ['*'],
+              };
+              setUser(updatedUser);
+              setIsAuthModalOpen(false);
+            }
+          }
+        };
+      } catch {}
+    }
+
+    const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed.name === 'string') {
+            setUser(parsed);
+            setSpentCentsState(typeof parsed.spentCents === 'number' ? parsed.spentCents : 0);
+            setIsAuthModalOpen(false);
+          }
+        } catch {}
+      } else if (e.key === 'aegispay_auth_sync' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed.type === 'PAYPAL_VAULT_SUCCESS' && parsed.data?.user) {
+            const data = parsed.data;
+            const updatedUser: UserProfile = {
+              name: data.user.name || 'PayPal Sandbox Buyer',
+              email: data.user.email || 'sb-buyer@personal.example.com',
+              isAuthorized: true,
+              vaultSetupTokenId: data.setupTokenId,
+              paymentTokenId: data.paymentTokenId,
+              spentCents: 0,
+              allowedCategories: DEFAULT_ALLOWED_CATEGORIES,
+              allowedMerchants: ['*'],
+            };
+            setUser(updatedUser);
+            setIsAuthModalOpen(false);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageSync);
+
     setMounted(true);
+
+    return () => {
+      if (authChannel) {
+        try { authChannel.close(); } catch {}
+      }
+      window.removeEventListener('storage', handleStorageSync);
+    };
   }, []);
 
   const openAuthModal = useCallback((mode: 'login' | 'authorize' = 'login') => {

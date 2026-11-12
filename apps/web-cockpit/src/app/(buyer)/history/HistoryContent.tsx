@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   ShieldCheck,
   Receipt,
@@ -24,11 +25,13 @@ import {
   ArrowLeft,
   X,
   AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { useMounted } from '@/hooks/useMounted';
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth } from '@/context/AuthContext';
+import { getClientOrders, getClientReceipts } from '@/lib/orderStorageHelper';
 
 export interface PurchaseHistoryItem {
   order_id: string;
@@ -81,94 +84,141 @@ export function HistoryContent({
   const [trackingToken, setTrackingToken] = useState<string | null>(null);
   const [targetOrderId, setTargetOrderId] = useState<string | null>(null);
 
+  const searchParams = useSearchParams();
+  const tokenParam = searchParams?.get('token') || null;
+  const orderIdParam = searchParams?.get('order_id') || null;
+
   // Live turn-bound chat sessions
   const [chatSessions, setChatSessions] = useState<any[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionDetail, setSessionDetail] = useState<{ session: any; messages: any[] } | null>(null);
   const [loadingSession, setLoadingSession] = useState<boolean>(false);
 
-  useEffect(() => {
-    let activeToken: string | null = null;
-    let activeOrderId: string | null = null;
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    const activeToken = tokenParam;
+    const activeOrderId = orderIdParam;
+    if (activeToken) setTrackingToken(activeToken);
+    if (activeOrderId) setTargetOrderId(activeOrderId);
 
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      activeToken = params.get('token');
-      activeOrderId = params.get('order_id');
-      if (activeToken) setTrackingToken(activeToken);
-      if (activeOrderId) setTargetOrderId(activeOrderId);
+    // 1. Immediately read client-side optimistic orders & receipts from localStorage
+    const localOrders = getClientOrders();
+    const localReceipts = getClientReceipts();
+    if (localOrders.length > 0) {
+      setItems((prev) => {
+        const map = new Map<string, PurchaseHistoryItem>();
+        for (const o of localOrders) map.set(o.order_id, o);
+        for (const o of prev) map.set(o.order_id, o);
+        return Array.from(map.values());
+      });
+    }
+    if (localReceipts.length > 0) {
+      setReceipts((prev) => {
+        const map = new Map<string, NFTReceiptItem>();
+        for (const r of localReceipts) map.set(r.tx_id || String(r.receipt_number), r);
+        for (const r of prev) map.set(r.tx_id || String(r.receipt_number), r);
+        return Array.from(map.values());
+      });
     }
 
-    async function loadData() {
-      setLoading(true);
-      const headers: Record<string, string> = {
-        'x-user-id': effectiveUserId,
-      };
-      if (activeToken) {
-        headers['authorization'] = `Bearer ${activeToken}`;
-      }
+    const headers: Record<string, string> = {
+      'x-user-id': effectiveUserId,
+    };
+    if (activeToken) {
+      headers['authorization'] = `Bearer ${activeToken}`;
+    }
 
-      try {
-        const historyUrl = activeOrderId
-          ? `/api/buyer/history?user_id=${encodeURIComponent(effectiveUserId)}&order_id=${encodeURIComponent(activeOrderId)}`
-          : `/api/buyer/history?user_id=${encodeURIComponent(effectiveUserId)}`;
-        const res = await fetch(historyUrl, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.history)) {
-            setItems(data.history);
-          } else if (Array.isArray(data.orders)) {
-            setItems(data.orders);
-          } else {
-            setItems([]);
-          }
-        } else {
-          setItems([]);
-        }
-      } catch (err) {
-        console.warn('Backend history unreachable or empty ledger.', err);
+    // 2. Fetch server orders with no-store cache
+    try {
+      const historyUrl = activeOrderId
+        ? `/api/buyer/history?user_id=${encodeURIComponent(effectiveUserId)}&order_id=${encodeURIComponent(activeOrderId)}`
+        : `/api/buyer/history?user_id=${encodeURIComponent(effectiveUserId)}`;
+      const res = await fetch(historyUrl, { headers, cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        const serverList: PurchaseHistoryItem[] = Array.isArray(data.history)
+          ? data.history
+          : (Array.isArray(data.orders) ? data.orders : []);
+
+        const orderMap = new Map<string, PurchaseHistoryItem>();
+        for (const o of localOrders) orderMap.set(o.order_id, o);
+        for (const o of serverList) orderMap.set(o.order_id, o);
+        setItems(Array.from(orderMap.values()));
+      } else if (localOrders.length > 0) {
+        setItems(localOrders);
+      } else {
         setItems([]);
       }
+    } catch (err) {
+      console.warn('Backend history unreachable or empty ledger.', err);
+      if (localOrders.length > 0) {
+        setItems(localOrders);
+      } else {
+        setItems([]);
+      }
+    }
 
-      try {
-        const resReceipts = await fetch(`/api/buyer/receipts?user_id=${encodeURIComponent(effectiveUserId)}`, { headers });
-        if (resReceipts.ok) {
-          const data = await resReceipts.json();
-          if (Array.isArray(data.receipts)) {
-            setReceipts(data.receipts);
-          } else {
-            setReceipts([]);
-          }
-        } else {
-          setReceipts([]);
-        }
-      } catch (err) {
-        console.warn('Backend receipts unreachable or empty.', err);
+    // 3. Fetch server receipts with no-store cache
+    try {
+      const resReceipts = await fetch(`/api/buyer/receipts?user_id=${encodeURIComponent(effectiveUserId)}`, { headers, cache: 'no-store' });
+      if (resReceipts.ok) {
+        const data = await resReceipts.json();
+        const serverReceipts: NFTReceiptItem[] = Array.isArray(data.receipts) ? data.receipts : [];
+        const receiptMap = new Map<string, NFTReceiptItem>();
+        for (const r of localReceipts) receiptMap.set(r.tx_id || String(r.receipt_number), r);
+        for (const r of serverReceipts) receiptMap.set(r.tx_id || String(r.receipt_number), r);
+        setReceipts(Array.from(receiptMap.values()));
+      } else if (localReceipts.length > 0) {
+        setReceipts(localReceipts);
+      } else {
         setReceipts([]);
       }
+    } catch (err) {
+      console.warn('Backend receipts unreachable or empty.', err);
+      if (localReceipts.length > 0) {
+        setReceipts(localReceipts);
+      } else {
+        setReceipts([]);
+      }
+    }
 
-      try {
-        const resSessions = await fetch(`/api/buyer/chat/sessions?user_id=${encodeURIComponent(effectiveUserId)}`, { headers });
-        if (resSessions.ok) {
-          const sData = await resSessions.json();
-          if (Array.isArray(sData.sessions)) {
-            setChatSessions(sData.sessions);
-          } else {
-            setChatSessions([]);
-          }
+    // 4. Fetch chat sessions
+    try {
+      const resSessions = await fetch(`/api/buyer/chat/sessions?user_id=${encodeURIComponent(effectiveUserId)}`, { headers, cache: 'no-store' });
+      if (resSessions.ok) {
+        const sData = await resSessions.json();
+        if (Array.isArray(sData.sessions)) {
+          setChatSessions(sData.sessions);
         } else {
           setChatSessions([]);
         }
-      } catch (err) {
-        console.warn('Backend chat sessions unreachable or empty.', err);
+      } else {
         setChatSessions([]);
-      } finally {
-        setLoading(false);
       }
+    } catch (err) {
+      console.warn('Backend chat sessions unreachable or empty.', err);
+      setChatSessions([]);
+    } finally {
+      setLoading(false);
     }
+  }, [effectiveUserId, tokenParam, orderIdParam]);
 
+  useEffect(() => {
     loadData();
-  }, [effectiveUserId]);
+
+    // Re-fetch automatically when window gains focus or client orders change in another tab
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'aegispay_client_orders' || e.key === 'aegispay_client_receipts') {
+        loadData();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    window.addEventListener('focus', loadData);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('focus', loadData);
+    };
+  }, [loadData]);
 
   const handleSelectSession = async (sessionId: string) => {
     setSelectedSessionId(sessionId);
@@ -331,47 +381,60 @@ export function HistoryContent({
           </div>
         )}
 
-        {/* Tab Switcher */}
-        <div className="mt-8 inline-flex p-1 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-2xs">
+        {/* Tab Switcher & Refresh Button */}
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+          <div className="inline-flex p-1 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 shadow-2xs">
+            <button
+              onClick={() => setActiveTab('orders')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+                activeTab === 'orders'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              {showTechnicalDetails
+                ? `Orders & Escrow Holds (${items.length})`
+                : `Your Orders (${items.length})`}
+            </button>
+            <button
+              onClick={() => setActiveTab('receipts')}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+                activeTab === 'receipts'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Receipt className="w-3.5 h-3.5" />
+              {showTechnicalDetails
+                ? `Cryptographic Proofs & Receipts (${receipts.length})`
+                : `Official Receipts (${receipts.length})`}
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('chats');
+                setSelectedSessionId(null);
+              }}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2 text-xs font-bold rounded-lg transition-all ${
+                activeTab === 'chats'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Chat Threads ({chatSessions.length})</span>
+            </button>
+          </div>
+
           <button
-            onClick={() => setActiveTab('orders')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2 text-xs font-bold rounded-lg transition-all ${
-              activeTab === 'orders'
-                ? 'bg-cyan-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
+            type="button"
+            onClick={() => loadData()}
+            disabled={loading}
+            className="p-2 sm:px-3 sm:py-2 rounded-xl bg-white dark:bg-slate-900/80 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:text-cyan-600 dark:hover:text-cyan-400 text-xs font-semibold shadow-2xs flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+            title="Refresh order history & receipts"
           >
-            <ShoppingBag className="w-3.5 h-3.5" />
-            {showTechnicalDetails
-              ? `Orders & Escrow Holds (${items.length})`
-              : `Your Orders (${items.length})`}
-          </button>
-          <button
-            onClick={() => setActiveTab('receipts')}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2 text-xs font-bold rounded-lg transition-all ${
-              activeTab === 'receipts'
-                ? 'bg-cyan-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <Receipt className="w-3.5 h-3.5" />
-            {showTechnicalDetails
-              ? `Cryptographic Proofs & Receipts (${receipts.length})`
-              : `Official Receipts (${receipts.length})`}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('chats');
-              setSelectedSessionId(null);
-            }}
-            className={`flex items-center gap-2 px-4 sm:px-5 py-2 text-xs font-bold rounded-lg transition-all ${
-              activeTab === 'chats'
-                ? 'bg-cyan-600 text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5" />
-            <span>Chat Threads ({chatSessions.length})</span>
+            <RotateCcw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-cyan-500' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
           </button>
         </div>
       </div>
