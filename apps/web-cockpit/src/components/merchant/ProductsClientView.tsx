@@ -6,6 +6,7 @@ import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { AddProductModal } from '@/components/merchant/AddProductModal';
 import { Plus, Sparkles, RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 interface ProductRow {
   id: string;
@@ -32,7 +33,7 @@ export function ProductsClientView({ initialProducts }: ProductsClientViewProps)
     setIsLoading(true);
     logger.info('[ProductsClientView] Fetching live products from PayPal Catalog API');
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/products`);
       if (res.ok) {
         const data = await res.json();

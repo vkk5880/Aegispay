@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { ShieldCheck, Undo2, Eye, FileText, Check, AlertTriangle, X } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/utils';
 
 interface HateoasDisputeActionRendererProps {
   hateoasAllowedActions: string[];
@@ -112,7 +113,7 @@ export function HateoasDisputeActionRenderer({
 
     // Live API call to execute PayPal Dispute v1 HATEOAS action
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       let tierAction = 'TIER1_REFUND';
       if (action === 'provide-evidence') tierAction = 'TIER4_CONTEST_PDF';
       else if (action === 'make-offer') tierAction = 'TIER2_PARTIAL_OFFER';

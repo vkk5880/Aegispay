@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import type { CustomCellRendererProps } from 'ag-grid-react';
 import { Layers, ShieldCheck, Truck, Clock, DollarSign, ExternalLink } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export interface PurchaseUnitItem {
   payee_merchant_id: string;
@@ -52,7 +53,7 @@ export function OrderDetailView(props: CustomCellRendererProps<any> | OrderDetai
   const handleCaptureVault = async () => {
     setIsCapturingVault(true);
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/capture-vault`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -73,7 +74,7 @@ export function OrderDetailView(props: CustomCellRendererProps<any> | OrderDetai
   const handleIssueRefund = async () => {
     setIsRefunding(true);
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/refund`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -5,6 +5,7 @@ import type { CustomCellRendererProps } from 'ag-grid-react';
 import { EvidenceComparatorWidget } from '@/components/ag-studio/EvidenceComparatorWidget';
 import { HateoasDisputeActionRenderer } from '@/components/ag-studio/HateoasDisputeActionRenderer';
 import { ShieldCheck, FileText, Cpu, ShieldAlert } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export interface DisputeDetailProps {
   data?: {
@@ -45,7 +46,7 @@ export function DisputeDetailView(props: CustomCellRendererProps<any> | DisputeD
   const handleAppeal = async () => {
     setIsAppealing(true);
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/disputes/${encodeURIComponent(disputeId)}/appeal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

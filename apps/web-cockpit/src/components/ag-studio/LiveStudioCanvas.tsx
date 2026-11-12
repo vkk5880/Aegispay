@@ -5,6 +5,7 @@ import { setupStudioHarness, executeStudioPrompt, type AgStudioMock } from './st
 import { Bot, Sparkles, Send, Filter, CheckCircle2, RefreshCw, BarChart2, ShieldAlert } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export function LiveStudioCanvas() {
   const { showTechnicalDetails } = useUiMode();
@@ -18,7 +19,7 @@ export function LiveStudioCanvas() {
   useEffect(() => {
     async function fetchCanvasMetrics() {
       try {
-        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const orchestratorUrl = getApiBaseUrl();
         const res = await fetch(`${orchestratorUrl}/api/merchant/overview-metrics`);
         if (res.ok) {
           const data = await res.json();

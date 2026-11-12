@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Package, Repeat, FileText, Wallet, ArrowLeftRight, TrendingUp, ShieldCheck, ArrowUpRight } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export interface DashboardReportMetrics {
   totalProducts?: number;
@@ -21,7 +22,7 @@ export function DashboardReports({ metrics: initialMetrics = {} }: { metrics?: D
   useEffect(() => {
     async function fetchLiveMetrics() {
       try {
-        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const orchestratorUrl = getApiBaseUrl();
         const res = await fetch(`${orchestratorUrl}/api/merchant/overview-metrics`);
         if (res.ok) {
           const data = await res.json();

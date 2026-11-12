@@ -11,6 +11,7 @@ import {
 } from './bryntumConfig';
 import { BryntumSchedulerWrapper } from './BryntumSchedulerWrapper';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export interface SlaDisputeItem {
   id: string;
@@ -36,7 +37,7 @@ export function DisputeSlaScheduler() {
     async function fetchDisputes() {
       setIsLoading(true);
       try {
-        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+        const orchestratorUrl = getApiBaseUrl();
         const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`);
         if (res.ok) {
           const data = await res.json();

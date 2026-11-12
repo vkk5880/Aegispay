@@ -1,6 +1,8 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
+import fs from 'node:fs';
+import path from 'node:path';
 import dotenv from 'dotenv';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 import { paypalWebhooksRoutes } from './routes/paypal.webhooks.js';
@@ -164,6 +166,17 @@ export async function buildApp() {
 }
 
 export async function startServer() {
+  for (const envPath of [
+    path.resolve(process.cwd(), '.env'),
+    path.resolve(process.cwd(), '../.env'),
+    path.resolve(process.cwd(), '../../.env'),
+  ]) {
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath });
+      break;
+    }
+  }
+
   const app = await buildApp();
   const port = parseInt(process.env.PORT || '4000', 10);
   const host = process.env.HOST || '0.0.0.0';

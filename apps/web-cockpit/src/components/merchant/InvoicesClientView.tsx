@@ -5,6 +5,7 @@ import type { ColDef } from 'ag-grid-community';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 interface InvoicesClientViewProps {
   initialInvoices: any[];
@@ -18,7 +19,7 @@ export function InvoicesClientView({ initialInvoices }: InvoicesClientViewProps)
     setIsLoading(true);
     logger.info('[InvoicesClientView] Fetching live commercial invoices from PayPal Invoicing API v2');
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/invoices`);
       if (res.ok) {
         const data = await res.json();

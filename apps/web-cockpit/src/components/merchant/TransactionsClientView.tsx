@@ -5,6 +5,7 @@ import type { ColDef } from 'ag-grid-community';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 interface TransactionsClientViewProps {
   initialTransactions: any[];
@@ -26,7 +27,7 @@ export function TransactionsClientView({ initialTransactions }: TransactionsClie
     setIsLoading(true);
     logger.info('[TransactionsClientView] Fetching live transactions from PayPal Reporting API');
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/transactions`);
       if (res.ok) {
         const data = await res.json();

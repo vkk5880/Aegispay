@@ -8,6 +8,8 @@ import {
   ApiError,
 } from '@paypal/paypal-server-sdk';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import dotenv from 'dotenv';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 
@@ -64,6 +66,24 @@ export function normalizeCarrierCode(carrierInput: string): string {
   if (clean.includes('ARAMEX')) return 'ARAMEX';
   if (clean.includes('PUROLATOR')) return 'PUROLATOR';
   return clean;
+}
+
+/**
+ * Normalizes input category to valid PayPal Catalogs API v1 category values.
+ * PayPal strictly enforces category enums (e.g. SOFTWARE, SERVICES, CLOTHING, ACCESSORIES,
+ * BOOKS_PERIODICALS_AND_NEWSPAPERS) and rejects invalid values like ELECTRONICS with INVALID_PARAMETER_VALUE.
+ */
+export function normalizeCatalogCategory(categoryInput?: string): string {
+  if (!categoryInput) return 'SOFTWARE';
+  const clean = categoryInput.trim().toUpperCase().replace(/[-_\s]+/g, '_');
+  if (clean.includes('ACCESSOR')) return 'ACCESSORIES';
+  if (clean.includes('CLOTH') || clean.includes('APPAREL') || clean.includes('SHOE')) return 'CLOTHING';
+  if (clean.includes('BOOK') || clean.includes('MEDIA')) return 'BOOKS_PERIODICALS_AND_NEWSPAPERS';
+  if (clean.includes('SERV')) return 'SERVICES';
+  if (clean.includes('SOFT') || clean.includes('APP') || clean.includes('DIGIT') || clean.includes('ELECTR') || clean.includes('HARDWARE') || clean.includes('COMP') || clean.includes('TECH')) {
+    return 'SOFTWARE';
+  }
+  return 'SOFTWARE';
 }
 
 export interface CatalogProductItem {
@@ -2156,13 +2176,14 @@ export class PayPalApimaticClient {
     payPalRequestId?: string;
   }): Promise<CatalogProductItem> {
     const requestId = params.payPalRequestId || crypto.randomUUID();
+    const category = normalizeCatalogCategory(params.category);
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
       return {
         id: `PROD-${Date.now().toString(36).toUpperCase()}`,
         name: params.name,
         description: params.description,
         type: params.type || 'PHYSICAL',
-        category: params.category || 'ELECTRONICS',
+        category,
         image_url: params.image_url,
         home_url: params.home_url,
         create_time: new Date().toISOString(),
@@ -2172,7 +2193,7 @@ export class PayPalApimaticClient {
     const payload: Record<string, unknown> = {
       name: params.name.slice(0, 127),
       type: params.type || 'PHYSICAL',
-      category: params.category || 'ELECTRONICS',
+      category,
     };
     if (params.description) payload.description = params.description.slice(0, 256);
     if (params.image_url) payload.image_url = params.image_url;
@@ -2414,13 +2435,14 @@ export class PayPalApimaticClient {
     params: InvoiceDraftPayload,
     payPalRequestId?: string
   ): Promise<InvoiceItemSummary & { links?: Array<{ href: string; rel: string; method?: string }> }> {
+    const totalVal = params.items.reduce((acc, it) => {
+      const p = parseFloat(it.unit_amount?.value || '0');
+      const q = typeof it.quantity === 'number' ? it.quantity : parseFloat(it.quantity || '1');
+      return acc + p * q;
+    }, 0).toFixed(2);
+
     if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here') {
-      const invoiceId = `INV2-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
-      const totalVal = params.items.reduce((acc, it) => {
-        const p = parseFloat(it.unit_amount?.value || '0');
-        const q = typeof it.quantity === 'number' ? it.quantity : parseFloat(it.quantity || '1');
-        return acc + p * q;
-      }, 0).toFixed(2);
+      const invoiceId = `MOCK-INV-${Date.now()}-${crypto.randomUUID().slice(0, 6)}`;
 
       return {
         id: invoiceId,
@@ -2434,6 +2456,12 @@ export class PayPalApimaticClient {
         amount: params.amount || {
           currency_code: params.detail.currency_code || 'USD',
           value: totalVal,
+          breakdown: {
+            item_total: {
+              currency_code: params.detail.currency_code || 'USD',
+              value: totalVal,
+            },
+          },
         },
         primary_recipients: params.primary_recipients,
         items: params.items,
@@ -2448,6 +2476,28 @@ export class PayPalApimaticClient {
     const token = await this.getAccessToken();
     const requestId = ensureRequestId(payPalRequestId);
 
+    const payload = {
+      ...params,
+      amount: params.amount || {
+        currency_code: params.detail.currency_code || 'USD',
+        value: totalVal,
+        breakdown: {
+          item_total: {
+            currency_code: params.detail.currency_code || 'USD',
+            value: totalVal,
+          },
+        },
+      },
+    };
+    if (payload.amount && !payload.amount.breakdown) {
+      payload.amount.breakdown = {
+        item_total: {
+          currency_code: payload.amount.currency_code || 'USD',
+          value: payload.amount.value || totalVal,
+        },
+      };
+    }
+
     const res = await this.fetchWithRetry(`${this.getBaseUrl()}/v2/invoicing/invoices`, {
       method: 'POST',
       headers: {
@@ -2455,7 +2505,7 @@ export class PayPalApimaticClient {
         'PayPal-Request-Id': requestId,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(params),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -2464,14 +2514,23 @@ export class PayPalApimaticClient {
     }
 
     const data = await res.json();
-    return isRecord(data) ? (data as any) : { id: 'unknown', status: 'DRAFT', detail: { invoice_number: '', currency_code: 'USD' } };
+    const location = res.headers.get('location') || '';
+    const rawId = (data as any)?.id || (typeof (data as any)?.href === 'string' ? (data as any).href.split('/').pop() : '') || location.split('/').pop();
+    const invoiceId = safeString(rawId, `INV2-${Date.now()}`);
+
+    return {
+      ...(isRecord(data) ? (data as any) : {}),
+      id: invoiceId,
+      status: (data as any)?.status || 'DRAFT',
+      detail: (data as any)?.detail || params.detail,
+    };
   }
 
   /**
    * Invoicing v2: Send invoice (POST /v2/invoicing/invoices/{invoice_id}/send)
    */
   async sendInvoice(invoiceId: string, payPalRequestId?: string): Promise<boolean> {
-    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || invoiceId.startsWith('INV2-')) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || invoiceId.startsWith('MOCK-')) {
       return true;
     }
 
@@ -2499,7 +2558,7 @@ export class PayPalApimaticClient {
    * Invoicing v2: Generate invoice payment QR code (POST /v2/invoicing/invoices/{invoice_id}/generate-qr-code)
    */
   async generateInvoiceQrCode(invoiceId: string): Promise<string> {
-    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || invoiceId.startsWith('INV2-')) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || invoiceId.startsWith('MOCK-')) {
       // Return high-fidelity Base64 PNG QR code placeholder
       return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
     }
@@ -2534,7 +2593,7 @@ export class PayPalApimaticClient {
    * Invoicing v2: Send invoice reminder (POST /v2/invoicing/invoices/{invoice_id}/remind)
    */
   async sendInvoiceReminder(invoiceId: string, note?: string, payPalRequestId?: string): Promise<boolean> {
-    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || invoiceId.startsWith('INV2-')) {
+    if (!this.config.clientId || this.config.clientId === 'your_paypal_client_id_here' || invoiceId.startsWith('MOCK-')) {
       return true;
     }
 

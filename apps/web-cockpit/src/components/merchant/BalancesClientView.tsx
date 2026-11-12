@@ -5,6 +5,7 @@ import type { ColDef } from 'ag-grid-community';
 import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 interface BalanceRow {
   currency: string;
@@ -30,7 +31,7 @@ export function BalancesClientView({ initialBalances }: { initialBalances: Balan
     setIsLoading(true);
     logger.info('[BalancesClientView] Fetching live balances from PayPal Reporting API');
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/balances`);
       if (res.ok) {
         const data = await res.json();

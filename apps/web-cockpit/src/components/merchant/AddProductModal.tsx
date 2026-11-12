@@ -17,6 +17,7 @@ import {
   Info,
 } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -27,7 +28,7 @@ interface AddProductModalProps {
 export function AddProductModal({ isOpen, onClose, onProductCreated }: AddProductModalProps) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('ELECTRONICS');
+  const [category, setCategory] = useState('SOFTWARE');
   const [type, setType] = useState<'PHYSICAL' | 'DIGITAL' | 'SERVICE'>('PHYSICAL');
   const [imageUrl, setImageUrl] = useState('');
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -73,7 +74,7 @@ export function AddProductModal({ isOpen, onClose, onProductCreated }: AddProduc
     logger.info('[AddProductModal] Invoking Gemini 3.8 Flash multi-modal auto-fill');
 
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const res = await fetch(`${orchestratorUrl}/api/merchant/products/ai-suggest`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -131,7 +132,7 @@ export function AddProductModal({ isOpen, onClose, onProductCreated }: AddProduc
     setErrorMessage(null);
 
     const priceCents = Math.round(parseFloat(priceUsd) * 100) || 9900;
-    const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+    const orchestratorUrl = getApiBaseUrl();
 
     try {
       logger.info('[AddProductModal] Creating product on PayPal Catalog API', { name, category, type });
@@ -331,12 +332,11 @@ export function AddProductModal({ isOpen, onClose, onProductCreated }: AddProduc
                 onChange={(e) => setCategory(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-[#080d1a] text-slate-900 dark:text-white text-xs font-medium focus:ring-2 focus:ring-cyan-500 focus:outline-hidden"
               >
-                <option value="ELECTRONICS">ELECTRONICS</option>
-                <option value="SOFTWARE">SOFTWARE</option>
-                <option value="ACCESSORIES">ACCESSORIES</option>
-                <option value="SERVICES">SERVICES</option>
-                <option value="CLOTHING">CLOTHING</option>
-                <option value="HEALTH_AND_BEAUTY">HEALTH & BEAUTY</option>
+                <option value="SOFTWARE">SOFTWARE (Tech, Software & Hardware)</option>
+                <option value="ACCESSORIES">ACCESSORIES (Peripherals & Gear)</option>
+                <option value="SERVICES">SERVICES (Subscription & Support)</option>
+                <option value="CLOTHING">CLOTHING (Apparel & Wearables)</option>
+                <option value="BOOKS_PERIODICALS_AND_NEWSPAPERS">BOOKS & MEDIA</option>
               </select>
             </div>
           </div>

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import type { CustomCellRendererProps } from 'ag-grid-react';
 import { Truck, CheckCircle2, Clock, AlertTriangle, ExternalLink } from 'lucide-react';
+import { getApiBaseUrl } from '@/lib/utils';
 
 export interface CarrierData {
   carrier?: string;
@@ -27,7 +28,7 @@ export function CarrierTrackerCellRenderer(props: CustomCellRendererProps<Carrie
   const handleSyncTracker = async () => {
     setSyncingTracker(true);
     try {
-      const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
+      const orchestratorUrl = getApiBaseUrl();
       const txId = (data as any)?.id || (data as any)?.transaction_id || 'TXN-DEMO-001';
       const res = await fetch(`${orchestratorUrl}/api/merchant/trackers`, {
         method: 'POST',

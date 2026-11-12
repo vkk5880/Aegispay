@@ -17,10 +17,13 @@ import {
   UserCheck,
   LogIn,
   AlertCircle,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth } from '@/context/AuthContext';
 import { webLogger as logger } from '@/lib/logger';
+import { getApiBaseUrl } from '@/lib/utils';
 
 const DisputeSlaScheduler = dynamic(
   () =>
@@ -54,6 +57,48 @@ export default function MerchantCockpitPage() {
   const { user, isLoggedIn, openAuthModal } = useAuth();
   const [disputes, setDisputes] = useState<any[]>([]);
   const [isLoadingDisputes, setIsLoadingDisputes] = useState(true);
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedNotice, setSeedNotice] = useState<string | null>(null);
+
+  const fetchDisputes = async () => {
+    setIsLoadingDisputes(true);
+    try {
+      const orchestratorUrl = getApiBaseUrl();
+      const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`);
+      if (res.ok) {
+        const data = await res.json();
+        setDisputes(Array.isArray(data.disputes) ? data.disputes : []);
+        logger.info(`[MerchantCockpitPage] Loaded ${data.disputes?.length || 0} live merchant disputes`);
+      }
+    } catch (err: any) {
+      logger.debug('[MerchantCockpitPage] Live disputes fetch notice:', err?.message);
+    } finally {
+      setIsLoadingDisputes(false);
+    }
+  };
+
+  const handleSeedSandbox = async () => {
+    setIsSeeding(true);
+    setSeedNotice(null);
+    try {
+      const orchestratorUrl = getApiBaseUrl();
+      const res = await fetch(`${orchestratorUrl}/api/merchant/seed-sandbox`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        setSeedNotice('✅ Live PayPal Sandbox seeded with products, subscription plans & invoices!');
+        await fetchDisputes();
+      } else {
+        setSeedNotice(`Notice: ${data.message || 'Seeding initiated'}`);
+      }
+    } catch (err: any) {
+      setSeedNotice('Failed to connect to PayPal sandbox seeder.');
+    } finally {
+      setIsSeeding(false);
+      setTimeout(() => setSeedNotice(null), 5000);
+    }
+  };
 
   useEffect(() => {
     logger.info('[MerchantCockpitPage] Mounted Merchant Cockpit page', {
@@ -63,23 +108,6 @@ export default function MerchantCockpitPage() {
       timestamp: new Date().toISOString(),
       viewport: typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : 'SSR',
     });
-
-    async function fetchDisputes() {
-      setIsLoadingDisputes(true);
-      try {
-        const orchestratorUrl = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:4000';
-        const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`);
-        if (res.ok) {
-          const data = await res.json();
-          setDisputes(Array.isArray(data.disputes) ? data.disputes : []);
-          logger.info(`[MerchantCockpitPage] Loaded ${data.disputes?.length || 0} live merchant disputes`);
-        }
-      } catch (err: any) {
-        logger.debug('[MerchantCockpitPage] Live disputes fetch notice:', err?.message);
-      } finally {
-        setIsLoadingDisputes(false);
-      }
-    }
 
     fetchDisputes();
 
@@ -165,6 +193,20 @@ export default function MerchantCockpitPage() {
               Vault Allowance: ${(user.budgetCapCents / 100).toFixed(2)}
             </span>
           ) : null}
+          <button
+            type="button"
+            onClick={handleSeedSandbox}
+            disabled={isSeeding}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 text-xs font-bold transition-all shadow-xs disabled:opacity-50"
+            title="Seed live products, subscription plans, and invoices into PayPal Sandbox"
+          >
+            {isSeeding ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-500" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
+            )}
+            {isSeeding ? 'Seeding PayPal...' : 'Seed PayPal Sandbox'}
+          </button>
           {!isLoggedIn ? (
             <button
               type="button"
@@ -182,6 +224,19 @@ export default function MerchantCockpitPage() {
           )}
         </div>
       </div>
+
+      {seedNotice && (
+        <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-800 dark:text-cyan-200 text-xs font-bold flex items-center justify-between animate-in fade-in">
+          <span>{seedNotice}</span>
+          <button
+            type="button"
+            onClick={() => setSeedNotice(null)}
+            className="text-cyan-600 dark:text-cyan-400 hover:underline ml-4 text-[11px]"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Merchant Reporting & APIMatic Overview */}
       <DashboardReports />
