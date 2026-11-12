@@ -256,3 +256,58 @@ test('assistantUiRuntime: createDataStreamChatAdapter gracefully yields error no
   }
   assert.ok(true);
 });
+
+test('BuyerGenerativeTools: tool renderers are defensive against undefined status and args', async () => {
+  const React = await import('react');
+  const { renderToString } = await import('react-dom/server');
+
+  // Test SearchCatalogToolUI with undefined status (simulates in-flight or manual part)
+  const searchHtml = renderToString(
+    React.createElement(SearchCatalogToolUI.unstable_tool.render as any, {
+      args: { query: 'noise cancelling' },
+      result: undefined,
+      status: undefined as any,
+    })
+  );
+  assert.ok(searchHtml.includes('Searching Channel3 Catalog'), 'SearchCatalogToolUI should render loading skeleton even when status is undefined');
+
+  // Test DiscoverProductsToolUI with undefined status
+  const discoverHtml = renderToString(
+    React.createElement(DiscoverProductsToolUI.unstable_tool.render as any, {
+      args: undefined as any,
+      result: undefined,
+      status: undefined as any,
+    })
+  );
+  assert.ok(discoverHtml.includes('Searching Channel3 Catalog'), 'DiscoverProductsToolUI should render loading skeleton even when args & status are undefined');
+
+  // Test FilterTurnProductsToolUI with undefined status
+  const filterHtml = renderToString(
+    React.createElement(FilterTurnProductsToolUI.unstable_tool.render as any, {
+      args: undefined as any,
+      result: undefined,
+      status: undefined as any,
+    })
+  );
+  assert.ok(filterHtml.includes('Applying sub-2ms in-memory turn filters'), 'FilterTurnProductsToolUI should render loading skeleton even when status is undefined');
+
+  // Test CompareProductsToolUI with undefined status
+  const compareHtml = renderToString(
+    React.createElement(CompareProductsToolUI.unstable_tool.render as any, {
+      args: undefined as any,
+      result: undefined,
+      status: undefined as any,
+    })
+  );
+  assert.ok(compareHtml.includes('Evaluating') && compareHtml.includes('contenders'), 'CompareProductsToolUI should render loading skeleton even when status is undefined');
+
+  // Test PrepareCheckoutToolUI with undefined status
+  const prepareHtml = renderToString(
+    React.createElement(PrepareCheckoutToolUI.unstable_tool.render as any, {
+      args: undefined as any,
+      result: undefined,
+      status: undefined as any,
+    })
+  );
+  assert.ok(prepareHtml.includes('Verifying 2PC merchant stock hold'), 'PrepareCheckoutToolUI should render loading skeleton even when status is undefined');
+});

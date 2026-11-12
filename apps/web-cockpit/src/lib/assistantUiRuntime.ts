@@ -361,6 +361,9 @@ export function createDataStreamChatAdapter(options: ShoppingAssistantRuntimeOpt
             args: tc.args as any,
             argsText: JSON.stringify(tc.args),
             result: tc.result,
+            status: {
+              type: tc.result !== undefined ? 'complete' : 'running',
+            } as any,
           });
         }
 

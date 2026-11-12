@@ -366,7 +366,8 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
   toolName: 'search_catalog',
   render: ({ args, result, status }) => {
     const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
-    const isRunning = status.type === 'running' || !result;
+    const isRunning = Boolean((status as any)?.type === 'running' || !result);
+    const query = args?.query || 'catalog search';
 
     if (isRunning) {
       return (
@@ -375,7 +376,7 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
             <div className="flex items-center gap-2 text-cyan-400 text-xs font-mono">
               <Sparkles className="w-4 h-4 animate-spin text-cyan-400" />
               <span>
-                Searching Channel3 Catalog for: <strong>"{args.query}"</strong>...
+                Searching Channel3 Catalog for: <strong>"{query}"</strong>...
               </span>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
@@ -391,8 +392,8 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
       );
     }
 
-    const products = result.products || [];
-    const promoCode = (result as any).promo_code || 'PAYPAL-HACKATHON-2026';
+    const products = result?.products || [];
+    const promoCode = (result as any)?.promo_code || 'PAYPAL-HACKATHON-2026';
     return (
       <div className="my-2 space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
@@ -424,7 +425,8 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
   toolName: 'discover_products',
   render: ({ args, result, status }) => {
     const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
-    const isRunning = status.type === 'running' || !result;
+    const isRunning = Boolean((status as any)?.type === 'running' || !result);
+    const query = args?.query || 'catalog search';
 
     if (isRunning) {
       return (
@@ -433,7 +435,7 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
             <div className="flex items-center gap-2 text-cyan-400 text-xs font-mono">
               <Sparkles className="w-4 h-4 animate-spin text-cyan-400" />
               <span>
-                Searching Channel3 Catalog for: <strong>"{args.query}"</strong>...
+                Searching Channel3 Catalog for: <strong>"{query}"</strong>...
               </span>
             </div>
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
@@ -449,8 +451,8 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
       );
     }
 
-    const products = result.products || [];
-    const promoCode = (result as any).promo_code || 'PAYPAL-HACKATHON-2026';
+    const products = result?.products || [];
+    const promoCode = (result as any)?.promo_code || 'PAYPAL-HACKATHON-2026';
     return (
       <div className="my-2 space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 font-mono">
@@ -482,29 +484,30 @@ export const FilterTurnProductsToolUI = makeAssistantToolUI<FilterTurnProductsIn
   toolName: 'filter_turn_products',
   render: ({ args, result, status }) => {
     const { selectedProducts, onToggleSelectProduct, onAskAi, onAction } = useBuyerToolCallbacks();
-    const isRunning = status.type === 'running' || !result;
+    const isRunning = Boolean((status as any)?.type === 'running' || !result);
+    const criteria = args?.criteria || 'active items';
 
     if (isRunning) {
       return (
         <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 my-2 animate-pulse flex items-center gap-2 text-cyan-400 text-xs font-mono">
           <Clock className="w-4 h-4 animate-spin" />
-          <span>Applying sub-2ms in-memory turn filters ({args.criteria || 'active items'})...</span>
+          <span>Applying sub-2ms in-memory turn filters ({criteria})...</span>
         </div>
       );
     }
 
-    const products = result.products || [];
+    const products = result?.products || [];
     return (
       <div className="my-2 space-y-2">
         <div className="p-2 rounded-lg bg-cyan-50/60 dark:bg-cyan-950/30 border border-cyan-500/30 text-xs flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-cyan-700 dark:text-cyan-300 font-mono text-[11px]">
             <Layers className="w-3.5 h-3.5" />
             <span>
-              Filtered <strong>{result.filtered_count}</strong> item(s) in-memory (&lt;2ms)
-              {result.applied_criteria ? ` matching "${result.applied_criteria}"` : ''}
+              Filtered <strong>{result?.filtered_count ?? products.length}</strong> item(s) in-memory (&lt;2ms)
+              {result?.applied_criteria ? ` matching "${result.applied_criteria}"` : ''}
             </span>
           </div>
-          {args.sort_by && (
+          {args?.sort_by && (
             <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
               Sort: {args.sort_by}
             </span>
@@ -535,37 +538,40 @@ export const CompareProductsToolUI = makeAssistantToolUI<CompareProductsInput, C
   toolName: 'compare_products',
   render: ({ args, result, status }) => {
     const { onAction } = useBuyerToolCallbacks();
-    const isRunning = status.type === 'running' || !result;
+    const isRunning = Boolean((status as any)?.type === 'running' || !result);
+    const productCount = args?.product_ids?.length || 2;
 
     if (isRunning) {
       return (
         <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-4 my-2 animate-pulse space-y-2">
           <div className="flex items-center gap-2 text-cyan-400 text-xs font-mono">
             <Scale className="w-4 h-4 animate-spin text-cyan-400" />
-            <span>Evaluating {args.product_ids?.length || 2} contenders side-by-side...</span>
+            <span>Evaluating {productCount} contenders side-by-side...</span>
           </div>
           <div className="h-32 rounded-lg bg-slate-800/40 border border-slate-700/40" />
         </div>
       );
     }
 
-    const comparison = result.comparison;
-    const contenders = result.products || comparison.products || [];
-    const winnerId = result.winner_product_id || comparison.winner_product_id;
-    const winner = contenders.find((c) => c.product_id === winnerId) || contenders[0];
+    const comparison = result?.comparison || ({} as any);
+    const contenders = result?.products || comparison?.products || [];
+    const winnerId = result?.winner_product_id || comparison?.winner_product_id;
+    const winner = contenders.find((c: any) => c.product_id === winnerId) || contenders[0] || null;
 
     return (
       <div className="my-2 space-y-3">
         {/* Battle Arena Visualizer */}
-        <BattleArena
-          contenders={contenders}
-          winner={winner}
-          battleReport={comparison.rationale || (result as any).reason || null}
-          onSelectWinner={(winProd) => onAction('BUY', winProd)}
-        />
+        {contenders.length > 0 && winner && (
+          <BattleArena
+            contenders={contenders}
+            winner={winner}
+            battleReport={comparison?.rationale || (result as any)?.reason || null}
+            onSelectWinner={(winProd) => onAction('BUY', winProd)}
+          />
+        )}
 
         {/* Detailed Spec Comparison Table */}
-        <ComparisonMatrixCard matrix={comparison} onAction={onAction} />
+        {comparison && <ComparisonMatrixCard matrix={comparison} onAction={onAction} />}
       </div>
     );
   },
@@ -579,7 +585,7 @@ export const PrepareCheckoutToolUI = makeAssistantToolUI<PrepareCheckoutInput, P
   toolName: 'prepare_checkout',
   render: ({ args, result, status }) => {
     const { zipCode, onViewFullCart, onPurchaseConfirmed, onAction } = useBuyerToolCallbacks();
-    const isRunning = status.type === 'running' || !result;
+    const isRunning = Boolean((status as any)?.type === 'running' || !result);
 
     if (isRunning) {
       return (
@@ -593,17 +599,17 @@ export const PrepareCheckoutToolUI = makeAssistantToolUI<PrepareCheckoutInput, P
       );
     }
 
-    const prod = result.product;
-    const qty = args.quantity || 1;
-    const unitPrice = prod?.price_cents || Math.round(result.total_expenditure_cents / qty) || 10000;
+    const prod = result?.product;
+    const qty = args?.quantity || 1;
+    const unitPrice = prod?.price_cents || Math.round((result?.total_expenditure_cents || 10000) / qty);
     const rebateCents = (prod?.commission_rebate_cents || Math.round(unitPrice * 0.1)) * qty;
     const shippingCents = prod?.free_shipping ? 0 : 500;
     const grossSubtotalCents = unitPrice * qty;
     const taxCents = Math.round(grossSubtotalCents * 0.0825);
-    const netCents = result.total_expenditure_cents || grossSubtotalCents - rebateCents + shippingCents + taxCents;
+    const netCents = result?.total_expenditure_cents || grossSubtotalCents - rebateCents + shippingCents + taxCents;
 
-    const cart = (result.cart as any)?.assigned_merchants
-      ? (result.cart as any)
+    const cart = (result?.cart as any)?.assigned_merchants
+      ? (result?.cart as any)
       : {
           gross_subtotal_cents: grossSubtotalCents,
           total_commission_rebate_cents: rebateCents,
@@ -611,7 +617,7 @@ export const PrepareCheckoutToolUI = makeAssistantToolUI<PrepareCheckoutInput, P
           total_shipping_saved_cents: 0,
           total_tax_cents: taxCents,
           net_buyer_expenditure_cents: netCents,
-          budget_cap_cents: args.budget_cap_cents || 50000,
+          budget_cap_cents: args?.budget_cap_cents || 50000,
           is_within_budget: true,
           assigned_merchants: [
             {
@@ -624,7 +630,7 @@ export const PrepareCheckoutToolUI = makeAssistantToolUI<PrepareCheckoutInput, P
               tax_cents: taxCents,
               items: [
                 {
-                  product_id: prod?.product_id || args.product_id,
+                  product_id: prod?.product_id || args?.product_id || 'prod_unknown',
                   title: prod?.title || 'Selected Product',
                   price_cents: unitPrice,
                   unit_price_cents: unitPrice,

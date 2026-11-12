@@ -577,6 +577,15 @@ export function ConversationalAgentChat({
                                         />
                                       </div>
                                     ),
+                                    tools: {
+                                      by_name: {
+                                        search_catalog: SearchCatalogToolUI.unstable_tool.render,
+                                        discover_products: DiscoverProductsToolUI.unstable_tool.render,
+                                        filter_turn_products: FilterTurnProductsToolUI.unstable_tool.render,
+                                        compare_products: CompareProductsToolUI.unstable_tool.render,
+                                        prepare_checkout: PrepareCheckoutToolUI.unstable_tool.render,
+                                      },
+                                    },
                                   }}
                                 />
                               </div>
