@@ -35,7 +35,11 @@ Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atom
   - [4.4 Channel3 Commerce Intelligence (Catalog & Cart Solver)](#44-channel3-commerce-intelligence-catalog--cart-solver)
   - [4.5 APIMatic Grounded SDK Implementation](#45-apimatic-grounded-sdk-implementation)
   - [4.6 Bryntum SLA Dispute Scheduler](#46-bryntum-sla-dispute-scheduler)
-- [5. 🎬 3-Minute Interactive Demo & Evaluation Runbook](#5--3-minute-interactive-demo--evaluation-runbook)
+- [5. 🔍 Evaluator Testing Guide & Professional Demo Walkthrough](#5--evaluator-testing-guide--professional-demo-walkthrough)
+  - [5.1 Interactive Portals & Navigation Map](#51-interactive-portals--navigation-map)
+  - [5.2 Step-by-Step Evaluator Test Scenarios (How to Check Our Agent)](#52-step-by-step-evaluator-test-scenarios-how-to-check-our-agent)
+  - [5.3 Complete Capabilities & Feature Inventory (What We Have)](#53-complete-capabilities--feature-inventory-what-we-have)
+  - [5.4 3-Minute Video Presentation Storyboard](#54-3-minute-video-presentation-storyboard)
 - [6. ☁️ Production Deployment Guide (Render Blueprint & Manual)](#6-️-production-deployment-guide-render-blueprint--manual)
 - [7. 💻 Local Development & Quickstart](#7--local-development--quickstart)
 - [8. 📂 Monorepo Directory Topology](#8--monorepo-directory-topology)
@@ -265,14 +269,144 @@ AegisPay integrates best-in-class commerce, cloud, and analytical infrastructure
 
 ---
 
-## 5. 🎬 3-Minute Interactive Demo & Evaluation Runbook
+## 5. 🔍 Evaluator Testing Guide & Professional Demo Walkthrough
 
-Evaluators can test the entire system in **under 3 minutes** using the pre-authenticated, zero-friction Evaluation Cockpit at:  
-👉 **`http://localhost:3000/judge`** (or deployed URL: `/judge`)
+This section provides a structured, professional guide for judges, evaluators, and engineers to interactively test AegisPay's AI agents, clearinghouse workstations, and security barriers.
+
+### 5.1 Interactive Portals & Navigation Map
+
+| Portal / Route | Interface Role | Primary Evaluation Capabilities |
+| :--- | :--- | :--- |
+| **`http://localhost:3000/`** | **Buyer Agent Portal** | Multi-turn conversational commerce, assistant-ui generative tools, 1-prompt buy, Fastlane checkout |
+| **`http://localhost:3000/judge`** | **Pre-Authenticated Evaluation Lab** | 4-act automated testing suite, prompt injection shield, synthetic bidding, live telemetry console |
+| **`http://localhost:3000/merchant`** | **Merchant Clearinghouse** | AG Grid Enterprise v36 Master/Detail, AG Studio 3 live canvas, Bryntum SLA timeline scheduler |
+| **`http://localhost:3000/simulator`** | **Chaos Negative Testing Lab** | Injects real `PayPal-Mock-Response` headers (`INSTRUMENT_DECLINED`, `COMPLIANCE_VIOLATION`) |
+| **`http://localhost:3000/products/[id]`** | **Flagship Product Detail (PDP)** | Multi-angle studio zoom gallery, 2PC stock verification, multi-merchant price comparison matrix |
+| **`http://localhost:4000/api/integrations/verify`** | **Health Telemetry Endpoint** | Real-time diagnostic JSON returning live connectivity for PostgreSQL, Redis, PayPal, Channel3 |
+
+---
+
+### 5.2 Step-by-Step Evaluator Test Scenarios (How to Check Our Agent)
+
+#### Scenario A: Testing the Autonomous Conversational Shopping Agent
+1. **Navigate to:** `http://localhost:3000/` (Buyer Agent Portal).
+2. **Test Multi-Turn Product Discovery:**
+   - Type in the chat bar:
+     ```text
+     "Find me noise cancelling wireless headphones with 30h battery under $350"
+     ```
+   - **Observe:**
+     - The Fastify SSE data stream returns live token streaming (`0:text`).
+     - Tool-calling visualizers appear displaying `discover_products` querying Channel3 and `score_and_rank` executing deterministic utility ranking.
+     - Generative UI cards render with product badges (`Best Value`, `Price Leader`), verified Channel3 pricing, and instant cashback breakdowns.
+3. **Test Side-by-Side Product Comparison (Battle Arena):**
+   - Click the **[⚖️ Select / Compare]** chip on two different headphones in the chat.
+   - Type or click:
+     ```text
+     "Compare these two side-by-side"
+     ```
+   - **Observe:** The Generative **Battle Arena** drawer expands, highlighting technical specifications, battery life, weight, merchant anomaly score, and warranty terms side-by-side.
+4. **Test 1-Prompt Autonomous Buying & Spend Mandates:**
+   - Click **Connect with PayPal** in the header and choose **Mode B: Spend Allowance Authorization** (mints a PayPal Vault v3 Setup Token + browser-signed Ed25519 mandate with a $400 spend limit).
+   - Type in chat:
+     ```text
+     "Buy the Sony WH-1000XM5 under $300 right now"
+     ```
+   - **Observe:**
+     - The agent verifies the Ed25519 mandate, decrements the balance atomically via Redis Lua in `< 1ms`, locks inventory via 2PC, and executes the PayPal order without popup modals.
+     - A streamed success receipt card appears with carrier tracking and a scoped receipt link.
+
+---
+
+#### Scenario B: Testing the 4-Act Automated Evaluation Suite (`/judge`)
+Navigate to `http://localhost:3000/judge`. This pre-authenticated lab allows testing all core algorithmic moats in zero-friction 1-click actions:
+
+* **Act 1: Adversarial Prompt Injection Block**
+  - Click **[Trigger $5,000 Injection Attack]**.
+  - **Result:** An external prompt injection attempt over a $500 cap is intercepted by the single-threaded Redis Lua firewall. The transaction is **rejected in < 1ms (`ERR_EXCEEDS_TOTAL_MANDATE_BUDGET`)** before PayPal REST APIs can be touched.
+* **Act 2: Synthetic Intent Bidding & Vault Authorization**
+  - Click **[Trigger Synthetic Bid ($450)]** on a $490 cart.
+  - **Result:** Mints a `SyntheticIntentVoucher` anchored by a live PayPal Vault v3 Setup Token. The autonomous merchant pricing agent accepts the counter-bid, immediately converting the setup token into an authorized PayPal order.
+* **Act 3: Damaged Return Dispute Forensics & Auto-Adjudication**
+  - Click **[Auto-Adjudicate Dispute]**.
+  - **Result:** Render Workflows runs computer vision comparisons between pristine Channel3 studio photos and buyer damage photos, inspects EXIF metadata for Photoshop tampering, compiles an in-memory `pdf-lib` evidence dossier, and streams `multipart/form-data` to PayPal Disputes v1 (`/provide-evidence`).
+* **Act 4: Knapsack Multi-Vendor Split & 72h Escrow Price Drop**
+  - Click **[Trigger Knapsack + 72h Drop]**.
+  - **Result:** The ILP knapsack solver optimizes multi-vendor split units, passes commission rebates ($\alpha = 0.75$), and places an `AUTHORIZE` hold. The Render Workflow detects a 15% price drop on Channel3 and captures the adjusted lower price ($403.75), auto-refunding the difference to the buyer.
+
+---
+
+#### Scenario C: Testing the Merchant Clearinghouse & AG Grid Enterprise Workstation
+1. **Navigate to:** `http://localhost:3000/merchant`
+2. **Test Master/Detail Order Expansion (`/merchant/transactions`):**
+   - Click the expand arrow `▶` on transaction `TXN-DEMO-001`.
+   - **Observe:** The child `<OrderDetailView />` sub-grid opens, revealing separate multi-payee merchant payouts, Vault v3 setup token states, and live USPS shipment tracking scan events.
+3. **Test Live AG Studio 3 Multi-Agent Canvas:**
+   - In `/merchant`, locate the active AG Studio 3 Canvas and Prompt Bar.
+   - Type natural language prompt commands:
+     ```text
+     "Filter orders with margin > 15%"
+     ```
+     ```text
+     "Isolate high risk disputes with abuse score > 60%"
+     ```
+   - **Observe:** The AG Studio Lead Agent compiles the prompt into DuckDB SQL and executes cross-filtering in `< 10ms` over client-side Arrow tables.
+4. **Test Bryntum Dispute SLA Timeline:**
+   - In the Merchant Arbitration view, locate the Bryntum SLA Scheduler.
+   - Click the **"Imminent Breach"** filter button.
+   - **Observe:** The grid isolates disputes approaching PayPal's `seller_response_due_date` with color-coded urgency bands (Red <6h, Yellow vision triage, Green submitted) and prominent **"Unallocated SLA Deadline"** badges.
+5. **Test In-Cell Sparklines & Multi-Sheet Excel Export:**
+   - In `/merchant/balances`, inspect in-cell area sparklines depicting 30-day balance trajectories.
+   - Click **Pivot Mode** to cross-tabulate multi-currency reserves, and click **Export Excel** to download a formatted multi-sheet `.xlsx` workbook.
+
+---
+
+#### Scenario D: Testing Bank Declines & Ledger Rollbacks in the Chaos Lab (`/simulator`)
+1. **Navigate to:** `http://localhost:3000/simulator`
+2. **Trigger Bank Decline (`INSTRUMENT_DECLINED`):**
+   - Select `INSTRUMENT_DECLINED` and click **Execute Negative Test**.
+   - **Observe:** The Fastify orchestrator passes authentic `PayPal-Mock-Response` headers to PayPal Sandbox. PayPal returns HTTP 422 `INSTRUMENT_DECLINED`. Within `0.38ms`, the Redis Lua compensating script executes `rollback_spend`, restoring the buyer's budget cap with zero leakage.
+3. **Trigger Compliance Violation (`COMPLIANCE_VIOLATION`):**
+   - Select `COMPLIANCE_VIOLATION` and click **Execute Negative Test**.
+   - **Observe:** The transaction is quarantined, 2PC inventory holds are released, and an audit entry is logged to PostgreSQL 16.
+
+---
+
+### 5.3 Complete Capabilities & Feature Inventory (What We Have)
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                   AEGISPAY FEATURE INVENTORY                                     │
+├─────────────────────────┬────────────────────────────────────────────────────────────────────────┤
+│ Layer / Capability      │ Feature Description & Operational Scope                                │
+├─────────────────────────┼────────────────────────────────────────────────────────────────────────┤
+│ Conversational Chat     │ assistant-ui + Mastra DAG + Gemini 2.5 Flash with Fastify SSE stream   │
+│ Generative UI Tools     │ Product cards, side-by-side Battle Arena, turn-attached product chips    │
+│ Flagship PDP & Modal    │ Dedicated route (/products/[id]) with studio gallery zoom & 2PC stock  │
+│ Spend Protection        │ WebCrypto Ed25519 SessionMandates + Sub-1ms Redis Lua atomic limiter   │
+│ Fastlane Checkout       │ PayPal JS SDK v6 Web Components accelerated guest conversion           │
+│ Knapsack Optimizer      │ Integer Linear Programming multi-vendor cart solver (Channel3 catalog) │
+│ Synthetic Intent        │ Bounded Dutch auction discount negotiation backed by Vault v3 tokens   │
+│ 72h Price-Drop Escrow   │ Render Workflows durable polling capturing price drops & auto-refunds  │
+│ Dispute Forensics       │ Computer vision photo diffs, EXIF tampering audits, pdf-lib dossiers   │
+│ Merchant Clearinghouse  │ AG Grid Enterprise v36 Master/Detail sub-grids, dynamic Quartz theme   │
+│ DuckDB-WASM SSRM Bridge │ Web Worker Server-Side Row Model running <10ms SQL over 100K+ records  │
+│ Live AG Studio 3 Canvas │ Multi-agent AI harness executing natural language dashboard commands   │
+│ Bryntum SLA Scheduler   │ Dispute response timeline with Unallocated SLA badge & breach filters  │
+│ Chaos Negative Testing  │ PayPal-Mock-Response header simulator for bank decline rollback tests  │
+│ Automated Cloud Deploy  │ Declarative render.yaml Blueprint (Web, Workflows, Cron, PG16, Redis)  │
+└─────────────────────────┴────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 5.4 3-Minute Video Presentation Storyboard
+
+For evaluators watching the 180-second demonstration video (script located in [`docs/DEMO_VIDEO_SCRIPT.md`](docs/DEMO_VIDEO_SCRIPT.md)):
 
 ```
 ====================================================================================
-                        AEGISPAY 3-MINUTE EVALUATION RUNBOOK
+                        AEGISPAY 3-MINUTE VIDEO STORYBOARD
 ====================================================================================
 [0:00 - 0:45] ACT 1: ADVERSARIAL PROMPT INJECTION SHIELD
   Narrative : Autonomous shopping agent receives an injected prompt attempting a
@@ -304,11 +438,6 @@ Evaluators can test the entire system in **under 3 minutes** using the pre-authe
               price ($403.75) and auto-refunding the difference to the buyer.
 ====================================================================================
 ```
-
-### Live Sandbox Chaos Simulator (`/simulator`)
-The Chaos Simulator allows testing authentic `PayPal-Mock-Response` headers in live Sandbox calls:
-- `INSTRUMENT_DECLINED`: Verifies compensating Redis Lua rollbacks and financial ledger balance restoration.
-- `COMPLIANCE_VIOLATION`: Confirms policy rejections and immediate security logging.
 
 ---
 
