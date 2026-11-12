@@ -4,6 +4,7 @@ import {
   parseDataStreamLine,
   decodeDataStream,
   createDataStreamChatAdapter,
+  useShoppingAssistantRuntime,
 } from '../../lib/assistantUiRuntime.js';
 import { POST as chatHandler } from '../../app/api/buyer/chat/route.js';
 import {
@@ -219,4 +220,8 @@ test('BuyerGenerativeTools: makeAssistantToolUI correctly registers the 4 core g
 
   assert.equal(PrepareCheckoutToolUI.unstable_tool.toolName, 'prepare_checkout');
   assert.equal(typeof PrepareCheckoutToolUI.unstable_tool.render, 'function');
+});
+
+test('assistantUiRuntime: useShoppingAssistantRuntime is a defined hook function with stable interface', () => {
+  assert.equal(typeof useShoppingAssistantRuntime, 'function');
 });

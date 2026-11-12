@@ -133,10 +133,26 @@ export function ConversationalAgentChat({
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            logger.info('[BuyerChat:Storage] Restored saved chat history from localStorage', {
-              messageCount: parsed.length,
-            });
-            return parsed;
+            // Filter to only messages that have valid role and content
+            const valid = parsed.filter(
+              (m) => m && (m.role === 'user' || m.role === 'assistant') && m.content
+            );
+            // Ensure every message has an id and valid structured content
+            const sanitized = valid.map((m, idx) => ({
+              id: m.id || `msg_restored_${idx}`,
+              role: m.role,
+              content: typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content,
+            }));
+            // Drop trailing user message if there is no assistant response to avoid broken thread state
+            while (sanitized.length > 0 && sanitized[sanitized.length - 1].role === 'user') {
+              sanitized.pop();
+            }
+            if (sanitized.length > 0) {
+              logger.info('[BuyerChat:Storage] Restored saved chat history from localStorage', {
+                messageCount: sanitized.length,
+              });
+              return sanitized;
+            }
           }
         }
       } catch (err: any) {
@@ -249,7 +265,7 @@ export function ConversationalAgentChat({
     },
   });
 
-  const handleSendMessage = (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();
     if (!text && selectedProducts.length === 0) return;
 
@@ -266,26 +282,21 @@ export function ConversationalAgentChat({
     });
 
     setIsSubmitting(true);
-    try {
-      runtime.thread.append(messageText);
+    if (!textToSend) setInputMessage('');
 
-      // Persist user turn to localStorage
-      if (typeof window !== 'undefined') {
-        try {
-          const raw = localStorage.getItem('aegispay_saved_chat_messages');
-          const currentList: any[] = raw ? JSON.parse(raw) : [];
-          currentList.push({
-            role: 'user',
-            content: [{ type: 'text', text: messageText }],
-          });
-          localStorage.setItem('aegispay_saved_chat_messages', JSON.stringify(currentList));
-        } catch {}
+    try {
+      if (runtime.thread && typeof runtime.thread.append === 'function') {
+        await runtime.thread.append(messageText);
+      } else if (runtime.thread?.composer) {
+        runtime.thread.composer.setText(messageText);
+        runtime.thread.composer.send();
       }
     } catch (err: any) {
-      logger.warn('[BuyerChat:Send] Failed to append message directly to thread', { error: err?.message });
+      logger.error('[BuyerChat:Send] Failed to send message to assistant-ui thread', { error: err?.message });
+      // Restore input text if send failed so user does not lose input
+      if (!textToSend) setInputMessage(text);
     } finally {
       setIsSubmitting(false);
-      if (!textToSend) setInputMessage('');
     }
   };
 
@@ -572,6 +583,14 @@ export function ConversationalAgentChat({
                             </div>
                           </div>
                         </MessagePrimitive.If>
+
+                        {/* Error State Rendering */}
+                        <MessagePrimitive.Error>
+                          <div className="flex items-center gap-2 p-3 my-1 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-700 dark:text-rose-300 text-xs">
+                            <AlertCircle className="w-4 h-4 shrink-0 text-rose-500" />
+                            <span>Failed to generate response. Please try rephrasing or click a suggestion below.</span>
+                          </div>
+                        </MessagePrimitive.Error>
                       </MessagePrimitive.Root>
                     ),
                   }}

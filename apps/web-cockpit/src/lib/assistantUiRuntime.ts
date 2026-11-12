@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useLocalRuntime } from '@assistant-ui/react';
 import type {
   ChatModelAdapter,
@@ -360,36 +360,58 @@ export function createDataStreamChatAdapter(options: ShoppingAssistantRuntimeOpt
 
 /**
  * React hook to initialize and memoize the Assistant UI shopping concierge runtime.
+ * Maintains stable adapter and runtimeOptions references to prevent thread list teardowns across re-renders.
  */
 export function useShoppingAssistantRuntime(options: ShoppingAssistantRuntimeOptions) {
-  const adapter = useMemo(() => createDataStreamChatAdapter(options), [
-    options.apiEndpoint,
-    options.sessionId,
-    options.budgetCapCents,
-    options.zipCode,
-    options.developerModeEnabled,
-    options.selectedModel,
-    options.userApiKey,
-  ]);
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
-  const defaultGreeting = [
-    {
-      role: 'assistant' as const,
-      content: [
-        {
-          type: 'text' as const,
-          text: options.developerModeEnabled
-            ? 'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.'
-            : 'Hello! I am your AegisPay Shopping Assistant. I can discover products across verified stores, compare features side-by-side, calculate instant cashback savings, and verify live stock before you purchase.',
-        },
-      ],
-    },
-  ];
+  // Stable adapter that delegates execution to the latest optionsRef.current without recreating the runtime
+  const adapter = useMemo<ChatModelAdapter>(() => {
+    return {
+      async *run(args) {
+        const delegate = createDataStreamChatAdapter(optionsRef.current);
+        yield* delegate.run(args);
+      },
+    };
+  }, []);
 
-  return useLocalRuntime(adapter, {
-    initialMessages:
-      options.initialMessages && options.initialMessages.length > 0
-        ? options.initialMessages
-        : defaultGreeting,
-  });
+  const defaultGreeting = useMemo(
+    () => [
+      {
+        id: 'init_greeting',
+        role: 'assistant' as const,
+        content: [
+          {
+            type: 'text' as const,
+            text: options.developerModeEnabled
+              ? 'Hello! I am your AegisPay Shopping Concierge. I can discover products across Channel3 merchants, compare specs side-by-side, calculate instant commission rebates, and verify stock with 2PC inventory holds before you purchase.'
+              : 'Hello! I am your AegisPay Shopping Assistant. I can discover products across verified stores, compare features side-by-side, calculate instant cashback savings, and verify live stock before you purchase.',
+          },
+        ],
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [options.developerModeEnabled]
+  );
+
+  const initialMessages = useMemo(() => {
+    if (options.initialMessages && options.initialMessages.length > 0) {
+      return options.initialMessages.map((m, idx) => ({
+        ...m,
+        id: m.id || `init_msg_${idx}`,
+      }));
+    }
+    return defaultGreeting;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const runtimeOptions = useMemo(
+    () => ({
+      initialMessages,
+    }),
+    [initialMessages]
+  );
+
+  return useLocalRuntime(adapter, runtimeOptions);
 }
