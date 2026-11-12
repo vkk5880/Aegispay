@@ -76,10 +76,15 @@ export function ChatInputBar({
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
               <span className="text-xs font-mono font-bold text-cyan-800 dark:text-cyan-300">
-                {`Selected (${selectedProducts.length}):`}
+                {`Selected (${selectedProducts.length}/4):`}
               </span>
+              {selectedProducts.length >= 4 && (
+                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                  Max 4 Limit
+                </span>
+              )}
               <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-                Combined: {formatCents(selectedProducts.reduce((sum, p) => sum + p.price_cents, 0))}
+                Combined: {formatCents((selectedProducts || []).reduce((sum, p) => sum + p.price_cents, 0))}
               </span>
             </div>
             <button
@@ -93,7 +98,7 @@ export function ChatInputBar({
 
           {/* Interactive Dismissible Chips */}
           <div className="flex flex-wrap gap-1.5 items-center">
-            {selectedProducts.map((product) => (
+            {(selectedProducts || []).map((product) => (
               <span
                 key={product.product_id}
                 className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-slate-50 dark:bg-[#0b1428] border border-cyan-500/30 text-slate-900 dark:text-slate-100 text-xs font-medium shadow-2xs group hover:border-cyan-500 transition-all"

@@ -308,31 +308,6 @@ export function BattleArena({
           onSelect={() => onSelectWinner?.(a)}
         />
 
-        {/* Small Comparison Center Badge with Deltas */}
-        <div className="flex sm:flex-col items-center justify-center shrink-0 gap-1.5 my-1 sm:my-0 px-1">
-          <div className="w-7 h-7 rounded-full bg-cyan-100 dark:bg-cyan-950/80 border border-cyan-400/50 flex items-center justify-center font-black text-[11px] text-cyan-700 dark:text-cyan-300 shadow-xs">
-            <Scale className="w-3.5 h-3.5" />
-          </div>
-          {deltas && (
-            <div className="flex sm:flex-col items-center gap-1 text-[9px] font-mono text-center">
-              <span className={`px-1.5 py-0.5 rounded-full border ${
-                deltas.cheaperSide === 'EQUAL'
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
-              }`}>
-                {deltas.priceDiffText}
-              </span>
-              <span className={`px-1.5 py-0.5 rounded-full border ${
-                deltas.higherScoreSide === 'EQUAL'
-                  ? 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
-                  : 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-500/30'
-              }`}>
-                {deltas.scoreDiffText}
-              </span>
-            </div>
-          )}
-        </div>
-
         <ContenderCard
           product={b}
           side="B"

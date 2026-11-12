@@ -305,9 +305,9 @@ export default function BuyerPortalPage() {
     logger.info('[BuyerPage:RemoveItem] Removing item from knapsack cart', { productId });
     setOptimizationData((prev) => {
       let removedTitle = 'Item';
-      const updatedMerchants = prev.assigned_merchants
+      const updatedMerchants = (prev?.assigned_merchants || [])
         .map((merchant) => {
-          const remainingItems = merchant.items.filter((it) => {
+          const remainingItems = (merchant?.items || []).filter((it) => {
             if (it.product_id === productId) {
               removedTitle = it.title;
               return false;
@@ -401,7 +401,7 @@ export default function BuyerPortalPage() {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-3 sm:py-4 space-y-3 sm:space-y-4">
         {/* Persistent Spend Allowance Header Bar */}
         <SpendAllowanceHeader
           maxBudgetCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
@@ -425,7 +425,7 @@ export default function BuyerPortalPage() {
         />
 
         {/* Main Consumer Shopping Concierge Chat */}
-        <section className="space-y-6">
+        <section className="space-y-3 sm:space-y-4">
           <ConversationalAgentChat
             budgetCapCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
             zipCode={userSettings.zipCode}
@@ -553,8 +553,8 @@ export default function BuyerPortalPage() {
               body: JSON.stringify({
                 message: `Order checkout for ${firstItem?.title || 'cart items'}`,
                 action: 'BUY',
-                selected_product_ids: optimizationData.assigned_merchants.flatMap((m) =>
-                  m.items.map((i) => i.product_id)
+                selected_product_ids: (optimizationData?.assigned_merchants || []).flatMap((m) =>
+                  (m?.items || []).map((i) => i?.product_id).filter(Boolean)
                 ),
                 budget_cap_cents: totalCents + 5000,
                 allowed_category_ids: user?.allowedCategories,

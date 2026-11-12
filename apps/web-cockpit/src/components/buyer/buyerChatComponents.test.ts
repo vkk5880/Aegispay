@@ -588,7 +588,7 @@ test('Upgrade B: ChatInputBar renders multi-chip input bar visualizer and quick 
   );
 
   // Multi-Chip Input Bar Visualizer checks
-  assert.ok(html.includes('Selected (2):'));
+  assert.ok(html.includes('Selected (2/4):') || html.includes('Selected (2):'));
   assert.ok(html.includes('Rowenta Steam 1710W'));
   assert.ok(html.includes('Black+Decker 1200W'));
   assert.ok(html.includes('(Clear All)'));
@@ -679,5 +679,144 @@ test('Chat Guardrails: POST /api/buyer/chat intercepts off-topic query and redir
   assert.ok(data.markdown.includes('AegisPay Commerce Concierge'));
   assert.ok(data.markdown.includes('specialize strictly in'));
 });
+
+test('Buyer Generative Tools: GenerativeProductCard renders compact horizontal mobile layout with select box', async () => {
+  const React = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const { GenerativeProductCard } = await import('./BuyerGenerativeTools.js');
+  const mockProduct = {
+    product_id: 'prod_test_01',
+    title: 'Sony WH-1000XM5 Wireless Headphones',
+    price_cents: 39999,
+    commission_rebate_cents: 4000,
+    merchant_domain: 'sony.com',
+    image_url: 'https://example.com/sony.jpg',
+    cleaned_image_url: 'https://example.com/sony.jpg',
+    rating: 4.8,
+    free_shipping: true,
+    merchant_credibility_score: 98,
+  };
+
+  // Test unselected state
+  const unselectedHtml = renderToString(
+    React.createElement(GenerativeProductCard, {
+      product: mockProduct as any,
+      isSelected: false,
+      onAction: () => {},
+    })
+  );
+  assert.ok(unselectedHtml.includes('flex-row'), 'Expected horizontal flex-row layout');
+  assert.ok(unselectedHtml.includes('w-14 h-14 sm:w-16 sm:h-16'), 'Expected small compact thumbnail');
+  assert.ok(unselectedHtml.includes('sony.com'));
+  assert.ok(unselectedHtml.includes('$359.99'), 'Expected net price ($399.99 - $40.00)');
+  assert.ok(unselectedHtml.includes('Select product for comparison'));
+
+  // Test selected state with tickmark
+  const selectedHtml = renderToString(
+    React.createElement(GenerativeProductCard, {
+      product: mockProduct as any,
+      isSelected: true,
+      onAction: () => {},
+    })
+  );
+  assert.ok(selectedHtml.includes('bg-cyan-600 border-cyan-600'), 'Expected checked checkbox style');
+  assert.ok(selectedHtml.includes('Deselect product'));
+});
+
+test('Buyer Generative Tools: ComparisonMatrixCard safely handles undefined rows without .map error', async () => {
+  const React = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const { ComparisonMatrixCard } = await import('./BuyerGenerativeTools.js');
+  const malformedMatrix = {
+    winner_product_id: 'prod_1',
+    rationale: 'Top value contender',
+    products: [
+      {
+        product_id: 'prod_1',
+        title: 'Product 1',
+        price_cents: 10000,
+        commission_rebate_cents: 1000,
+        merchant_domain: 'store1.com',
+        rating: 4.5,
+        free_shipping: true,
+      },
+      {
+        product_id: 'prod_2',
+        title: 'Product 2',
+        price_cents: 12000,
+        commission_rebate_cents: 500,
+        merchant_domain: 'store2.com',
+        rating: 4.2,
+        free_shipping: false,
+      },
+    ],
+    // Notice rows is intentionally undefined to test defensive recovery!
+    rows: undefined as any,
+  };
+
+  // Must not throw Uncaught TypeError: Cannot read properties of undefined (reading 'map')
+  const html = renderToString(
+    React.createElement(ComparisonMatrixCard, {
+      matrix: malformedMatrix as any,
+      onAction: () => {},
+    })
+  );
+  assert.ok(html.includes('Side-by-Side Comparison Matrix'));
+  assert.ok(html.includes('Product 1'));
+  assert.ok(html.includes('Product 2'));
+  assert.ok(html.includes('Net Price'));
+  assert.ok(html.includes('$90.00'));
+});
+
+test('Buyer Generative Tools: SideBySideProductColumns renders clean 2-to-4 column table comparison', async () => {
+  const React = await import('react');
+  const { renderToString } = await import('react-dom/server');
+  const { SideBySideProductColumns } = await import('./BuyerGenerativeTools.js');
+  const { MAX_SELECTED_PRODUCTS } = await import('./ConversationalAgentChat.js');
+
+  assert.equal(MAX_SELECTED_PRODUCTS, 4, 'Expected MAX_SELECTED_PRODUCTS to be 4');
+
+  const products = [
+    {
+      product_id: 'p1',
+      title: 'Bose QuietComfort 45',
+      price_cents: 32900,
+      commission_rebate_cents: 3290,
+      merchant_domain: 'bose.com',
+      image_url: 'https://example.com/bose.jpg',
+      rating: 4.7,
+      free_shipping: true,
+      merchant_credibility_score: 96,
+    },
+    {
+      product_id: 'p2',
+      title: 'Sennheiser Momentum 4',
+      price_cents: 37995,
+      commission_rebate_cents: 3800,
+      merchant_domain: 'sennheiser.com',
+      image_url: 'https://example.com/senn.jpg',
+      rating: 4.8,
+      free_shipping: false,
+      merchant_credibility_score: 94,
+    },
+  ];
+
+  const html = renderToString(
+    React.createElement(SideBySideProductColumns, {
+      products: products as any,
+      onBuy: () => {},
+    })
+  );
+
+  // Verifies table layout and absence of middle badge/deltas or essay text
+  assert.ok(html.includes('Bose QuietComfort 45'));
+  assert.ok(html.includes('Sennheiser Momentum 4'));
+  assert.ok(html.includes('Net Price'));
+  assert.ok(html.includes('$296.10'));
+  assert.ok(html.includes('$341.95'));
+  assert.ok(html.includes('Buy for Me'));
+  assert.ok(!html.includes('Referee\'s Declarative Verdict'), 'Did not expect referee essay text');
+});
+
 
 

@@ -256,12 +256,12 @@ export function UnifiedCartDrawer({
                     <span>Store Whitelist Policy Restriction</span>
                   </div>
                   <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-                    Cart contains items from stores not in your authorized whitelist ({unauthorizedMerchants.map(m => m.merchant_domain).join(', ')}). Remove unauthorized items or add them to your whitelist in Settings to checkout.
+                    Cart contains items from stores not in your authorized whitelist ({(unauthorizedMerchants || []).map(m => m.merchant_domain).join(', ')}). Remove unauthorized items or add them to your whitelist in Settings to checkout.
                   </p>
                 </div>
               )}
 
-              {activeCart.assigned_merchants.map((merchant, mIdx) => {
+              {(activeCart?.assigned_merchants || []).map((merchant, mIdx) => {
                 const isMerchantBlocked = unauthorizedMerchants.some(u => u.merchant_domain === merchant.merchant_domain);
                 return (
                 <div
@@ -294,7 +294,7 @@ export function UnifiedCartDrawer({
 
                   {/* Items in this merchant */}
                   <div className="divide-y divide-slate-100 dark:divide-slate-800/60 p-3 space-y-2">
-                    {merchant.items.map((item) => (
+                    {(merchant?.items || []).map((item) => (
                       <div key={item.product_id} className="pt-2 first:pt-0 flex items-center gap-3">
                         <div className="w-12 h-12 rounded-lg bg-slate-200 dark:bg-slate-800 overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
                           {/* eslint-disable-next-line @next/next/no-img-element */}

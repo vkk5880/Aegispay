@@ -54,13 +54,17 @@ import {
   BuyerToolCallbacksProvider,
   GenerativeProductCard,
   ComparisonMatrixCard,
+  SideBySideProductColumns,
 } from './BuyerGenerativeTools';
 import { BattleArena } from './BattleArena';
 import { PurchaseConfirmationCard } from './PurchaseConfirmationCard';
 
+// Maximum allowed products for side-by-side comparison
+export const MAX_SELECTED_PRODUCTS = 4;
+
 // Re-export for 100% backward compatibility
-export { GenerativeProductCard as ProductCard, ComparisonMatrixCard };
-export type { GenerativeProductCardProps as ProductCardProps, ComparisonMatrixCardProps } from './BuyerGenerativeTools';
+export { GenerativeProductCard as ProductCard, ComparisonMatrixCard, SideBySideProductColumns };
+export type { GenerativeProductCardProps as ProductCardProps, ComparisonMatrixCardProps, SideBySideProductColumnsProps } from './BuyerGenerativeTools';
 
 export interface ChatMessage {
   id: string;
@@ -189,7 +193,7 @@ export function ConversationalAgentChat({
     }
   }, [selectedProducts.length, isSidePanelOpen]);
 
-  // Handle Multi-Select Product Toggle
+  // Handle Multi-Select Product Toggle (Enforces MAX_SELECTED_PRODUCTS limit)
   const handleToggleSelectProduct = (product: ProductCardData) => {
     setSelectedProducts((prev) => {
       const exists = prev.some((p) => p.product_id === product.product_id);
@@ -200,6 +204,12 @@ export function ConversationalAgentChat({
         }
         return prev.filter((p) => p.product_id !== product.product_id);
       } else {
+        if (prev.length >= MAX_SELECTED_PRODUCTS) {
+          logger.warn('[BuyerChat:MultiSelect] Maximum products limit reached', {
+            limit: MAX_SELECTED_PRODUCTS,
+          });
+          return prev;
+        }
         logger.info('[BuyerChat:MultiSelect] Selecting product for multi-item action', {
           productId: product.product_id,
           title: product.title,
@@ -227,8 +237,8 @@ export function ConversationalAgentChat({
   // Initialize the assistant-ui local streaming runtime
   const runtime = useShoppingAssistantRuntime({
     sessionId: sessionIdRef.current,
-    getActiveTurnProducts: () => activeTurnProductsRef.current,
-    getSelectedProductIds: () => selectedProducts.map((p) => p.product_id),
+    getActiveTurnProducts: () => activeTurnProductsRef.current || [],
+    getSelectedProductIds: () => (selectedProducts || []).map((p) => p.product_id),
     budgetCapCents,
     zipCode,
     developerModeEnabled,
@@ -238,8 +248,9 @@ export function ConversationalAgentChat({
     allowedMerchants: user?.allowedMerchants,
     initialMessages: savedMessages,
     onTurnProductsReceived: (products) => {
-      logger.info('[BuyerChat:TurnProducts] Grounded turn products bound to context', { count: products.length });
-      activeTurnProductsRef.current = products.map((p, idx) => ({
+      const safeProducts = Array.isArray(products) ? products : [];
+      logger.info('[BuyerChat:TurnProducts] Grounded turn products bound to context', { count: safeProducts.length });
+      activeTurnProductsRef.current = safeProducts.map((p, idx) => ({
         index: idx + 1,
         product_id: p.product_id,
         title: p.title,
@@ -390,7 +401,7 @@ export function ConversationalAgentChat({
         <PrepareCheckoutToolUI />
 
         {/* Responsive Cockpit Container: Split-Screen Desktop & Mobile Drawer */}
-        <div className="flex flex-col lg:flex-row gap-4 h-[760px] bg-white/80 dark:bg-[#070d1a]/90 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden backdrop-blur-md shadow-xl transition-all">
+        <div className="flex flex-col lg:flex-row gap-3 sm:gap-4 h-[calc(100dvh-13rem)] min-h-[480px] max-h-[720px] bg-white/80 dark:bg-[#070d1a]/90 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden backdrop-blur-md shadow-xl transition-all">
           {/* Main Left Panel: Conversation Thread & Input Bar */}
           <div
             className={`flex flex-col h-full transition-all duration-300 ${
@@ -653,79 +664,87 @@ export function ConversationalAgentChat({
             </ThreadPrimitive.Root>
           </div>
 
-          {/* Right Panel: Split-Screen Cockpit Arena / Comparison / Cart Drawer on Desktop */}
+          {/* Right Panel: Split-Screen Cockpit Arena / Comparison / Cart Drawer on Desktop & Mobile Drawer */}
           {isSidePanelOpen && (
-            <div className="hidden lg:flex lg:w-2/5 flex-col h-full border-l border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-[#070e1c]/80 p-4 overflow-y-auto space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-                <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
-                  <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                  <span>Cockpit Decision Arena</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsSidePanelOpen(false)}
-                  className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  title="Close side panel"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+            <>
+              {/* Mobile overlay backdrop */}
+              <div
+                className="fixed inset-0 bg-black/50 backdrop-blur-xs z-40 lg:hidden"
+                onClick={() => setIsSidePanelOpen(false)}
+                aria-hidden="true"
+              />
 
-              {/* Active Multi-Product Arena or Selected Contenders */}
-              {selectedProducts.length >= 2 ? (
-                <div className="space-y-4">
-                  <BattleArena
-                    contenders={selectedProducts}
-                    winner={selectedProducts[0]}
-                    battleReport="Active contender comparison from your multi-chip selection. Real-time referee score and head-to-head metrics displayed."
-                    onSelectWinner={(winProd) => handleActionClick('BUY', winProd)}
-                  />
+              <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] max-w-[92vw] lg:static lg:w-2/5 lg:max-w-none flex flex-col h-full border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070e1c] p-3 sm:p-4 overflow-y-auto space-y-3 shadow-2xl lg:shadow-none transition-all">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2 text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider font-mono">
+                    <Scale className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                    <span>Product Comparison ({selectedProducts.length}/4)</span>
+                  </div>
                   <button
                     type="button"
-                    onClick={handleCompareSelected}
-                    className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    onClick={() => setIsSidePanelOpen(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    title="Close side panel"
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Run AI Spec Comparison in Stream</span>
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
-              ) : activeComparison ? (
-                <div className="space-y-4">
-                  <BattleArena
-                    contenders={activeComparison.products || []}
-                    winner={(activeComparison.products || []).find((p) => p.product_id === activeComparison.winner_product_id) || null}
-                    battleReport={activeComparison.rationale}
-                    onSelectWinner={(winProd) => handleActionClick('BUY', winProd)}
-                  />
-                  <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
-                </div>
-              ) : activeCart ? (
-                <div className="space-y-3">
-                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-500" />
-                    <span>Two-Phase Commit (2PC) Hold Active</span>
+
+                {/* Active Multi-Product Comparison: Pure Table Columns/Rows without middle icons or essay text */}
+                {selectedProducts.length >= 2 ? (
+                  <div className="space-y-3">
+                    <SideBySideProductColumns
+                      products={selectedProducts}
+                      onBuy={(winProd) => handleActionClick('BUY', winProd)}
+                      onRemove={(prodId) =>
+                        handleToggleSelectProduct({ product_id: prodId } as any)
+                      }
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCompareSelected}
+                      className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Ask AI to Compare Specs</span>
+                    </button>
                   </div>
-                  <PurchaseConfirmationCard
-                    cart={activeCart}
-                    zipCode={zipCode}
-                    onViewFullCart={onOpenCart}
-                    onConfirmPurchase={handlePurchaseConfirmedInternal}
-                  />
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500 dark:text-slate-400 space-y-3">
-                  <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
-                    <Scale className="w-6 h-6" />
+                ) : activeComparison ? (
+                  <div className="space-y-3">
+                    <SideBySideProductColumns
+                      products={activeComparison.products || []}
+                      onBuy={(winProd) => handleActionClick('BUY', winProd)}
+                    />
+                    <ComparisonMatrixCard matrix={activeComparison} onAction={handleActionClick} />
                   </div>
-                  <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
-                    No Contenders Selected
-                  </h4>
-                  <p className="text-xs max-w-xs leading-relaxed">
-                    Click <strong>[⚖️ Select]</strong> on two or more product cards to compare specs side-by-side in this live arena.
-                  </p>
-                </div>
-              )}
-            </div>
+                ) : activeCart ? (
+                  <div className="space-y-3">
+                    <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                      <span>Two-Phase Commit (2PC) Hold Active</span>
+                    </div>
+                    <PurchaseConfirmationCard
+                      cart={activeCart}
+                      zipCode={zipCode}
+                      onViewFullCart={onOpenCart}
+                      onConfirmPurchase={handlePurchaseConfirmedInternal}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-500 dark:text-slate-400 space-y-3">
+                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-600 dark:text-cyan-400">
+                      <Scale className="w-6 h-6" />
+                    </div>
+                    <h4 className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                      Select Products to Compare
+                    </h4>
+                    <p className="text-xs max-w-xs leading-relaxed">
+                      Click the checkbox on 2 to 4 products in the chat to open a clean side-by-side spec comparison table here.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       </BuyerToolCallbacksProvider>

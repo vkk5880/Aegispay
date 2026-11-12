@@ -122,7 +122,7 @@ export function KnapsackSplitVisualizer({
   const data = optimization || defaultData;
 
   // Group by delivery window or merchant
-  const enrichedMerchants = data.assigned_merchants.map((merchant, idx) => ({
+  const enrichedMerchants = (data?.assigned_merchants || defaultData.assigned_merchants || []).map((merchant, idx) => ({
     ...merchant,
     delivery_window: merchant.delivery_window || (idx === 0 ? '2-Day Express Consolidated' : '3-4 Day Priority Freight'),
     estimated_arrival: merchant.estimated_arrival || (idx === 0 ? 'Est. Delivery in 2 business days' : 'Est. Delivery in 3-4 business days'),
@@ -205,7 +205,7 @@ export function KnapsackSplitVisualizer({
 
               {/* Items in Merchant Group with Line-Item Commission Rebates */}
               <div className="divide-y divide-slate-200 dark:divide-slate-800/60 my-2">
-                {merchant.items.map((item) => {
+                {(merchant.items || []).map((item) => {
                   const lineTotalCents = item.unit_price_cents * item.quantity;
                   const itemRebateCents = Math.round(lineTotalCents * item.commission_rate * 0.75); // 75% passback
                   const netItemCents = lineTotalCents - itemRebateCents;

@@ -23,8 +23,10 @@ import {
   ArrowRight,
   Zap,
   CheckCircle2,
+  Check,
   Clock,
   Layers,
+  X,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { BattleArena } from './BattleArena';
@@ -80,144 +82,109 @@ export function GenerativeProductCard({
   onAction,
 }: GenerativeProductCardProps) {
   const [selectedVariantId, setSelectedVariantId] = useState<string>(
-    product.selected_variant_id || product.variants?.[0]?.id || ''
+    product?.selected_variant_id || product?.variants?.[0]?.id || ''
   );
-  const activeVariant = product.variants?.find((v) => v.id === selectedVariantId);
-  const activePriceCents = activeVariant?.price_cents ?? product.price_cents;
-  const netCents = activePriceCents - (product.commission_rebate_cents || 0);
+  const activeVariant = product?.variants?.find((v) => v.id === selectedVariantId);
+  const activePriceCents = activeVariant?.price_cents ?? product?.price_cents ?? 0;
+  const netCents = activePriceCents - (product?.commission_rebate_cents || 0);
 
   return (
     <div
-      className={`bg-white dark:bg-[#080f20] border rounded-xl overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col group relative ${
+      className={`bg-white dark:bg-[#080f20] border rounded-xl overflow-hidden shadow-2xs hover:shadow-xs transition-all flex flex-row items-center p-2 sm:p-2.5 gap-2 sm:gap-2.5 group relative ${
         isSelected
-          ? 'border-cyan-500 dark:border-cyan-400 ring-2 ring-cyan-500/40 bg-cyan-50/20 dark:bg-cyan-950/20 shadow-md shadow-cyan-500/10'
+          ? 'border-cyan-500 dark:border-cyan-400 ring-2 ring-cyan-500/30 bg-cyan-50/20 dark:bg-cyan-950/20'
           : 'border-slate-200 dark:border-slate-800 hover:border-cyan-500/40'
       }`}
     >
-      {/* Product Image & Badges - Compact Small Image */}
-      <div className="relative h-20 sm:h-22 aspect-video w-full bg-slate-100 dark:bg-slate-900 overflow-hidden">
+      {/* Product Image - Small Square on the Left */}
+      <div className="relative w-14 h-14 sm:w-16 sm:h-16 rounded-lg bg-slate-100 dark:bg-slate-900 overflow-hidden shrink-0 border border-slate-200/70 dark:border-slate-800/70">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={product.cleaned_image_url || product.image_url}
-          alt={product.title}
-          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+          src={product?.cleaned_image_url || product?.image_url}
+          alt={product?.title || 'Product'}
+          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-200"
+          loading="lazy"
         />
-
-        {/* Selected Overlay Pill */}
-        {isSelected && (
-          <div className="absolute top-1.5 left-1.5 z-10 px-1.5 py-0.5 rounded-md bg-cyan-600/95 text-white text-[9px] font-bold shadow-md flex items-center gap-1 backdrop-blur-xs">
-            <CheckCircle2 className="w-2.5 h-2.5 text-white" />
-            <span>Selected</span>
-          </div>
-        )}
-
-        {/* Badges Overlay */}
-        <div className={`absolute ${isSelected ? 'top-6' : 'top-1.5'} left-1.5 flex flex-col gap-1 z-10 transition-all`}>
-          {product.free_shipping && (
-            <span className="px-1.5 py-0.5 rounded bg-emerald-500/90 text-white text-[9px] font-bold shadow-xs flex items-center gap-1 backdrop-blur-xs">
-              <Truck className="w-2 h-2" /> Free
-            </span>
-          )}
-          {product.commission_rebate_cents > 0 && (
-            <span className="px-1.5 py-0.5 rounded bg-cyan-600/90 text-white text-[9px] font-bold shadow-xs backdrop-blur-xs">
-              -{formatCents(product.commission_rebate_cents)}
-            </span>
-          )}
-        </div>
-
-        <div className="absolute top-1.5 right-1.5 z-10">
-          <span className="px-1.5 py-0.5 rounded bg-slate-900/80 dark:bg-black/80 text-white text-[9px] font-mono backdrop-blur-xs flex items-center gap-1">
-            <ShieldCheck className="w-2 h-2 text-emerald-400" />
-            {product.merchant_credibility_score}%
+        {product?.free_shipping && (
+          <span className="absolute bottom-0.5 left-0.5 px-1 py-0.2 rounded bg-emerald-600/90 text-white text-[8px] font-bold">
+            Free
           </span>
-        </div>
+        )}
       </div>
 
-      {/* Body */}
-      <div className="p-2.5 flex-1 flex flex-col justify-between space-y-2">
-        <div className="space-y-0.5">
-          <div className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400">
-            {product.merchant_domain}
-          </div>
-          <h4 className="font-semibold text-slate-900 dark:text-white text-xs line-clamp-1 leading-snug">
-            {product.title}
-          </h4>
-        </div>
+      {/* Information & Actions on the Right */}
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5 space-y-1">
+        {/* Top Header: Domain & Select Box with Tickmark */}
+        <div className="flex items-center justify-between gap-1">
+          <span className="text-[10px] font-mono text-cyan-600 dark:text-cyan-400 truncate max-w-[120px] sm:max-w-[140px]">
+            {product?.merchant_domain}
+          </span>
 
-        {/* Phase 4 Variant Selection Chips */}
-        {product.variants && product.variants.length > 0 && (
-          <div className="flex flex-wrap gap-1 pt-0.5" role="group" aria-label="Product variants">
-            {product.variants.slice(0, 3).map((v) => (
-              <button
-                key={v.id}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedVariantId(v.id);
-                }}
-                className={`px-1.5 py-0.5 rounded text-[9px] font-mono transition-all cursor-pointer ${
-                  selectedVariantId === v.id
-                    ? 'bg-cyan-500/25 text-cyan-800 dark:text-cyan-200 border border-cyan-500/60 font-bold shadow-2xs'
-                    : 'bg-slate-100 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                {v.name}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Pricing */}
-        <div className="pt-1 border-t border-slate-100 dark:border-slate-800/80 flex items-baseline justify-between">
-          <div>
-            <div className="text-xs sm:text-sm font-black text-slate-900 dark:text-white font-mono">
-              {formatCents(netCents)}
-            </div>
-            {product.commission_rebate_cents > 0 && (
-              <div className="text-[9px] text-slate-400 line-through font-mono">
-                {formatCents(product.price_cents)}
-              </div>
-            )}
-          </div>
-
-          <div className="text-right text-[10px] text-slate-500 dark:text-slate-400">
-            <span>★ {product.rating}</span>
-          </div>
-        </div>
-
-        {/* Phase 3 Action Chips */}
-        <div className="grid grid-cols-3 gap-1 pt-0.5">
-          {/* Multi-Select Toggle */}
+          {/* Select Box with Tickmark */}
           <button
             type="button"
-            onClick={() => onToggleSelect && onToggleSelect(product)}
-            className={`px-1 py-1 rounded text-[10px] font-semibold transition-all border flex items-center justify-center gap-0.5 cursor-pointer active:scale-95 ${
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSelect?.(product);
+            }}
+            className={`w-5 h-5 rounded border flex items-center justify-center transition-all cursor-pointer shrink-0 ${
               isSelected
-                ? 'bg-cyan-500/20 text-cyan-800 dark:text-cyan-200 border-cyan-500 font-bold shadow-2xs'
-                : 'bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/10 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 border-slate-200 dark:border-slate-700'
+                ? 'bg-cyan-600 border-cyan-600 text-white shadow-2xs ring-1 ring-cyan-500'
+                : 'bg-white dark:bg-slate-800 border-slate-300 dark:border-slate-600 text-transparent hover:border-cyan-500 hover:bg-cyan-50/50 dark:hover:bg-cyan-950/30'
             }`}
-            title={isSelected ? 'Remove from comparison' : 'Select for side-by-side comparison'}
+            title={isSelected ? 'Deselect product' : 'Select product for comparison'}
+            aria-label={isSelected ? `Deselect ${product?.title}` : `Select ${product?.title}`}
           >
-            <Scale className="w-2.5 h-2.5 text-cyan-600 dark:text-cyan-400" />
-            <span>{isSelected ? 'Done' : 'Select'}</span>
+            <Check className={`w-3.5 h-3.5 stroke-[2.5] ${isSelected ? 'text-white' : 'opacity-0'}`} />
           </button>
+        </div>
 
-          {/* Single-Item Deep Dive */}
+        {/* Title */}
+        <h4
+          className="font-semibold text-slate-900 dark:text-white text-xs line-clamp-1 leading-snug"
+          title={product?.title}
+        >
+          {product?.title}
+        </h4>
+
+        {/* Pricing & Rating */}
+        <div className="flex items-baseline justify-between gap-1">
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-xs sm:text-sm font-black text-slate-900 dark:text-white font-mono">
+              {formatCents(netCents)}
+            </span>
+            {(product?.commission_rebate_cents || 0) > 0 && (
+              <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-mono font-bold">
+                -{formatCents(product.commission_rebate_cents)}
+              </span>
+            )}
+            {(product?.commission_rebate_cents || 0) > 0 && (
+              <span className="text-[9px] text-slate-400 line-through font-mono hidden sm:inline">
+                {formatCents(activePriceCents)}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-amber-500 font-semibold shrink-0">
+            ★ {product?.rating || '4.5'}
+          </span>
+        </div>
+
+        {/* Bottom Actions: Ask & Buy */}
+        <div className="flex items-center gap-1.5 pt-0.5">
           <button
             type="button"
             onClick={() => (onAskAi ? onAskAi(product) : onAction('DETAILS', product))}
-            className="px-1 py-1 rounded bg-slate-100 dark:bg-slate-800/80 hover:bg-cyan-500/15 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[10px] font-semibold transition-all border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-0.5 cursor-pointer active:scale-95"
+            className="flex-1 py-1 px-1.5 rounded-md bg-slate-100 dark:bg-slate-800/90 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 text-slate-700 dark:text-slate-300 hover:text-cyan-700 dark:hover:text-cyan-300 text-[10px] font-semibold border border-slate-200 dark:border-slate-700 transition-colors flex items-center justify-center gap-1 cursor-pointer"
             title="Ask AI about specs"
           >
             <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
             <span>Ask</span>
           </button>
 
-          {/* Instant Buy */}
           <button
             type="button"
             onClick={() => onAction('BUY', product)}
-            className="px-1 py-1 rounded bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-[10px] font-bold transition-all shadow-xs flex items-center justify-center gap-0.5 cursor-pointer active:scale-95"
+            className="flex-1 py-1 px-1.5 rounded-md bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-[10px] font-bold shadow-2xs transition-all flex items-center justify-center gap-1 cursor-pointer active:scale-95"
             title="Instant 1-Click Buy"
           >
             <Zap className="w-2.5 h-2.5" />
@@ -237,7 +204,56 @@ export interface ComparisonMatrixCardProps {
 }
 
 export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardProps) {
-  const products = matrix.products || [];
+  const products = Array.isArray(matrix?.products) ? matrix.products : [];
+
+  // Safe rows extraction with dynamic attribute synthesis fallback
+  let rows = Array.isArray(matrix?.rows) ? matrix.rows : [];
+  if (rows.length === 0 && products.length > 0) {
+    rows = [
+      {
+        attribute: 'Net Price',
+        values: Object.fromEntries(
+          products.map((p) => [
+            p.product_id,
+            formatCents(p.price_cents - (p.commission_rebate_cents || 0)),
+          ])
+        ),
+      },
+      {
+        attribute: 'Instant Rebate',
+        values: Object.fromEntries(
+          products.map((p) => [
+            p.product_id,
+            p.commission_rebate_cents ? `-${formatCents(p.commission_rebate_cents)}` : '$0.00',
+          ])
+        ),
+      },
+      {
+        attribute: 'Original Price',
+        values: Object.fromEntries(
+          products.map((p) => [p.product_id, formatCents(p.price_cents)])
+        ),
+      },
+      {
+        attribute: 'Store / Domain',
+        values: Object.fromEntries(
+          products.map((p) => [p.product_id, p.merchant_domain || 'Merchant'])
+        ),
+      },
+      {
+        attribute: 'Rating',
+        values: Object.fromEntries(
+          products.map((p) => [p.product_id, `★ ${p.rating || '4.5'}`])
+        ),
+      },
+      {
+        attribute: 'Shipping',
+        values: Object.fromEntries(
+          products.map((p) => [p.product_id, p.free_shipping ? 'Free Shipping' : 'Standard'])
+        ),
+      },
+    ];
+  }
 
   return (
     <div className="bg-white dark:bg-[#070e1c] border border-cyan-500/30 rounded-xl overflow-hidden shadow-xs">
@@ -253,7 +269,7 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
         </span>
       </div>
 
-      {matrix.rationale && (
+      {matrix?.rationale && (
         <div className="p-3 bg-cyan-50/50 dark:bg-cyan-950/20 border-b border-cyan-200/50 dark:border-cyan-500/20 text-xs text-slate-700 dark:text-slate-300 flex items-start gap-2">
           <Sparkles className="w-4 h-4 text-cyan-600 shrink-0 mt-0.5" />
           <div>
@@ -272,7 +288,7 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
                 Feature / Spec
               </th>
               {products.map((p) => {
-                const isWinner = p.product_id === matrix.winner_product_id;
+                const isWinner = p.product_id === matrix?.winner_product_id;
                 return (
                   <th
                     key={p.product_id}
@@ -294,15 +310,15 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
-            {matrix.rows.map((row, idx) => (
+            {rows.map((row, idx) => (
               <tr key={idx} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/30">
                 <td className="py-2 px-3 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
                   {row.attribute}
                 </td>
                 {products.map((p) => {
-                  const val = row.values[p.product_id] || '-';
-                  const isHighlighted = row.highlighted_product_id === p.product_id;
-                  const isWinner = p.product_id === matrix.winner_product_id;
+                  const val = row?.values?.[p.product_id] ?? '-';
+                  const isHighlighted = row?.highlighted_product_id === p.product_id;
+                  const isWinner = p.product_id === matrix?.winner_product_id;
                   return (
                     <td
                       key={p.product_id}
@@ -325,7 +341,7 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
                 Instant Action
               </td>
               {products.map((p) => {
-                const isWinner = p.product_id === matrix.winner_product_id;
+                const isWinner = p.product_id === matrix?.winner_product_id;
                 return (
                   <td
                     key={p.product_id}
@@ -348,6 +364,190 @@ export function ComparisonMatrixCard({ matrix, onAction }: ComparisonMatrixCardP
                   </td>
                 );
               })}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// --- Side-by-Side Product Columns Component (Direct 2-to-4 Column Comparison Table) ---
+
+export interface SideBySideProductColumnsProps {
+  products: ProductCardData[];
+  onBuy: (product: ProductCardData) => void;
+  onRemove?: (productId: string) => void;
+}
+
+export function SideBySideProductColumns({
+  products,
+  onBuy,
+  onRemove,
+}: SideBySideProductColumnsProps) {
+  const safeProducts = (products || []).slice(0, 4);
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#080f20] overflow-hidden shadow-xs">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#060c18]">
+              <th className="py-2.5 px-2 font-semibold text-slate-500 dark:text-slate-400 text-[11px] w-24 shrink-0">
+                Item
+              </th>
+              {safeProducts.map((p, idx) => (
+                <th
+                  key={p.product_id || idx}
+                  className="py-2 px-2 text-center align-top min-w-[125px] border-l border-slate-200 dark:border-slate-800"
+                >
+                  <div className="flex flex-col items-center gap-1 relative">
+                    {onRemove && (
+                      <button
+                        type="button"
+                        onClick={() => onRemove(p.product_id)}
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-700 hover:bg-rose-500 hover:text-white text-slate-500 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
+                        title="Remove product"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    )}
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={p.cleaned_image_url || p.image_url}
+                      alt={p.title}
+                      className="w-12 h-12 rounded-lg object-cover border border-slate-200 dark:border-slate-700 shadow-2xs"
+                    />
+                    <div className="font-semibold text-slate-900 dark:text-white text-[11px] line-clamp-2 text-center leading-tight">
+                      {p.title}
+                    </div>
+                    <span className="text-[9px] font-mono text-cyan-600 dark:text-cyan-400 truncate max-w-[110px]">
+                      {p.merchant_domain}
+                    </span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60 font-sans">
+            {/* Final Net Price */}
+            <tr className="bg-cyan-50/20 dark:bg-cyan-950/20">
+              <td className="py-2 px-2 font-semibold text-slate-700 dark:text-slate-300 text-[11px]">
+                Net Price
+              </td>
+              {safeProducts.map((p, idx) => {
+                const netCents = p.price_cents - (p.commission_rebate_cents || 0);
+                return (
+                  <td
+                    key={p.product_id || idx}
+                    className="py-2 px-2 text-center border-l border-slate-200 dark:border-slate-800"
+                  >
+                    <span className="font-black font-mono text-cyan-600 dark:text-cyan-400 text-xs sm:text-sm">
+                      {formatCents(netCents)}
+                    </span>
+                  </td>
+                );
+              })}
+            </tr>
+
+            {/* Original Price */}
+            <tr>
+              <td className="py-2 px-2 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
+                Original Price
+              </td>
+              {safeProducts.map((p, idx) => (
+                <td
+                  key={p.product_id || idx}
+                  className="py-2 px-2 text-center text-[11px] font-mono text-slate-400 line-through border-l border-slate-200 dark:border-slate-800"
+                >
+                  {formatCents(p.price_cents)}
+                </td>
+              ))}
+            </tr>
+
+            {/* Instant Rebate */}
+            <tr>
+              <td className="py-2 px-2 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
+                Cashback
+              </td>
+              {safeProducts.map((p, idx) => (
+                <td
+                  key={p.product_id || idx}
+                  className="py-2 px-2 text-center text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 border-l border-slate-200 dark:border-slate-800"
+                >
+                  {p.commission_rebate_cents ? `-${formatCents(p.commission_rebate_cents)}` : '$0.00'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Rating */}
+            <tr>
+              <td className="py-2 px-2 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
+                Rating
+              </td>
+              {safeProducts.map((p, idx) => (
+                <td
+                  key={p.product_id || idx}
+                  className="py-2 px-2 text-center text-[11px] text-amber-500 font-semibold border-l border-slate-200 dark:border-slate-800"
+                >
+                  ★ {p.rating || '4.5'}
+                </td>
+              ))}
+            </tr>
+
+            {/* Shipping */}
+            <tr>
+              <td className="py-2 px-2 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
+                Shipping
+              </td>
+              {safeProducts.map((p, idx) => (
+                <td
+                  key={p.product_id || idx}
+                  className="py-2 px-2 text-center text-[11px] font-medium border-l border-slate-200 dark:border-slate-800"
+                >
+                  {p.free_shipping ? (
+                    <span className="text-emerald-600 dark:text-emerald-400 font-bold">Free</span>
+                  ) : (
+                    <span className="text-slate-500">$5.00</span>
+                  )}
+                </td>
+              ))}
+            </tr>
+
+            {/* Trust Score */}
+            <tr>
+              <td className="py-2 px-2 font-medium text-slate-500 dark:text-slate-400 text-[11px]">
+                Store Trust
+              </td>
+              {safeProducts.map((p, idx) => (
+                <td
+                  key={p.product_id || idx}
+                  className="py-2 px-2 text-center text-[11px] font-mono text-slate-700 dark:text-slate-300 border-l border-slate-200 dark:border-slate-800"
+                >
+                  {p.merchant_credibility_score || 95}%
+                </td>
+              ))}
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-[#060c18]">
+              <td className="py-2 px-2 font-semibold text-slate-500 dark:text-slate-400 text-[11px]">
+                Action
+              </td>
+              {safeProducts.map((p, idx) => (
+                <td
+                  key={p.product_id || idx}
+                  className="py-2 px-2 border-l border-slate-200 dark:border-slate-800"
+                >
+                  <button
+                    type="button"
+                    onClick={() => onBuy(p)}
+                    className="w-full py-1.5 px-2 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-[11px] shadow-2xs flex items-center justify-center gap-1 cursor-pointer transition-transform active:scale-95"
+                  >
+                    <span>Buy for Me</span>
+                  </button>
+                </td>
+              ))}
             </tr>
           </tfoot>
         </table>
@@ -392,7 +592,7 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
       );
     }
 
-    const products = result?.products || [];
+    const products = Array.isArray(result?.products) ? result.products : [];
     const promoCode = (result as any)?.promo_code || 'PAYPAL-HACKATHON-2026';
     return (
       <div className="my-2 space-y-2">
@@ -400,7 +600,7 @@ export const SearchCatalogToolUI = makeAssistantToolUI<SearchCatalogInput, Searc
           <span>Discovered {products.length} catalog items</span>
           <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">Promo: {promoCode}</span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}
@@ -442,16 +642,16 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
               PAYPAL-HACKATHON-2026
             </span>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-24 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
+              <div key={i} className="h-20 rounded-lg bg-slate-100 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/40" />
             ))}
           </div>
         </div>
       );
     }
 
-    const products = result?.products || [];
+    const products = Array.isArray(result?.products) ? result.products : [];
     const promoCode = (result as any)?.promo_code || 'PAYPAL-HACKATHON-2026';
     return (
       <div className="my-2 space-y-2">
@@ -459,7 +659,7 @@ export const DiscoverProductsToolUI = makeAssistantToolUI<SearchCatalogInput, Se
           <span>Discovered {products.length} catalog items</span>
           <span className="text-[10px] text-cyan-600 dark:text-cyan-400 font-semibold">Promo: {promoCode}</span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}
@@ -496,7 +696,7 @@ export const FilterTurnProductsToolUI = makeAssistantToolUI<FilterTurnProductsIn
       );
     }
 
-    const products = result?.products || [];
+    const products = Array.isArray(result?.products) ? result.products : [];
     return (
       <div className="my-2 space-y-2">
         <div className="p-2 rounded-lg bg-cyan-50/60 dark:bg-cyan-950/30 border border-cyan-500/30 text-xs flex items-center justify-between">
@@ -513,7 +713,7 @@ export const FilterTurnProductsToolUI = makeAssistantToolUI<FilterTurnProductsIn
             </span>
           )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
           {products.map((product) => (
             <GenerativeProductCard
               key={product.product_id}
@@ -554,21 +754,30 @@ export const CompareProductsToolUI = makeAssistantToolUI<CompareProductsInput, C
     }
 
     const comparison = result?.comparison || ({} as any);
-    const contenders = result?.products || comparison?.products || [];
+    const contenders = Array.isArray(result?.products)
+      ? result.products
+      : Array.isArray(comparison?.products)
+      ? comparison.products
+      : [];
     const winnerId = result?.winner_product_id || comparison?.winner_product_id;
     const winner = contenders.find((c: any) => c.product_id === winnerId) || contenders[0] || null;
 
     return (
       <div className="my-2 space-y-3">
-        {/* Battle Arena Visualizer */}
-        {contenders.length > 0 && winner && (
+        {/* Direct Side-by-Side Table Comparison */}
+        {contenders.length >= 2 ? (
+          <SideBySideProductColumns
+            products={contenders}
+            onBuy={(winProd) => onAction('BUY', winProd)}
+          />
+        ) : contenders.length > 0 && winner ? (
           <BattleArena
             contenders={contenders}
             winner={winner}
-            battleReport={comparison?.rationale || (result as any)?.reason || null}
+            battleReport={null}
             onSelectWinner={(winProd) => onAction('BUY', winProd)}
           />
-        )}
+        ) : null}
 
         {/* Detailed Spec Comparison Table */}
         {comparison && <ComparisonMatrixCard matrix={comparison} onAction={onAction} />}
@@ -662,7 +871,7 @@ export const PrepareCheckoutToolUI = makeAssistantToolUI<PrepareCheckoutInput, P
         />
 
         {/* Phase 5 Proactive 1-Tap Recovery Pills */}
-        {result.recovery_pills && result.recovery_pills.length > 0 && (
+        {Array.isArray(result?.recovery_pills) && result.recovery_pills.length > 0 && (
           <div className="mt-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-mono font-bold text-amber-500 dark:text-amber-400">
               <Sparkles className="w-3.5 h-3.5" />
