@@ -6,6 +6,7 @@ import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
+import { BASELINE_TRANSACTIONS } from '@/lib/merchantService';
 
 interface TransactionsClientViewProps {
   initialTransactions?: any[];
@@ -21,7 +22,9 @@ const FX_RATES: Record<string, number> = {
 };
 
 export function TransactionsClientView({ initialTransactions = [], embedded = false }: TransactionsClientViewProps) {
-  const [transactions, setTransactions] = useState<any[]>(initialTransactions);
+  const [transactions, setTransactions] = useState<any[]>(
+    initialTransactions.length > 0 ? initialTransactions : BASELINE_TRANSACTIONS
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchLiveTransactions = useCallback(async () => {
@@ -32,7 +35,7 @@ export function TransactionsClientView({ initialTransactions = [], embedded = fa
       const res = await fetch(`${orchestratorUrl}/api/merchant/transactions`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.transactions)) {
+        if (Array.isArray(data.transactions) && data.transactions.length > 0) {
           const mapped = data.transactions.map((t: any, idx: number) => {
             const info = t.transaction_info || {};
             const payer = t.payer_info || {};
@@ -144,6 +147,7 @@ export function TransactionsClientView({ initialTransactions = [], embedded = fa
       rows={transactions}
       columns={columns}
       embedded={embedded}
+      tableName="transactions"
       headerAction={
         <button
           onClick={fetchLiveTransactions}

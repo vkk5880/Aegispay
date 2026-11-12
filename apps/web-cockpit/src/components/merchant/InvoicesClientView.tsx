@@ -6,6 +6,7 @@ import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
+import { BASELINE_INVOICES } from '@/lib/merchantService';
 
 interface InvoicesClientViewProps {
   initialInvoices?: any[];
@@ -13,7 +14,9 @@ interface InvoicesClientViewProps {
 }
 
 export function InvoicesClientView({ initialInvoices = [], embedded = false }: InvoicesClientViewProps) {
-  const [invoices, setInvoices] = useState<any[]>(initialInvoices);
+  const [invoices, setInvoices] = useState<any[]>(
+    initialInvoices.length > 0 ? initialInvoices : BASELINE_INVOICES
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchLiveInvoices = useCallback(async () => {
@@ -24,7 +27,7 @@ export function InvoicesClientView({ initialInvoices = [], embedded = false }: I
       const res = await fetch(`${orchestratorUrl}/api/merchant/invoices`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.invoices)) {
+        if (Array.isArray(data.invoices) && data.invoices.length > 0) {
           setInvoices(data.invoices);
           logger.info(`[InvoicesClientView] Successfully loaded ${data.invoices.length} invoices`);
           return;
@@ -65,6 +68,7 @@ export function InvoicesClientView({ initialInvoices = [], embedded = false }: I
       rows={invoices}
       columns={columns}
       embedded={embedded}
+      tableName="invoices"
       headerAction={
         <button
           onClick={fetchLiveInvoices}

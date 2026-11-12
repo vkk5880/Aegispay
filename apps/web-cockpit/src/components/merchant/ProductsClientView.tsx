@@ -7,6 +7,7 @@ import { AddProductModal } from '@/components/merchant/AddProductModal';
 import { Plus, Sparkles, RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
+import { BASELINE_PRODUCTS } from '@/lib/merchantService';
 
 interface ProductRow {
   id: string;
@@ -20,13 +21,29 @@ interface ProductRow {
   allow_synthetic_intent?: boolean;
 }
 
+const DEFAULT_PRODUCTS: ProductRow[] = BASELINE_PRODUCTS.map((p: any, idx: number) => ({
+  id: p.id || `PROD-${idx + 1}`,
+  name: p.name || 'Unnamed Product',
+  type: p.type || 'PHYSICAL',
+  category: p.category || 'SOFTWARE',
+  description: p.description || '',
+  created: p.create_time || new Date().toISOString(),
+  recent_bids_distribution: Array.isArray(p.recent_bids_distribution) && p.recent_bids_distribution.length > 0
+    ? p.recent_bids_distribution
+    : [12, 18, 25, 42, 38, 55, 60],
+  price: p.price_cents ? p.price_cents / 100 : (p.price ? parseFloat(p.price) : 119.0),
+  allow_synthetic_intent: p.allow_synthetic_intent ?? true,
+}));
+
 interface ProductsClientViewProps {
   initialProducts?: ProductRow[];
   embedded?: boolean;
 }
 
 export function ProductsClientView({ initialProducts = [], embedded = false }: ProductsClientViewProps) {
-  const [products, setProducts] = useState<ProductRow[]>(initialProducts);
+  const [products, setProducts] = useState<ProductRow[]>(
+    initialProducts.length > 0 ? initialProducts : DEFAULT_PRODUCTS
+  );
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -38,7 +55,7 @@ export function ProductsClientView({ initialProducts = [], embedded = false }: P
       const res = await fetch(`${orchestratorUrl}/api/merchant/products`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.products)) {
+        if (Array.isArray(data.products) && data.products.length > 0) {
           const mapped: ProductRow[] = data.products.map((p: any, idx: number) => ({
             id: p.id || `PROD-${idx + 1}`,
             name: p.name || 'Unnamed Product',
@@ -120,6 +137,7 @@ export function ProductsClientView({ initialProducts = [], embedded = false }: P
         rows={products}
         columns={columns}
         embedded={embedded}
+        tableName="products"
         headerAction={
           <div className="flex items-center gap-2">
             <button

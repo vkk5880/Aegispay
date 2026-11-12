@@ -6,6 +6,7 @@ import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
+import { BASELINE_PLANS } from '@/lib/merchantService';
 
 interface PlanRow {
   id: string;
@@ -20,13 +21,34 @@ interface PlanRow {
   created: string;
 }
 
+const DEFAULT_PLANS: PlanRow[] = BASELINE_PLANS.map((pl: any, idx: number) => {
+  const cycle = pl.billing_cycles?.[0];
+  const priceVal = parseFloat(cycle?.pricing_scheme?.fixed_price?.value || '49.00');
+  const intervalUnit = cycle?.frequency?.interval_unit || 'MONTH';
+  const intervalCount = cycle?.frequency?.interval_count || 1;
+  return {
+    id: pl.id || `PLAN-${idx + 1}`,
+    productId: pl.product_id || '',
+    name: pl.name || 'Untitled Plan',
+    status: pl.status || 'ACTIVE',
+    price: priceVal,
+    billedEvery: `${intervalCount} ${intervalUnit}`,
+    trial: 'None',
+    setupFee: 0,
+    currency: cycle?.pricing_scheme?.fixed_price?.currency_code || 'USD',
+    created: pl.create_time || new Date().toISOString(),
+  };
+});
+
 interface PlansClientViewProps {
   initialPlans?: PlanRow[];
   embedded?: boolean;
 }
 
 export function PlansClientView({ initialPlans = [], embedded = false }: PlansClientViewProps) {
-  const [plans, setPlans] = useState<PlanRow[]>(initialPlans);
+  const [plans, setPlans] = useState<PlanRow[]>(
+    initialPlans.length > 0 ? initialPlans : DEFAULT_PLANS
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchLivePlans = useCallback(async () => {
@@ -37,7 +59,7 @@ export function PlansClientView({ initialPlans = [], embedded = false }: PlansCl
       const res = await fetch(`${orchestratorUrl}/api/merchant/plans`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.plans)) {
+        if (Array.isArray(data.plans) && data.plans.length > 0) {
           const mapped: PlanRow[] = data.plans.map((p: any, idx: number) => {
             const cycle = p.billing_cycles?.[0];
             const priceVal = parseFloat(cycle?.pricing_scheme?.fixed_price?.value || '0.00');
@@ -94,6 +116,7 @@ export function PlansClientView({ initialPlans = [], embedded = false }: PlansCl
       rows={plans}
       columns={columns}
       embedded={embedded}
+      tableName="plans"
       headerAction={
         <button
           onClick={fetchLivePlans}

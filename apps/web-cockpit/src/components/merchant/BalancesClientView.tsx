@@ -6,6 +6,7 @@ import { EndpointPage } from '@/components/merchant/EndpointPage';
 import { RefreshCw } from 'lucide-react';
 import { webLogger as logger } from '@/lib/logger';
 import { getApiBaseUrl } from '@/lib/utils';
+import { BASELINE_BALANCES } from '@/lib/merchantService';
 
 interface BalanceRow {
   currency: string;
@@ -30,7 +31,9 @@ export function BalancesClientView({
   initialBalances?: BalanceRow[];
   embedded?: boolean;
 }) {
-  const [balances, setBalances] = useState<BalanceRow[]>(initialBalances);
+  const [balances, setBalances] = useState<BalanceRow[]>(
+    initialBalances.length > 0 ? initialBalances : BASELINE_BALANCES.balances
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   const fetchLiveBalances = useCallback(async () => {
@@ -41,7 +44,7 @@ export function BalancesClientView({
       const res = await fetch(`${orchestratorUrl}/api/merchant/balances`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data.balances)) {
+        if (Array.isArray(data.balances) && data.balances.length > 0) {
           const mapped: BalanceRow[] = data.balances.map((b: any) => {
             const currency = b.currency || 'USD';
             const total = typeof b.total === 'number'
@@ -129,6 +132,7 @@ export function BalancesClientView({
       rows={balances}
       columns={columns}
       embedded={embedded}
+      tableName="balances"
       headerAction={
         <button
           onClick={fetchLiveBalances}
