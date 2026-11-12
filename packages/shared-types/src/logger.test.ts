@@ -20,6 +20,10 @@ test('sanitizeForLogging: redacts sensitive keys and prevents circular reference
     token: 'jwt_val',
     vault_token: 'vault_val',
     client_secret: 'secret_val',
+    api_key: 'key_123',
+    apiKey: 'key_456',
+    refresh_token: 'refresh_val',
+    token_count: 150, // Should NOT be redacted
     safe_data: 'visible',
     nested: {
       password: 'mypassword',
@@ -36,6 +40,10 @@ test('sanitizeForLogging: redacts sensitive keys and prevents circular reference
   assert.equal(sanitized.token, '[REDACTED]');
   assert.equal(sanitized.vault_token, '[REDACTED]');
   assert.equal(sanitized.client_secret, '[REDACTED]');
+  assert.equal(sanitized.api_key, '[REDACTED]');
+  assert.equal(sanitized.apiKey, '[REDACTED]');
+  assert.equal(sanitized.refresh_token, '[REDACTED]');
+  assert.equal(sanitized.token_count, 150);
   assert.equal(sanitized.safe_data, 'visible');
   assert.equal(sanitized.nested.password, '[REDACTED]');
   assert.equal(sanitized.nested.allowed, 42);

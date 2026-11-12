@@ -90,12 +90,13 @@ export async function POST(req: NextRequest): Promise<NextResponse<AudioTranscri
 
     // Call Google's free Gemini Flash multimodal audio API (gemini-3.5-flash-lite or gemini-3.8-flash)
     const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
 
     const geminiResponse = await fetch(geminiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
       },
       body: JSON.stringify({
         contents: [

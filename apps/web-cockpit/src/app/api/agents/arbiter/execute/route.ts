@@ -14,9 +14,15 @@ export async function POST(req: NextRequest) {
     const orchestratorUrl = getApiBaseUrl();
     if (orchestratorUrl) {
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const auth = req.headers.get('authorization');
+        if (auth) headers['authorization'] = auth;
+        const sessionToken = req.headers.get('x-session-token');
+        if (sessionToken) headers['x-session-token'] = sessionToken;
+
         const res = await fetch(`${orchestratorUrl}/api/agents/arbiter/execute`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ dispute_id, action, amount_cents, note }),
         });
         if (res.ok) {

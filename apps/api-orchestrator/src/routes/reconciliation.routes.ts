@@ -1,6 +1,7 @@
 import { FastifyPluginAsync } from 'fastify';
 import { defaultPayPalClient, PayPalApimaticClient } from '../services/paypal-apimatic.js';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
+import { authenticateUser } from '../middleware/auth.js';
 
 export const logger = createLogger('API:Routes:Reconciliation');
 
@@ -74,7 +75,7 @@ export const reconciliationRoutes: FastifyPluginAsync<{
    * POST /api/merchant/reconcile-csv
    * Reconciles merchant ERP CSV ledger against PayPal Orders v2 & capture records.
    */
-  fastify.post('/api/merchant/reconcile-csv', async (request, reply) => {
+  fastify.post('/api/merchant/reconcile-csv', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as any;
     let ledgerRows: CsvLedgerRow[] = [];
 

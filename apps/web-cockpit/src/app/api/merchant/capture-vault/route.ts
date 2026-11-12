@@ -15,9 +15,15 @@ export async function POST(req: NextRequest) {
     const orchestratorUrl = getApiBaseUrl();
     if (orchestratorUrl) {
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const auth = req.headers.get('authorization');
+        if (auth) headers['authorization'] = auth;
+        const sessionToken = req.headers.get('x-session-token');
+        if (sessionToken) headers['x-session-token'] = sessionToken;
+
         const res = await fetch(`${orchestratorUrl}/api/merchant/capture-vault`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ order_id }),
         });
         if (res.ok) {

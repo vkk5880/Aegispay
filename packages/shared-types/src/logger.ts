@@ -26,7 +26,7 @@ const LEVEL_SEVERITY: Record<LogLevel, number> = {
 };
 
 const SENSITIVE_KEY_REGEX =
-  /^(authorization|cookie|secret|token|vault_token|client_secret|private_key|spt|password|cvv|card_number|ed25519_signature_hex|public_key_hex)$/i;
+  /^(authorization|cookie|secret|client[-_]?secret|.*[-_]?token$|^token$|access[-_]?token|refresh[-_]?token|session[-_]?token|id[-_]?token|vault[-_]?token|bearer|password|passwd|pwd|cvv|cvc|pin|ssn|card[-_]?number|ed25519_signature_hex|public_key_hex|api[-_]?key|private[-_]?key|credential|spt)$/i;
 
 /**
  * Recursively redacts sensitive credentials from logged objects and prevents circular reference errors.

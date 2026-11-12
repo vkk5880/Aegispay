@@ -42,14 +42,14 @@ import { authenticateUser, createOrderTrackingToken } from '../middleware/auth.j
 export const logger = createLogger('API:Routes:Chat');
 
 const ChatMessageSchema = z.object({
-  session_id: z.string().optional(),
-  message: z.string().min(1),
+  session_id: z.string().max(128).optional(),
+  message: z.string().min(1).max(50000),
   action: ShoppingActionTypeSchema.optional(),
   product_ids: z.array(z.string()).optional(),
   selected_product_ids: z.array(z.string()).optional(),
   active_turn_products: z.array(ActiveTurnProductSchema).optional(),
   budget_cap_cents: z.number().int().positive().optional(),
-  zip_code: z.string().optional(),
+  zip_code: z.string().max(20).optional(),
   model: z.string().optional(),
   provider: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -57,7 +57,7 @@ const ChatMessageSchema = z.object({
   stream: z.boolean().optional(),
   history: z.array(z.object({
     role: z.enum(['user', 'assistant']),
-    content: z.string(),
+    content: z.string().max(50000),
   })).optional(),
 });
 
@@ -88,7 +88,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * Actively verifies that user-supplied BYOK personal API key is valid against provider endpoint.
    * If invalid, rejects saving so unauthenticated models cannot be activated.
    */
-  fastify.post('/api/buyer/verify-llm-key', async (request, reply) => {
+  fastify.post('/api/buyer/verify-llm-key', { preHandler: [authenticateUser] }, async (request, reply) => {
     const VerifySchema = z.object({
       provider: z.enum(['google', 'openai', 'anthropic', 'custom']),
       apiKey: z.string().min(1, 'API key cannot be empty'),
@@ -108,8 +108,13 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       if (provider === 'google') {
-        const testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey.trim())}&pageSize=1`;
-        const res = await fetch(testUrl, { method: 'GET' });
+        const testUrl = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1';
+        const res = await fetch(testUrl, {
+          method: 'GET',
+          headers: {
+            'x-goog-api-key': apiKey.trim(),
+          },
+        });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           const errMsg = (errData as any)?.error?.message || `Google API returned HTTP ${res.status}`;
@@ -753,7 +758,7 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/watchlist/check
    * Scans all user watchlists and checks for price drop alerts.
    */
-  fastify.post('/api/buyer/watchlist/check', async (request, reply) => {
+  fastify.post('/api/buyer/watchlist/check', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as { user_id?: string } | undefined;
     const userId = body?.user_id;
     logger.info('Executing scheduled/manual price drop check across watchlists', { userId });
@@ -866,9 +871,9 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/buyer/audio-transcribe
    * Transcribes spoken audio to text using Google's free Gemini Flash audio API.
    */
-  fastify.post('/api/buyer/audio-transcribe', async (request, reply) => {
+  fastify.post('/api/buyer/audio-transcribe', { preHandler: [authenticateUser] }, async (request, reply) => {
     const AudioTranscribeSchema = z.object({
-      audioBase64: z.string().min(1, 'Audio base64 data is required'),
+      audioBase64: z.string().min(1, 'Audio base64 data is required').max(10 * 1024 * 1024, 'Audio payload exceeds 10MB limit'),
       mimeType: z.string().optional(),
     });
 
@@ -898,10 +903,13 @@ export const chatRoutes: FastifyPluginAsync = async (fastify) => {
 
     try {
       const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
       const geminiResponse = await fetch(geminiUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify({
           contents: [
             {

@@ -15,9 +15,15 @@ export async function POST(
     const orchestratorUrl = getApiBaseUrl();
     if (orchestratorUrl) {
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        const auth = req.headers.get('authorization');
+        if (auth) headers['Authorization'] = auth;
+        const sessionToken = req.headers.get('x-session-token');
+        if (sessionToken) headers['x-session-token'] = sessionToken;
+
         const res = await fetch(`${orchestratorUrl}/api/disputes/${encodeURIComponent(id)}/appeal`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({ appeal_reason, evidence_notes }),
         });
         if (res.ok) {

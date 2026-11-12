@@ -11,6 +11,7 @@ import {
 } from '@aegispay/shared-types';
 import { defaultPayPalClient } from '../services/paypal-apimatic.js';
 import { defaultChannel3Client } from '../services/channel3.client.js';
+import { authenticateUser } from '../middleware/auth.js';
 
 const logger = createLogger('API:Routes:MerchantCatalog');
 
@@ -81,7 +82,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/products
    * Creates a new catalog product on PayPal Catalog API with ground-truth image hashing.
    */
-  fastify.post('/api/merchant/products', async (request, reply) => {
+  fastify.post('/api/merchant/products', { preHandler: [authenticateUser] }, async (request, reply) => {
     const parseResult = CreateProductSchema.safeParse(request.body);
     if (!parseResult.success) {
       logger.warn('Product creation validation failed', {
@@ -164,7 +165,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * PATCH /api/merchant/products/:id
    * Updates an existing catalog product on PayPal Catalog API.
    */
-  fastify.patch('/api/merchant/products/:id', async (request, reply) => {
+  fastify.patch('/api/merchant/products/:id', { preHandler: [authenticateUser] }, async (request, reply) => {
     const paramsResult = ProductIdParamSchema.safeParse(request.params);
     if (!paramsResult.success) {
       return reply.status(400).send({ error: 'INVALID_PRODUCT_ID' });
@@ -201,7 +202,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/products/ai-suggest
    * Multi-modal auto-fill using Gemini 3.8 Flash Vision & Channel3 Market Intelligence.
    */
-  fastify.post('/api/merchant/products/ai-suggest', async (request, reply) => {
+  fastify.post('/api/merchant/products/ai-suggest', { preHandler: [authenticateUser] }, async (request, reply) => {
     const parseResult = AiProductSuggestSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({ error: 'INVALID_SUGGEST_REQUEST' });
@@ -252,7 +253,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
     if (apiKey) {
       try {
         const geminiModel = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent`;
         const parts: any[] = [];
         if (prompt) {
           parts.push({
@@ -279,7 +280,10 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
 
         const aiResponse = await fetch(geminiUrl, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+          },
           body: JSON.stringify({
             contents: [{ parts }],
             generationConfig: {
@@ -391,7 +395,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/plans
    * Creates a new recurring billing plan on PayPal Subscriptions API.
    */
-  fastify.post('/api/merchant/plans', async (request, reply) => {
+  fastify.post('/api/merchant/plans', { preHandler: [authenticateUser] }, async (request, reply) => {
     const parseResult = CreateBillingPlanSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({
@@ -660,7 +664,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/refund
    * Issues standard commercial refund for captured payment (POST /v2/payments/captures/{id}/refund).
    */
-  fastify.post('/api/merchant/refund', async (request, reply) => {
+  fastify.post('/api/merchant/refund', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as any;
     const { capture_id, amount_cents, note } = body || {};
 
@@ -689,7 +693,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/trackers
    * Uploads shipment tracking number to PayPal to guarantee Seller Protection (POST /v1/shipping/trackers).
    */
-  fastify.post('/api/merchant/trackers', async (request, reply) => {
+  fastify.post('/api/merchant/trackers', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as any;
     const { transaction_id, tracking_number, carrier } = body || {};
 
@@ -721,7 +725,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/capture-vault
    * Captures pre-authorized vaulted funds for synthetic intent bids or orders (POST /v2/payments/orders/{id}/capture).
    */
-  fastify.post('/api/merchant/capture-vault', async (request, reply) => {
+  fastify.post('/api/merchant/capture-vault', { preHandler: [authenticateUser] }, async (request, reply) => {
     const body = request.body as any;
     const { order_id } = body || {};
 
@@ -746,7 +750,7 @@ export const merchantCatalogRoutes: FastifyPluginAsync = async (fastify) => {
    * POST /api/merchant/seed-sandbox
    * Seeds sample products, recurring plans, and commercial invoices directly into live PayPal Sandbox.
    */
-  fastify.post('/api/merchant/seed-sandbox', async (request, reply) => {
+  fastify.post('/api/merchant/seed-sandbox', { preHandler: [authenticateUser] }, async (request, reply) => {
     logger.info('Triggered 1-click live PayPal Sandbox seeding');
     const results = {
       productsCreated: [] as any[],

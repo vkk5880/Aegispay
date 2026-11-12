@@ -17,6 +17,13 @@ import {
 
 const logger = createLogger('API:Middleware:HttpAdapters');
 
+const getDefaultSecret = () =>
+  process.env.HTTP402_HMAC_SECRET ||
+  process.env.AEGIS_HMAC_SECRET ||
+  (process.env.NODE_ENV === 'production'
+    ? crypto.randomBytes(32).toString('hex')
+    : 'aegispay_test_secret_key_402');
+
 export interface SettlementOverrides {
   asset?: string;
   scheme?: string;
@@ -131,7 +138,7 @@ export interface ExpressPaymentMiddlewareOptions {
 }
 
 export function createExpressPaymentMiddleware(options: ExpressPaymentMiddlewareOptions) {
-  const { protectedRoutes, secret = 'aegispay_test_secret_key_402', vaultSetupUrl, payToUri } = options;
+  const { protectedRoutes, secret = getDefaultSecret(), vaultSetupUrl, payToUri } = options;
 
   logger.info('Initializing Express payment middleware', {
     protectedRoutesCount: protectedRoutes.length,
@@ -317,7 +324,7 @@ export function wrapFetchWithPayment(
  * Hono HTTP 402 Paywall Middleware (typescript/packages/http/hono/src/index.ts)
  */
 export function createHonoPaymentMiddleware(options: ExpressPaymentMiddlewareOptions) {
-  const { protectedRoutes, secret = 'aegispay_test_secret_key_402', vaultSetupUrl, payToUri } = options;
+  const { protectedRoutes, secret = getDefaultSecret(), vaultSetupUrl, payToUri } = options;
 
   logger.info('Initializing Hono payment middleware', {
     protectedRoutesCount: protectedRoutes.length,
