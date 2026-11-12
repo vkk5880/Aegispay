@@ -38,8 +38,9 @@ Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atom
 - [5. 🔍 Evaluator Testing Guide & Professional Demo Walkthrough](#5--evaluator-testing-guide--professional-demo-walkthrough)
   - [5.1 Interactive Portals & Navigation Map](#51-interactive-portals--navigation-map)
   - [5.2 Step-by-Step Evaluator Test Scenarios (How to Check Our Agent)](#52-step-by-step-evaluator-test-scenarios-how-to-check-our-agent)
-  - [5.3 Complete Capabilities & Feature Inventory (What We Have)](#53-complete-capabilities--feature-inventory-what-we-have)
-  - [5.4 3-Minute Video Presentation Storyboard](#54-3-minute-video-presentation-storyboard)
+  - [5.3 🏪 Comprehensive Seller Portal & Merchant Clearinghouse Guide (/merchant)](#53--comprehensive-seller-portal--merchant-clearinghouse-guide-merchant)
+  - [5.4 Complete Capabilities & Feature Inventory (What We Have)](#54-complete-capabilities--feature-inventory-what-we-have)
+  - [5.5 3-Minute Video Presentation Storyboard](#55-3-minute-video-presentation-storyboard)
 - [6. ☁️ Production Deployment Guide (Render Blueprint & Manual)](#6-️-production-deployment-guide-render-blueprint--manual)
 - [7. 💻 Local Development & Quickstart](#7--local-development--quickstart)
 - [8. 📂 Monorepo Directory Topology](#8--monorepo-directory-topology)
@@ -378,7 +379,113 @@ Navigate to `http://localhost:3000/judge`. This pre-authenticated lab allows tes
 
 ---
 
-### 5.3 Complete Capabilities & Feature Inventory (What We Have)
+### 5.3 🏪 Comprehensive Seller Portal & Merchant Clearinghouse Guide (/merchant)
+
+The **AegisPay Seller Portal** (`http://localhost:3000/merchant`) is an enterprise-grade merchant operational clearinghouse and autonomous commerce control tower. It bridges traditional e-commerce sellers, multi-merchant marketplaces, and autonomous AI buyer agents into a single unified workspace.
+
+Whether a merchant is selling physical goods, digital subscriptions, or multi-vendor enterprise bundles, the Seller Portal provides 8 specialized operational modules:
+
+```mermaid
+flowchart LR
+    subgraph SellerPortal["🏪 AegisPay Seller Portal (/merchant)"]
+        direction TB
+        M1["1. Overview & Revenue KPIs<br/>(Cleared Cash, Escrow Reserves)"]
+        M2["2. Resolution Center & Forensics<br/>(Bryntum SLA & Evidence Diff)"]
+        M3["3. Products & Catalog Sync<br/>(PayPal Catalog v1 & Channel3)"]
+        M4["4. Commercial Invoicing & QR<br/>(PayPal Invoicing v2 & Instant QR)"]
+        M5["5. Multi-Currency Balances<br/>(PayPal Balances v1 & Sparklines)"]
+        M6["6. Subscription Plans<br/>(PayPal Billing Plans v1)"]
+        M7["7. Financial Transactions<br/>(AG Grid v36 Master/Detail)"]
+        M8["8. Live AG Studio 3 Assistant<br/>(DuckDB-WASM Natural Language)"]
+    end
+
+    subgraph SellerEngines["⚡ Autonomous Merchant Rails"]
+        E1["PayPal Commerce Platform Rails"]
+        E2["Channel3 Catalog Discovery Engine"]
+        E3["Zero-Trust 72h Price-Drop Escrow"]
+        E4["Forensic Computer Vision Adjudication"]
+    end
+
+    SellerPortal <--> SellerEngines
+```
+
+#### 1. Executive Sales & Revenue Overview (`/merchant?tab=overview`)
+* **Live Financial Metric Tiles**:
+  * **Gross Merchandise Volume (GMV)**: Real-time cumulative order volume processed across all autonomous agent checkouts.
+  * **Cleared Cash**: Liquid settlement funds ready for instant merchant bank transfer.
+  * **Held Escrow Reserves**: Funds held in conditional authorization escrow during the 72-hour price-protection and delivery window.
+  * **Active Synthetic Intent Bids**: Real-time counter of buyer agents actively negotiating Dutch-auction purchase vouchers.
+  * **Open Return Disputes**: Count of pending return claims requiring merchant triage before SLA expiration.
+* **Channel3 Commerce Intelligence Reports (`DashboardReports.tsx`)**: Embedded market benchmarking charts displaying conversion ratios, competitive catalog price elasticity, and top-ranking search categories.
+* **Integrated Seller Explainer Card (`SellerExplainerCard.tsx`)**: Contextual quick guide explaining zero-trust fraud elimination, autonomous agent order acceptance, and accelerated settlement.
+
+#### 2. Resolution Center & Dispute Return Forensics (`/merchant?tab=disputes`)
+* **Interactive Bryntum SLA Timeline Scheduler (`DisputeSlaScheduler.tsx`)**:
+  * Visual Gantt timeline mapping open claims against strict PayPal seller response deadlines (`seller_response_due_date`).
+  * Dynamic visual urgency bands: Critical Red (`< 6 hours` remaining), Amber Warning (`< 24 hours`), and Compliant Green.
+  * **"Unallocated SLA Deadline"** triage badges identifying newly ingested claims that require forensic assignment.
+* **Side-by-Side Visual Evidence Comparator (`EvidenceComparatorWidget.tsx`)**:
+  * Displays the pristine Channel3 manufacturer product photograph side-by-side with the buyer-submitted return photo.
+  * Interactive difference slider and defect pixel-mask overlay to instantly identify return fraud, swapped serial numbers, or transit damage.
+* **HATEOAS Dynamic Dispute Action Renderer (`HateoasDisputeActionRenderer.tsx`)**:
+  * 1-click execution of authoritative PayPal Disputes API v1 endpoints (`/v1/customer/disputes/{id}`):
+    * `[Accept Claim]`: Issues instant full refund and auto-closes dispute without dinging merchant trust score.
+    * `[Submit Forensic Evidence]`: Bundles carrier tracking, proof-of-delivery timestamps, and PDF visual inspection reports via `POST /provide-evidence`.
+    * `[Propose Partial Offer]`: Submits an algorithmic compromise partial settlement to the buyer agent.
+* **Autonomy Dial Widget (`AutonomyDialWidget.tsx`)**:
+  * Configurable merchant automation rule slider (e.g., *"Auto-refund damaged claims under $25 if return freight cost exceeds product salvage value"*).
+
+#### 3. Products & Multi-Merchant Catalog Management (`/merchant/products`)
+* **PayPal Catalog Products API v1 Integration (`/v1/catalogs/products`)**:
+  * Full CRUD management of merchant SKUs, titles, descriptions, categories, and inventory caps.
+* **Add Product Modal (`AddProductModal.tsx`)**:
+  * Interactive modal form to register new catalog items with SKU, Merchant Category Code (MCC), retail price in cents, stock allocation thresholds, and gallery images.
+* **Bi-Directional Channel3 Sync**:
+  * Every published product automatically synchronizes with the Channel3 product crawler, making it instantly discoverable and rankable by external AI shopping agents.
+
+#### 4. Commercial Invoicing & Contactless QR Settlement (`/merchant/invoices`)
+* **PayPal Invoicing API v2 Integration (`/v2/invoicing/invoices`)**:
+  * Complete B2B/C2C invoice lifecycle: Create Draft, Finalize, Send via Email, Send Payment Reminder, Record Offline Settlement, and Cancel.
+* **Dynamic QR Code Generation (`POST /v2/invoicing/invoices/{id}/generate-qr-code`)**:
+  * In-portal generator producing dynamic base64 QR codes on demand, allowing contactless mobile checkout or instant in-person settlement for retail stores and pop-up locations.
+* **Invoice Status Tracker**: Real-time status indicators (`DRAFT`, `SENT`, `PAID`, `CANCELLED`, `REFUNDED`).
+
+#### 5. Multi-Currency Balances & Escrow Reserve Tracking (`/merchant/balances`)
+* **PayPal Reporting Balances API v1 Integration (`/v1/reporting/balances`)**:
+  * Comprehensive balance ledger displaying multi-currency cash positions across USD, EUR, GBP, CAD, and AUD.
+  * Explicit breakdown of:
+    1. **Available Cash**: Unrestricted funds cleared for immediate withdrawal.
+    2. **Held Escrow Balance**: Funds under temporary hold during buyer transit or 72-hour price-drop windows.
+    3. **Dispute Withheld Reserves**: Collateral held in reserve while chargebacks or claims are adjudicated.
+* **In-Cell 30-Day Trend Sparklines**: High-performance SVG sparklines rendered inside AG Grid cells depicting 30-day liquidity trajectories.
+
+#### 6. Subscription Plans & Recurring Billing Management (`/merchant/plans`)
+* **PayPal Subscriptions & Billing Plans API v1 Integration (`/v1/billing/plans`, `/v1/billing/subscriptions`)**:
+  * Create, activate, and deactivate recurring subscription tiers.
+  * Configure billing frequencies (daily, weekly, monthly, annual), setup fees, and trial period durations.
+  * Real-time subscriber cohort tracking and churn analytics.
+
+#### 7. Master/Detail Financial Transaction Clearinghouse (`/merchant/transactions`)
+* **PayPal Reporting Transactions API v1 Integration (`/v1/reporting/transactions`)**:
+  * Master/Detail Grid architecture powered by **AG Grid Enterprise v36**:
+    * Clicking the expand arrow `▶` on any parent order displays the child `<OrderDetailView />` sub-grid.
+    * Sub-grid reveals sub-merchant fee splits, net payout disbursement amounts, Vault v3 setup token identifiers, and live carrier tracking milestone scans.
+* **Enterprise Clearinghouse Controls**:
+  * Multi-column sorting, floating quick-filters, column pin/reorder, and pivot aggregation.
+  * Multi-sheet formatted Excel workbook export (`.xlsx`) and CSV data streaming.
+
+#### 8. Live AI Merchant Assistant Canvas (AG Studio 3) (`/merchant?tab=assistant`)
+* **AG Studio 3 Multi-Agent Harness**:
+  * Natural language prompt bar directly embedded in the merchant workspace.
+  * Merchants can type conversational prompts to instantly query and manipulate their financial data:
+    * *"Show all orders with net margin greater than 18% delivered this week"*
+    * *"Group transactions by merchant category and summarize total escrow holds"*
+    * *"Filter disputes with imminent SLA breach due in the next 12 hours"*
+  * The Lead Agent compiles queries into DuckDB SQL and transforms the AG Grid layout in `< 10ms` over client-side Arrow tables.
+
+---
+
+### 5.4 Complete Capabilities & Feature Inventory (What We Have)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -406,7 +513,7 @@ Navigate to `http://localhost:3000/judge`. This pre-authenticated lab allows tes
 
 ---
 
-### 5.4 3-Minute Video Presentation Storyboard
+### 5.5 3-Minute Video Presentation Storyboard
 
 For evaluators watching the 180-second demonstration video (script located in [`docs/DEMO_VIDEO_SCRIPT.md`](docs/DEMO_VIDEO_SCRIPT.md)):
 
