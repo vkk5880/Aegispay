@@ -36,7 +36,7 @@ export function createDb(
 
 // Re-export PostgreSQL schemas
 export * from './schema.js';
-export { eq, sql, desc, asc } from 'drizzle-orm';
+export { eq, sql, desc, asc, inArray, or, and } from 'drizzle-orm';
 
 
 // Export SQLite schemas

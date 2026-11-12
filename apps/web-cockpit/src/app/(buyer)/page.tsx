@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { webLogger as logger } from '@/lib/logger';
 import { GenerativeIntentBar, ParsedSearchIntent } from '@/components/buyer/GenerativeIntentBar';
 import { ThoughtStreamVisualizer, ThoughtStep } from '@/components/buyer/ThoughtStreamVisualizer';
@@ -13,7 +14,7 @@ import { FriendlyErrorTransmuter } from '@/components/common/FriendlyErrorTransm
 import { ConversationalAgentChat } from '@/components/buyer/ConversationalAgentChat';
 import { SpendAllowanceHeader } from '@/components/buyer/SpendAllowanceHeader';
 import { UserSettingsDrawer, UserSettings, DEFAULT_USER_SETTINGS } from '@/components/buyer/UserSettingsDrawer';
-import { UnifiedCartDrawer } from '@/components/buyer/UnifiedCartDrawer';
+import { UnifiedCartDrawer, OrderConfirmationData } from '@/components/buyer/UnifiedCartDrawer';
 import type { SessionMandate, ProductCardData } from '@aegispay/shared-types';
 import {
   Sparkles,
@@ -29,6 +30,7 @@ import { useUiMode } from '@/context/UiModeContext';
 import { useAuth } from '@/context/AuthContext';
 
 export default function BuyerPortalPage() {
+  const router = useRouter();
   const { showTechnicalDetails } = useUiMode();
   const {
     user,
@@ -56,6 +58,8 @@ export default function BuyerPortalPage() {
 
   // Cart Drawer state
   const [isCartOpen, setIsCartOpen] = useState<boolean>(false);
+  const [isCheckingOut, setIsCheckingOut] = useState<boolean>(false);
+  const [confirmationData, setConfirmationData] = useState<OrderConfirmationData | null>(null);
 
   // User Settings State & Drawer
   const [userSettings, setUserSettings] = useState<UserSettings>(DEFAULT_USER_SETTINGS);
@@ -524,27 +528,43 @@ export default function BuyerPortalPage() {
         isOpen={isCartOpen}
         onClose={() => {
           logger.info('[BuyerPage:CartDrawer] Closing multi-vendor cart drawer');
+          setConfirmationData(null);
           setIsCartOpen(false);
         }}
         cart={optimizationData}
         zipCode={userSettings.zipCode}
         onRemoveItem={handleRemoveCartItem}
+        isCheckingOut={isCheckingOut}
+        confirmationData={confirmationData}
+        onContinueShopping={() => {
+          setConfirmationData(null);
+          setIsCartOpen(false);
+        }}
+        onViewOrders={() => {
+          setConfirmationData(null);
+          setIsCartOpen(false);
+          router.push('/history');
+        }}
         onProceedToCheckout={async () => {
           const totalCents = optimizationData.net_buyer_expenditure_cents;
           const firstMerchant = optimizationData.assigned_merchants[0];
           const firstItem = firstMerchant?.items?.[0];
           const effectiveUserId = user?.email || (user as any)?.id || 'demo';
-          const orderId = `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const clientOrderId = `ord_pp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const allItems = (optimizationData?.assigned_merchants || []).flatMap((m) => m?.items || []);
+          const totalItemCount = allItems.reduce((acc, it) => acc + (it?.quantity || 1), 0);
+
+          setIsCheckingOut(true);
 
           logger.info('[BuyerPage:Checkout] Proceed to checkout triggered from UnifiedCartDrawer', {
-            orderId,
+            clientOrderId,
             effectiveUserId,
             netBuyerExpenditureCents: totalCents,
             merchantCount: optimizationData.assigned_merchants.length,
           });
 
           try {
-            await fetch('/api/buyer/chat', {
+            const res = await fetch('/api/buyer/chat', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -553,26 +573,69 @@ export default function BuyerPortalPage() {
               body: JSON.stringify({
                 message: `Order checkout for ${firstItem?.title || 'cart items'}`,
                 action: 'BUY',
-                selected_product_ids: (optimizationData?.assigned_merchants || []).flatMap((m) =>
-                  (m?.items || []).map((i) => i?.product_id).filter(Boolean)
-                ),
+                order_id: clientOrderId,
+                cart: optimizationData,
+                items: allItems,
+                selected_product_ids: allItems.map((i) => i?.product_id).filter(Boolean),
                 budget_cap_cents: totalCents + 5000,
                 allowed_category_ids: user?.allowedCategories,
                 allowed_merchants: user?.allowedMerchants,
               }),
             });
+
+            const data = await res.json().catch(() => ({}));
+            const finalOrderId = data.order_id || clientOrderId;
+            const finalTrackingNumber =
+              data.tracking_number || `FDX-${Math.floor(100000000000 + Math.random() * 900000000000)}`;
+            const finalReceiptNumber = data.receipt_number || Math.floor(1000 + Math.random() * 9000);
+            const isFailed = data.order_status === 'FAILED' || !res.ok;
+
+            if (!isFailed) {
+              recordPurchaseSpend(totalCents);
+              setOptimizationData({
+                assigned_merchants: [],
+                gross_subtotal_cents: 0,
+                total_commission_rebate_cents: 0,
+                total_shipping_cents: 0,
+                total_shipping_saved_cents: 0,
+                net_buyer_expenditure_cents: 0,
+                savings_percentage: 0,
+                is_within_budget: true,
+                budget_cap_cents: 50000,
+              });
+              setConfirmationData({
+                orderId: finalOrderId,
+                receiptNumber: finalReceiptNumber,
+                trackingNumber: finalTrackingNumber,
+                carrier: 'FedEx Priority',
+                totalCents,
+                itemCount: totalItemCount,
+                isFailed: false,
+              });
+              showNotification(`Order authorized! Saved to order history for ${effectiveUserId}`);
+            } else {
+              setConfirmationData({
+                orderId: finalOrderId,
+                totalCents,
+                itemCount: totalItemCount,
+                isFailed: true,
+                errorMessage:
+                  data.message ||
+                  data.error ||
+                  'Order declined by security enforcer policy or budget constraint. Recorded as FAILED.',
+              });
+            }
           } catch (err: any) {
             logger.warn('Failed to dispatch checkout via buyer chat', { error: err?.message });
-          }
-
-          setIsCartOpen(false);
-          recordPurchaseSpend(totalCents);
-          showNotification(`Order authorized! Saved to order history for ${effectiveUserId}`);
-
-          if (typeof window !== 'undefined') {
-            setTimeout(() => {
-              window.location.href = `/history?order_id=${encodeURIComponent(orderId)}`;
-            }, 800);
+            setConfirmationData({
+              orderId: clientOrderId,
+              totalCents,
+              itemCount: totalItemCount,
+              isFailed: true,
+              errorMessage: err?.message || 'Network error attempting checkout authorization.',
+            });
+          } finally {
+            setIsCheckingOut(false);
           }
         }}
       />

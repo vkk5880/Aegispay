@@ -29,6 +29,7 @@ import {
   eq,
   desc,
   sql,
+  inArray,
 } from '@aegispay/database';
 
 const logger = createLogger('API:Services:Financial').child('UserMemory');
@@ -73,7 +74,7 @@ const memoryPrefsStore = new Map<string, UserPreferences>();
 const purchaseHistoryStore = new Map<string, PurchaseLogEntry[]>();
 
 function sanitizeUserId(userId: string): string {
-  const cleaned = (userId || '').replace(/[^a-zA-Z0-9_\-]/g, '');
+  const cleaned = (userId || '').replace(/[^a-zA-Z0-9_\-@.+]/g, '');
   return cleaned.slice(0, 64) || 'demo';
 }
 
@@ -318,10 +319,15 @@ export async function getPurchaseHistoryAsync(userId: string = 'demo', limit: nu
   try {
     const db = getUserMemoryDb();
     if (db) {
+      const targetUserIds = [safeId];
+      if (safeId === 'sb-buyer@personal.example.com' || safeId === 'demo' || safeId === 'guest') {
+        targetUserIds.push('demo', 'sb-buyer@personal.example.com', 'usr_pp_buyer');
+      }
+
       const rows = await db
         .select()
         .from(purchaseHistoryTable)
-        .where(eq(purchaseHistoryTable.user_id, safeId))
+        .where(inArray(purchaseHistoryTable.user_id, Array.from(new Set(targetUserIds))))
         .orderBy(desc(purchaseHistoryTable.created_at))
         .limit(limit);
 
