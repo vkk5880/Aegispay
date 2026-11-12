@@ -649,3 +649,35 @@ test('PurchaseConfirmationCard: renders compact user-view ready prompt with Canc
   assert.ok(html.includes('w-9 h-9') || html.includes('w-10 sm:h-10'), 'Expected small image thumbnail');
 });
 
+test('Chat Guardrails: POST /api/buyer/chat intercepts greetings without emitting product cards', async () => {
+  const { POST } = await import('../../app/api/buyer/chat/route.js');
+  const req = new Request('http://localhost:3000/api/buyer/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'hello' }),
+  });
+  const res = await POST(req);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.action, 'DISCOVER');
+  assert.equal(data.products?.length, 0, 'Expected 0 products for greeting');
+  assert.ok(data.markdown.includes('Hello! I am your AegisPay Shopping Concierge'));
+});
+
+test('Chat Guardrails: POST /api/buyer/chat intercepts off-topic query and redirects to shopping without product cards', async () => {
+  const { POST } = await import('../../app/api/buyer/chat/route.js');
+  const req = new Request('http://localhost:3000/api/buyer/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'What is the capital of Peru?' }),
+  });
+  const res = await POST(req);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.action, 'DISCOVER');
+  assert.equal(data.products?.length, 0, 'Expected 0 products for off-topic query');
+  assert.ok(data.markdown.includes('AegisPay Commerce Concierge'));
+  assert.ok(data.markdown.includes('specialize strictly in'));
+});
+
+

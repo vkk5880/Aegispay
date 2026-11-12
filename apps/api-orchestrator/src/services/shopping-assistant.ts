@@ -605,6 +605,19 @@ export function buildAgentPrompt(request: ChatMessageRequest, effectiveProductId
   return prompt;
 }
 
+export const COMMERCE_CONCIERGE_INSTRUCTIONS =
+  'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
+  'Domain & Guardrail Enforcement: You strictly specialize in e-commerce, shopping, product discovery, price comparisons, and PayPal checkout. ' +
+  'You ONLY answer queries related to products, shopping, catalogs, comparisons, specs, shipping, discounts, knapsack cart bundling, stock reservations, order tracking, and PayPal payments. ' +
+  'If a user asks general knowledge, coding, creative writing, homework, politics, jokes, or other off-topic questions, politely decline and redirect them back to shopping and commerce. ' +
+  'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
+  'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
+  'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
+  'When a user wants to find or discover items, invoke the search_catalog tool. ' +
+  'When a user asks to compare products, invoke compare_products. ' +
+  'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
+  'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.';
+
 export class ShoppingAssistantService {
   public needsClarification(query: string): boolean {
     return needsClarification(query);
@@ -678,15 +691,7 @@ export class ShoppingAssistantService {
     this.agent = new Agent({
       id: 'aegispay-commerce-agent',
       name: 'AegisPay Autonomous Shopping Concierge',
-      instructions:
-        'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
-        'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
-        'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
-        'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
-        'When a user wants to find or discover items, invoke the search_catalog tool. ' +
-        'When a user asks to compare products, invoke compare_products. ' +
-        'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
-        'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
+      instructions: COMMERCE_CONCIERGE_INSTRUCTIONS,
       model: resolveCommerceModel(),
       tools: {
         search_catalog: this.searchCatalogTool,
@@ -1238,6 +1243,21 @@ export class ShoppingAssistantService {
       };
     }
 
+    // Domain guardrails: Intercept casual greetings & out-of-domain queries without invoking LLM or catalog search
+    const hasAttachedContext = Boolean(
+      (effectiveProductIds && effectiveProductIds.length > 0) ||
+      (request.active_turn_products && request.active_turn_products.length > 0)
+    );
+
+    if (!request.action && !hasAttachedContext) {
+      if (this.isGreetingQuery(request.message)) {
+        return this.generateGreetingPayload(request.message, activeModel);
+      }
+      if (this.isOffTopicQuery(request.message)) {
+        return this.generateOffTopicPayload(request.message, activeModel);
+      }
+    }
+
     // All other conversational requests: Mastra Agent LLM with full tool access decides actions and generates answers
     mastraLogger.info(`Processing chat message via Mastra Agent LLM: "${request.message}" (model: ${activeModel}, key: ${request.user_api_key ? 'User BYOK' : 'Platform Google Key'})`);
 
@@ -1778,6 +1798,86 @@ export class ShoppingAssistantService {
     return filtered.join(' ').trim() || message.trim();
   }
 
+  public isGreetingQuery(message: string): boolean {
+    if (!message) return false;
+    const trimmed = message.trim();
+    return /^(hi|hello|hey|hiya|howdy|sup|greetings|good\s+(morning|afternoon|evening)|who\s+are\s+you|what\s+can\s+you\s+do|how\s+can\s+you\s+help|help\s*me|help|how\s+does\s+(this|aegispay)\s+work)[!?.]*$/i.test(
+      trimmed
+    );
+  }
+
+  public isOffTopicQuery(message: string, hasAttachedContext = false): boolean {
+    if (!message || hasAttachedContext) return false;
+    const lower = message.toLowerCase();
+
+    const isExplicitOffTopic =
+      /\b(joke|pun|poem|poetry|rhyme|song|lyrics|python|javascript|typescript|c\+\+|java|html|css|sql|write\s+code|code\s+script|program|homework|essay|capital\s+of|president|prime\s+minister|weather|forecast|temperature\s+in|recipe|how\s+to\s+cook|bake|translate|translation|quantum|physics|math\s+problem|calculate|equation|story|tell\s+me\s+about\s+history|who\s+won\s+the|sports\s+score|movie\s+plot|philosophy|politics|religion)\b/i.test(
+        lower
+      );
+
+    const hasCommerceKeywords =
+      /\b(buy|purchase|checkout|order|shop|shopping|store|merchant|cart|price|pricing|cost|dollar|\$|cents|budget|deal|deals|discount|discounts|coupon|rebate|rebates|cashback|sale|cheap|cheapest|affordable|expensive|under|within|compare|comparison|specs|specification|specifications|warranty|stock|shipping|delivery|item|items|product|products|catalog|brand|brands|review|reviews|rating|ratings|headphone|headphones|earphone|earphones|audio|speaker|speakers|laptop|laptops|computer|phone|phones|iphone|android|tablet|monitor|keyboard|mouse|desk|chair|watch|camera|charger|cable|iron|irons|mat|mats|coffee|gift|backpack|wallet|tv|console|game|gaming)\b/i.test(
+        lower
+      );
+
+    return isExplicitOffTopic && !hasCommerceKeywords;
+  }
+
+  public generateGreetingPayload(message: string, activeModel: string): ChatResponsePayload {
+    return {
+      action: 'DISCOVER',
+      markdown:
+        '### 👋 Hello! I am your AegisPay Shopping Concierge\n\n' +
+        'I can help you discover products across verified merchants, evaluate deals, and make secure purchases with PayPal Buyer Protection:\n\n' +
+        '- 🔍 **Discover Products**: Search across verified merchants with live stock & instant cashback rebates.\n' +
+        '- ⚖️ **Compare Specs & Value**: View side-by-side matrices comparing specs, reviews, and net effective costs.\n' +
+        '- 💰 **Cart Optimization**: Automatically bundle multi-store orders and maximize free shipping thresholds.\n' +
+        '- ⚡ **Autonomous 2PC Buy**: Verified stock reservation and vaulted PayPal payment with 72-hour price drop protection.\n\n' +
+        '*What kind of product or deal are you looking for today?*',
+      products: [],
+      thought_trace: [
+        `[Mastra Workflow DAG] Active Model: ${activeModel} | Intent: GREETING ("${message}")`,
+        'Activated AegisPay Shopping Concierge conversational welcome state',
+        'Ready for product discovery, spec comparison, or checkout commands',
+      ],
+      follow_up_suggestions: [
+        'Find wireless headphones under $100',
+        'Compare top desk mats',
+        'Show verified tech deals',
+        'Check my order history',
+      ],
+      active_model: activeModel,
+    };
+  }
+
+  public generateOffTopicPayload(message: string, activeModel: string): ChatResponsePayload {
+    return {
+      action: 'DISCOVER',
+      markdown:
+        '### 🛡️ AegisPay Commerce Concierge\n\n' +
+        'I specialize strictly in **e-commerce shopping, product discovery, and PayPal payments**. I cannot assist with non-shopping requests such as general trivia, coding, homework, or creative writing.\n\n' +
+        'Here is how I can assist you:\n' +
+        '- **Search verified merchants** for electronics, workspace essentials, and lifestyle products\n' +
+        '- **Compare products side-by-side** with technical specs and customer ratings\n' +
+        '- **Apply instant commission rebates** to lower your effective purchase price\n' +
+        '- **Execute autonomous checkouts** with Two-Phase Commit (2PC) stock holds\n\n' +
+        '*Try searching for an item, asking for recommendations within a budget, or selecting products to compare!*',
+      products: [],
+      thought_trace: [
+        `[Mastra Workflow DAG] Active Model: ${activeModel} | Intent: DOMAIN_GUARDRAIL_INTERCEPT ("${message}")`,
+        'Domain Enforcer: Query classified as out-of-domain (non-commerce query)',
+        'Protected agent scope: Redirected user to product discovery and shopping features',
+      ],
+      follow_up_suggestions: [
+        'Find wireless headphones under $100',
+        'Compare top desk mats',
+        'Show verified tech deals',
+        'Can I buy headphones within $50 budget?',
+      ],
+      active_model: activeModel,
+    };
+  }
+
   public getAgent(requestedModel?: string, userApiKey?: string): Agent {
     const tools = {
       search_catalog: this.searchCatalogTool,
@@ -1819,15 +1919,7 @@ export class ShoppingAssistantService {
       return new Agent({
         id: `aegispay-user-agent-${Date.now()}`,
         name: `AegisPay User-Scoped Concierge (${activeModelId})`,
-        instructions:
-          'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
-          'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
-          'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
-          'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
-          'When a user wants to find or discover items, invoke the search_catalog tool. ' +
-          'When a user asks to compare products, invoke compare_products. ' +
-          'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
-          'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
+        instructions: COMMERCE_CONCIERGE_INSTRUCTIONS,
         model: modelConfig,
         tools,
       });
@@ -1837,15 +1929,7 @@ export class ShoppingAssistantService {
       return new Agent({
         id: `aegispay-agent-${requestedModel.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
         name: `AegisPay Autonomous Shopping Concierge (${requestedModel})`,
-        instructions:
-          'You are an autonomous dual-sided commerce concierge agent powered by AegisPay and Channel3. ' +
-          'You execute typed tools to query multi-vendor products, calculate deterministic rankings, ' +
-          'solve knapsack bundling optimization, filter turn products in-memory, and verify 2PC stock holds. ' +
-          'When a user expresses a clear purchase intent (e.g. "Buy the Sony XM5" or "Purchase item"), autonomously invoke the prepare_checkout tool with the target product ID. ' +
-          'When a user wants to find or discover items, invoke the search_catalog tool. ' +
-          'When a user asks to compare products, invoke compare_products. ' +
-          'When a user filters prior results (e.g. "top 3", "under $50"), invoke filter_turn_products. ' +
-          'You never hallucinate prices or discounts and always emit strict Zod-compliant structured outputs.',
+        instructions: COMMERCE_CONCIERGE_INSTRUCTIONS,
         model: requestedModel,
         tools,
       });
@@ -1900,6 +1984,52 @@ export class ShoppingAssistantService {
       }
 
       yield formatDataStreamFinish('stop', { promptTokens: 75, completionTokens: 140 });
+      return;
+    }
+
+    // In-memory turn filtering query check (<2ms):
+    // e.g. "top 3 from that", "only show under $50", "filter", "show only top 2"
+    const lower = message.toLowerCase();
+    const activeTurnProducts = request.active_turn_products || [];
+    const isTurnFilterIntent =
+      activeTurnProducts.length > 0 &&
+      (
+        /\b(top\s+\d+|from\s+that|only\s+show|show\s+only|filter|cheapest\s+one|highest\s+rated|under\s+\$?\d+)\b/i.test(lower) &&
+        !lower.includes('vs') &&
+        !lower.includes('compare') &&
+        !lower.includes('buy')
+      );
+
+    if (isTurnFilterIntent) {
+      const toolCallId = `call_filter_${Date.now()}`;
+      yield formatDataStreamToolCall(toolCallId, 'filter_turn_products', {
+        criteria: message,
+        active_turn_products: activeTurnProducts,
+      });
+
+      const filterOutput = (await this.filterTurnProductsTool.execute!(
+        {
+          criteria: message,
+          top_n: 5,
+          active_turn_products: activeTurnProducts,
+        },
+        {} as any
+      )) as { products: ProductCardData[]; filtered_count: number; applied_criteria?: string };
+
+      yield formatDataStreamToolResult(toolCallId, filterOutput);
+
+      const items = filterOutput.products;
+      yield formatDataStreamText(`I filtered the items from our active search in-memory (<2ms) based on **"${message}"**:\n\n`);
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const net = ((item.price_cents - item.commission_rebate_cents) / 100).toFixed(2);
+        yield formatDataStreamText(
+          `${i + 1}. **${item.title}**\n   - Price: $${(item.price_cents / 100).toFixed(2)} (Effective Net: **$${net}**)\n   - Rating: ★ ${item.rating} • Seller: \`${item.merchant_domain}\` (${item.merchant_credibility_score}% Trust)\n   - Shipping: ${item.free_shipping ? 'Free Shipping' : `$${(item.shipping_fee_cents / 100).toFixed(2)}`}\n\n`
+        );
+      }
+
+      yield formatDataStreamFinish('stop', { promptTokens: 45, completionTokens: 90 });
       return;
     }
 
@@ -1967,6 +2097,27 @@ export class ShoppingAssistantService {
 
       yield formatDataStreamFinish('stop', { promptTokens: 50, completionTokens: 110 });
       return;
+    }
+
+    // Domain guardrails: Intercept casual greetings & out-of-domain queries without invoking LLM or catalog search
+    const hasAttachedStreamContext = Boolean(
+      (effectiveProductIds && effectiveProductIds.length > 0) ||
+      (request.active_turn_products && request.active_turn_products.length > 0)
+    );
+
+    if (!request.action && !hasAttachedStreamContext) {
+      if (this.isGreetingQuery(message)) {
+        const greetingPayload = this.generateGreetingPayload(message, activeModel);
+        yield formatDataStreamText(greetingPayload.markdown);
+        yield formatDataStreamFinish('stop', { promptTokens: 20, completionTokens: 80 });
+        return;
+      }
+      if (this.isOffTopicQuery(message)) {
+        const offTopicPayload = this.generateOffTopicPayload(message, activeModel);
+        yield formatDataStreamText(offTopicPayload.markdown);
+        yield formatDataStreamFinish('stop', { promptTokens: 20, completionTokens: 80 });
+        return;
+      }
     }
 
     // 4. All other conversational messages: Stream through Mastra Agent LLM with full tool access

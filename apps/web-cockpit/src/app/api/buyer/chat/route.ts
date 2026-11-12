@@ -195,6 +195,30 @@ export async function POST(req: Request) {
     }
   }
 
+  // Domain guardrails & conversational intent classification:
+  // Prevent off-topic / non-commerce queries from returning random product lists or answering general trivia.
+  const trimmedMsg = (body.message || '').trim();
+  const hasSelectedContext = selectedProductIds.length > 0 || activeTurnProducts.length > 0;
+
+  const isPureGreeting =
+    !hasSelectedContext &&
+    !explicitAction &&
+    /^(hi|hello|hey|hiya|howdy|sup|greetings|good\s+(morning|afternoon|evening)|who\s+are\s+you|what\s+can\s+you\s+do|how\s+can\s+you\s+help|help\s*me|help|how\s+does\s+(this|aegispay)\s+work)[!?.]*$/i.test(
+      trimmedMsg
+    );
+
+  const isExplicitOffTopic =
+    !hasSelectedContext &&
+    !explicitAction &&
+    /\b(joke|pun|poem|poetry|rhyme|song|lyrics|python|javascript|typescript|c\+\+|java|html|css|sql|write\s+code|code\s+script|program|homework|essay|capital\s+of|president|prime\s+minister|weather|forecast|temperature\s+in|recipe|how\s+to\s+cook|bake|translate|translation|quantum|physics|math\s+problem|calculate|equation|story|tell\s+me\s+about\s+history|who\s+won\s+the|sports\s+score|movie\s+plot|philosophy|politics|religion)\b/i.test(
+      message
+    );
+
+  const hasCommerceKeywords =
+    /\b(buy|purchase|checkout|order|shop|shopping|store|merchant|cart|price|pricing|cost|dollar|\$|cents|budget|deal|deals|discount|discounts|coupon|rebate|rebates|cashback|sale|cheap|cheapest|affordable|expensive|under|within|compare|comparison|specs|specification|specifications|warranty|stock|shipping|delivery|item|items|product|products|catalog|brand|brands|review|reviews|rating|ratings|headphone|headphones|earphone|earphones|audio|speaker|speakers|laptop|laptops|computer|phone|phones|iphone|android|tablet|monitor|keyboard|mouse|desk|chair|watch|camera|charger|cable|iron|irons|mat|mats|coffee|gift|backpack|wallet|tv|console|game|gaming)\b/i.test(
+      message
+    );
+
   const sampleProducts: import('@aegispay/shared-types').ProductCardData[] = [
     {
       product_id: 'ch3_anc_headphone_01',
@@ -321,7 +345,7 @@ export async function POST(req: Request) {
       const encoder = new TextEncoder();
       const stream = new ReadableStream({
         start(controller) {
-          if (payload.action === 'DISCOVER') {
+          if (payload.action === 'DISCOVER' && payload.products && payload.products.length > 0) {
             controller.enqueue(
               encoder.encode(formatDataStreamToolCall('call_disc_1', 'search_catalog', { query: body.message || 'catalog search' }))
             );
@@ -657,6 +681,48 @@ export async function POST(req: Request) {
       ],
     };
     return respond(mockPayload);
+  }
+
+  // 1. Pure Greeting Handler: Welcome user and guide them to shopping capabilities without querying products
+  if (isPureGreeting && !hasCommerceKeywords) {
+    const greetingPayload: ChatResponsePayload = {
+      action: 'DISCOVER',
+      markdown: `### 👋 Hello! I am your AegisPay Shopping Concierge\n\nI can help you discover products across verified merchants, evaluate deals, and make secure purchases with PayPal Buyer Protection:\n\n- 🔍 **Discover Products**: Search across verified merchants with live stock & instant cashback rebates.\n- ⚖️ **Compare Specs & Value**: View side-by-side matrices comparing specs, reviews, and net effective costs.\n- 💰 **Cart Optimization**: Automatically bundle multi-store orders and maximize free shipping thresholds.\n- ⚡ **Autonomous 2PC Buy**: Verified stock reservation and vaulted PayPal payment with 72-hour price drop protection.\n\n*What kind of product or deal are you looking for today?*`,
+      products: [],
+      thought_trace: [
+        `Parsed user intent: "${body.message}" -> Action: GREETING`,
+        'Activated AegisPay Shopping Concierge conversational welcome state',
+        'Ready for product discovery, spec comparison, or checkout commands',
+      ],
+      follow_up_suggestions: [
+        'Find wireless headphones under $100',
+        'Compare top desk mats',
+        'Show verified tech deals',
+        'Check my order history',
+      ],
+    };
+    return respond(greetingPayload);
+  }
+
+  // 2. Off-Topic / Out-of-Domain Guardrail: Politely decline non-commerce requests and redirect to shopping
+  if (isExplicitOffTopic && !hasCommerceKeywords) {
+    const offTopicPayload: ChatResponsePayload = {
+      action: 'DISCOVER',
+      markdown: `### 🛡️ AegisPay Commerce Concierge\n\nI specialize strictly in **e-commerce shopping, product discovery, and PayPal payments**. I cannot assist with non-shopping requests such as general trivia, coding, homework, or creative writing.\n\nHere is how I can assist you:\n- **Search verified merchants** for electronics, workspace essentials, and lifestyle products\n- **Compare products side-by-side** with technical specs and customer ratings\n- **Apply instant commission rebates** to lower your effective purchase price\n- **Execute autonomous checkouts** with Two-Phase Commit (2PC) stock holds\n\n*Try searching for an item, asking for recommendations within a budget, or selecting products to compare!*`,
+      products: [],
+      thought_trace: [
+        `Parsed user intent: "${body.message}" -> Action: DOMAIN_GUARDRAIL_INTERCEPT`,
+        'Domain Enforcer: Query classified as out-of-domain (non-commerce query)',
+        'Protected agent scope: Redirected user to product discovery and shopping features',
+      ],
+      follow_up_suggestions: [
+        'Find wireless headphones under $100',
+        'Compare top desk mats',
+        'Show verified tech deals',
+        'Can I buy headphones within $50 budget?',
+      ],
+    };
+    return respond(offTopicPayload);
   }
 
   // Default DISCOVER - query live Channel3 (by default requesting 50 items)

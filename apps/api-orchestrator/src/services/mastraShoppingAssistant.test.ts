@@ -531,6 +531,7 @@ test('Phase 1: Fastify SSE Data Stream Protocol generator (0:text, 9:toolCall, a
   const discoverFrames: string[] = [];
   for await (const frame of service.processMessageStream({
     message: 'Find best noise cancelling headphones',
+    action: 'DISCOVER',
   })) {
     discoverFrames.push(frame);
   }
@@ -540,3 +541,38 @@ test('Phase 1: Fastify SSE Data Stream Protocol generator (0:text, 9:toolCall, a
   assert.ok(discoverFrames.some(f => f.startsWith('0:') && f.includes('top matches')));
   assert.ok(discoverFrames.some(f => f.startsWith('d:') && f.includes('stop')));
 });
+
+test('ShoppingAssistantService: Domain Guardrails intercept greetings & off-topic queries', async () => {
+  const service = new ShoppingAssistantService();
+
+  // Test greeting detection
+  assert.equal(service.isGreetingQuery('hello'), true);
+  assert.equal(service.isGreetingQuery('who are you'), true);
+  assert.equal(service.isGreetingQuery('Find headphones'), false);
+
+  // Test off-topic detection
+  assert.equal(service.isOffTopicQuery('What is the capital of Peru?'), true);
+  assert.equal(service.isOffTopicQuery('tell me a joke'), true);
+  assert.equal(service.isOffTopicQuery('write python code'), true);
+  assert.equal(service.isOffTopicQuery('I want earphones within $50'), false);
+  assert.equal(service.isOffTopicQuery('compare laptop vs tablet'), false);
+
+  // Test processMessage intercepts off-topic without products
+  const offTopicRes = await service.processMessage({
+    message: 'write a poem about stars',
+  });
+  assert.equal(offTopicRes.action, 'DISCOVER');
+  assert.equal(offTopicRes.products?.length, 0);
+  assert.ok(offTopicRes.markdown.includes('AegisPay Commerce Concierge'));
+
+  // Test processMessageStream intercepts greeting
+  const greetingFrames: string[] = [];
+  for await (const frame of service.processMessageStream({
+    message: 'hi',
+  })) {
+    greetingFrames.push(frame);
+  }
+  assert.ok(greetingFrames.some(f => f.startsWith('0:') && f.includes('Hello! I am your AegisPay Shopping Concierge')));
+  assert.ok(!greetingFrames.some(f => f.startsWith('9:')));
+});
+
