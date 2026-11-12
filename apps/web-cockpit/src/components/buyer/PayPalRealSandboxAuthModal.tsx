@@ -23,6 +23,8 @@ import {
   Plus,
   Filter,
   ShieldAlert,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth, UserProfile, DEFAULT_ALLOWED_CATEGORIES, DEFAULT_ALLOWED_MERCHANTS } from '@/context/AuthContext';
@@ -66,8 +68,10 @@ export function PayPalRealSandboxAuthModal({
   const [activeSetupTokenId, setActiveSetupTokenId] = useState<string | null>(null);
   const [popupWindowRef, setPopupWindowRef] = useState<Window | null>(null);
 
-  // Pre-authorization amount controls: by default disabled ($0) as specified
-  const [enablePreauth, setEnablePreauth] = useState<boolean>(false);
+  // Pre-authorization amount controls: by default disabled ($0) unless in authorize mode or already logged in
+  const [enablePreauth, setEnablePreauth] = useState<boolean>(
+    defaultMode === 'authorize' || Boolean(isLoggedIn && !isAuthorized)
+  );
   const [preauthAmount, setPreauthAmount] = useState<number>(500);
   const [preauthAmountInput, setPreauthAmountInput] = useState<string>('500');
 
@@ -79,16 +83,33 @@ export function PayPalRealSandboxAuthModal({
   const [availableMerchants, setAvailableMerchants] = useState<any[]>([]);
   const [isSearchingMerchants, setIsSearchingMerchants] = useState<boolean>(false);
 
+  // Accordion Expand/Collapse states for Category and Store selection
+  const [isCategoriesExpanded, setIsCategoriesExpanded] = useState<boolean>(false);
+  const [isStoresExpanded, setIsStoresExpanded] = useState<boolean>(false);
+
+  // Dynamic button label according to authentication and budget authorization selection
+  const getButtonLabel = () => {
+    if (isLoggedIn) {
+      return `Authorize $${preauthAmount}`;
+    }
+    if (enablePreauth) {
+      return `Login & Authorize $${preauthAmount}`;
+    }
+    return 'Login';
+  };
+
   // Reset inputs when opened
   useEffect(() => {
     if (isOpen) {
       setErrorMessage(null);
       setStatusMessage(null);
       setIsLoading(false);
-      // Default disabled ($0) on initial open unless user previously authorized
-      setEnablePreauth(defaultMode === 'authorize');
+      // When opened, only enable preauth if defaultMode is 'authorize' or user is already logged in
+      setEnablePreauth(defaultMode === 'authorize' || isLoggedIn);
       setPreauthAmount(500);
       setPreauthAmountInput('500');
+      setIsCategoriesExpanded(false);
+      setIsStoresExpanded(false);
       if (user?.email) {
         setEmailInput(user.email);
         setNameInput(user.name);
@@ -107,7 +128,7 @@ export function PayPalRealSandboxAuthModal({
         setSelectedMerchants(DEFAULT_ALLOWED_MERCHANTS);
       }
     }
-  }, [isOpen, user, defaultMode]);
+  }, [isOpen, user, defaultMode, isLoggedIn]);
 
   // Load / Search available merchants from API
   useEffect(() => {
@@ -331,9 +352,39 @@ export function PayPalRealSandboxAuthModal({
     }
   };
 
-  // 2. Direct Sandbox Credentials Login
+  // 2. Direct Sandbox Credentials Login / Direct Spend Authorization
   const handleDirectSandboxLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const effectiveCats = selectedCategories.length > 0 ? selectedCategories : DEFAULT_ALLOWED_CATEGORIES;
+    const effectiveMerchants = whitelistMode ? selectedMerchants : ['*'];
+
+    // If already logged in, authorize spend directly without needing re-login roundtrip
+    if (isLoggedIn) {
+      setIsLoading(true);
+      setErrorMessage(null);
+      setStatusMessage(`Authorizing $${preauthAmount} spend allowance with PayPal Sandbox...`);
+      try {
+        await authorizePayment(
+          Math.round(preauthAmount * 100),
+          effectiveCats,
+          effectiveMerchants
+        );
+        setStatusMessage('Spend allowance authorized successfully!');
+        setIsLoading(false);
+        onClose();
+        setTimeout(() => {
+          if (typeof window !== 'undefined') window.location.reload();
+        }, 200);
+        return;
+      } catch (err: any) {
+        setIsLoading(false);
+        logger.error('[PayPalAuthModal:Error] Direct authorize failed', { error: String(err) });
+        onClose();
+        return;
+      }
+    }
+
     if (!emailInput || !emailInput.includes('@')) {
       setErrorMessage('Please enter a valid PayPal Sandbox email address.');
       return;
@@ -414,14 +465,16 @@ export function PayPalRealSandboxAuthModal({
             <div>
               <div className="flex items-center gap-2.5">
                 <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                  Login
+                  {isLoggedIn ? 'Authorize Payment' : 'Login'}
                 </h2>
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
                   PAYPAL SANDBOX
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sign in with PayPal Sandbox credentials & configure optional 1-prompt pre-authorized spend allowance
+                {isLoggedIn
+                  ? 'Configure your pre-authorized budget cap and store whitelist with PayPal Sandbox'
+                  : 'Sign in with PayPal Sandbox credentials & configure optional spend allowance'}
               </p>
             </div>
           </div>
@@ -467,9 +520,9 @@ export function PayPalRealSandboxAuthModal({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <span>Pre-authorize Spend Allowance</span>
+                    <span>Allow Budget &amp; Spend Allowance</span>
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20">
-                      1-Prompt Buying
+                      {enablePreauth ? 'Allowed' : 'Disabled ($0)'}
                     </span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -502,7 +555,7 @@ export function PayPalRealSandboxAuthModal({
                 <div className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
                   <span className="w-2 h-2 rounded-full bg-slate-400" />
                   <span>
-                    Spend Pre-authorization is <strong>Disabled ($0 Allowance)</strong>. You will log in with browsing & search permissions only.
+                    Budget Allowance is <strong>Unchecked ($0 Allowance)</strong>. Categories and store whitelist are hidden until budget is allowed.
                   </span>
                 </div>
                 <button
@@ -510,7 +563,7 @@ export function PayPalRealSandboxAuthModal({
                   onClick={handleTogglePreauth}
                   className="text-xs font-bold text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer shrink-0 ml-2"
                 >
-                  Enable $500 Cap
+                  Allow Budget ($500 Cap)
                 </button>
               </div>
             ) : (
@@ -596,254 +649,330 @@ export function PayPalRealSandboxAuthModal({
 
           {/* =========================================================================
               SECURITY & SPEND MANDATE CONTROLS: CATEGORIES & MERCHANT WHITELIST
+              Only displayed when Allow Budget (enablePreauth) is checked!
              ========================================================================= */}
-          <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-indigo-50/60 via-white to-purple-50/40 dark:from-[#0c142c]/60 dark:via-[#090f20]/80 dark:to-[#060a16] border border-indigo-200/80 dark:border-indigo-500/20 shadow-xs space-y-5">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-100 dark:border-slate-800/80">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
-                  <ShieldCheck className="w-4 h-4" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <span>Security & Hardware Spend Mandate</span>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
-                      WebCrypto Ed25519
-                    </span>
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Enforce browser-signed cryptographic limits, authorized categories, and store whitelisting.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Cryptographic Browser-Signed Token Badge */}
-            <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-500/30 flex items-center gap-3 text-xs">
-              <Lock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-              <div className="text-slate-700 dark:text-slate-300">
-                <strong className="text-slate-900 dark:text-white">Browser-Signed Token Active:</strong> Purchases are locked by in-browser WebCrypto Ed25519 keys, preventing prompt injection attacks or rogue agent actions from exceeding your policy.
-              </div>
-            </div>
-
-            {/* Section A: Authorized Categories */}
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                  <Filter className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>Authorized Product Categories:</span>
-                  <span className="text-[11px] font-mono font-normal text-slate-500">
-                    ({selectedCategories.length} allowed)
-                  </span>
-                </label>
-                <div className="flex items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCategories(AVAILABLE_CATEGORIES.map((c) => c.id))}
-                    className="text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-medium text-[11px]"
-                  >
-                    Select All
-                  </button>
-                  <span className="text-slate-300 dark:text-slate-700">|</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCategories([])}
-                    className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:underline cursor-pointer font-medium text-[11px]"
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              {/* Category Chips Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {AVAILABLE_CATEGORIES.map((cat) => {
-                  const isSelected = selectedCategories.includes(cat.id);
-                  return (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedCategories((prev) =>
-                          isSelected ? prev.filter((id) => id !== cat.id) : [...prev, cat.id]
-                        );
-                      }}
-                      className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-medium transition-all text-left cursor-pointer ${
-                        isSelected
-                          ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/50 text-indigo-900 dark:text-indigo-200 shadow-xs'
-                          : 'bg-white/80 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
-                      }`}
-                    >
-                      <span className="text-sm shrink-0">{cat.icon}</span>
-                      <span className="truncate">{cat.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Section B: Allowed Merchants Whitelist ("Allow Only Merchant") */}
-            <div className="space-y-3 pt-2 border-t border-indigo-100 dark:border-slate-800/80">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Store className="w-3.5 h-3.5 text-indigo-500" />
-                  <label className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                    Allowed Stores Whitelist:
-                  </label>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20">
-                    {whitelistMode ? `${selectedMerchants.length} Stores Whitelisted` : 'All Stores Allowed'}
-                  </span>
-                </div>
-
-                {/* Whitelist Mode Toggle */}
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {whitelistMode ? 'Restricted to Selected Stores' : 'Allow All Stores'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setWhitelistMode((prev) => !prev)}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      whitelistMode ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'
-                    }`}
-                    role="switch"
-                    aria-checked={whitelistMode}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
-                        whitelistMode ? 'translate-x-5' : 'translate-x-0'
-                      }`}
-                    />
-                  </button>
-                </div>
-              </div>
-
-              {whitelistMode && (
-                <div className="space-y-3 animate-fade-in">
-                  {/* Selected Store Badges */}
-                  <div className="flex flex-wrap gap-1.5 p-2.5 rounded-xl bg-white dark:bg-[#070e1a] border border-slate-200 dark:border-slate-800 min-h-[42px] items-center">
-                    {selectedMerchants.length === 0 ? (
-                      <span className="text-xs text-rose-500 italic flex items-center gap-1.5">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        No stores selected! Add at least one merchant to allow purchases.
+          {enablePreauth && (
+            <div className="p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-indigo-50/60 via-white to-purple-50/40 dark:from-[#0c142c]/60 dark:via-[#090f20]/80 dark:to-[#060a16] border border-indigo-200/80 dark:border-indigo-500/20 shadow-xs space-y-4 animate-fade-in">
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-indigo-100 dark:border-slate-800/80">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>Security &amp; Hardware Spend Mandate</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30">
+                        WebCrypto Ed25519
                       </span>
-                    ) : (
-                      selectedMerchants.map((domain) => (
-                        <span
-                          key={domain}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80"
-                        >
-                          <span>{domain}</span>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedMerchants((prev) => prev.filter((d) => d !== domain))}
-                            className="hover:text-rose-500 cursor-pointer"
-                            title="Remove from allowed list"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Configure cryptographic purchase limits, authorized categories, and store whitelisting.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cryptographic Browser-Signed Token Badge */}
+              <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/30 border border-indigo-200/80 dark:border-indigo-500/30 flex items-center gap-3 text-xs">
+                <Lock className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                <div className="text-slate-700 dark:text-slate-300">
+                  <strong className="text-slate-900 dark:text-white">Browser-Signed Token Active:</strong> Purchases are locked by in-browser WebCrypto Ed25519 keys, preventing prompt injection attacks or rogue agent actions from exceeding your policy.
+                </div>
+              </div>
+
+              {/* Section A: Authorized Categories (Collapsible / Expandable) */}
+              <div className="rounded-xl border border-indigo-200/80 dark:border-indigo-500/20 bg-white/70 dark:bg-slate-900/40 overflow-hidden transition-all shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsCategoriesExpanded((prev) => !prev)}
+                  className="w-full p-3.5 flex items-center justify-between text-left hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 transition-colors cursor-pointer"
+                  aria-expanded={isCategoriesExpanded}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                      <Filter className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Authorized Product Categories
                         </span>
-                      ))
-                    )}
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border border-indigo-500/20">
+                          {selectedCategories.length} Allowed
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {isCategoriesExpanded
+                          ? 'Select categories this session is authorized to purchase'
+                          : selectedCategories.length === AVAILABLE_CATEGORIES.length
+                          ? 'All categories allowed (Click to customize)'
+                          : `${selectedCategories.length} of ${AVAILABLE_CATEGORIES.length} categories enabled (Click to edit)`}
+                      </p>
+                    </div>
                   </div>
 
-                  {/* Merchant Search & Add Input */}
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      value={merchantSearchQuery}
-                      onChange={(e) => setMerchantSearchQuery(e.target.value)}
-                      placeholder="Search stores from Channel3 catalog (e.g. Best Buy, Amazon, Apple, Nordic Workspaces...)"
-                      className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#070d18] text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
+                    <span className="text-xs font-semibold">
+                      {isCategoriesExpanded ? 'Collapse' : 'Expand'}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform duration-200 ${
+                        isCategoriesExpanded ? 'rotate-180' : ''
+                      }`}
                     />
-                    {isSearchingMerchants && (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 absolute right-3 top-2.5" />
-                    )}
                   </div>
+                </button>
 
-                  {/* Store Suggestions & Quick Presets */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500">
-                      <span>Available Partner Stores:</span>
+                {isCategoriesExpanded && (
+                  <div className="p-4 pt-2 border-t border-indigo-100 dark:border-slate-800/80 space-y-3 animate-fade-in">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-[11px] text-slate-500">Toggle allowed categories:</span>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            const tech = ['bestbuy.com', 'amazon.com', 'apple.com', 'newegg.com'];
-                            setSelectedMerchants((prev) => Array.from(new Set([...prev, ...tech])));
-                          }}
-                          className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-medium"
+                          onClick={() => setSelectedCategories(AVAILABLE_CATEGORIES.map((c) => c.id))}
+                          className="text-cyan-600 dark:text-cyan-400 hover:underline cursor-pointer font-medium text-[11px]"
                         >
-                          + Top Tech
+                          Select All
                         </button>
-                        <span>•</span>
+                        <span className="text-slate-300 dark:text-slate-700">|</span>
                         <button
                           type="button"
-                          onClick={() => {
-                            const audioWorkspace = ['audio-gear-direct.com', 'nordic-workspaces.io', 'bhphotovideo.com'];
-                            setSelectedMerchants((prev) => Array.from(new Set([...prev, ...audioWorkspace])));
-                          }}
-                          className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-medium"
+                          onClick={() => setSelectedCategories([])}
+                          className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:underline cursor-pointer font-medium text-[11px]"
                         >
-                          + Audio & Workspace
+                          Clear
                         </button>
                       </div>
                     </div>
 
-                    {/* Available Merchants Scrollable Grid */}
-                    <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
-                      {availableMerchants.map((m) => {
-                        const isAllowed = selectedMerchants.includes(m.domain);
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {AVAILABLE_CATEGORIES.map((cat) => {
+                        const isSelected = selectedCategories.includes(cat.id);
                         return (
-                          <div
-                            key={m.domain}
-                            className="flex items-center justify-between p-2 rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 text-xs hover:border-indigo-400 transition-colors"
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCategories((prev) =>
+                                isSelected ? prev.filter((id) => id !== cat.id) : [...prev, cat.id]
+                              );
+                            }}
+                            className={`flex items-center gap-2 p-2 rounded-xl border text-xs font-medium transition-all text-left cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-500/50 text-indigo-900 dark:text-indigo-200 shadow-xs'
+                                : 'bg-white/80 dark:bg-slate-900/40 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-slate-300'
+                            }`}
                           >
-                            <div className="flex items-center gap-2.5 min-w-0">
-                              {/* Store Logo / Icon */}
-                              <img
-                                src={m.logo_url}
-                                alt={m.name}
-                                className="w-6 h-6 rounded-md object-cover bg-slate-100 dark:bg-slate-800 shrink-0"
-                                onError={(e) => {
-                                  (e.target as HTMLElement).style.display = 'none';
-                                }}
-                              />
-                              <div className="min-w-0">
-                                <div className="font-semibold text-slate-900 dark:text-white truncate">
-                                  {m.name}
-                                </div>
-                                <div className="text-[10px] font-mono text-slate-500 truncate">
-                                  {m.domain}
-                                </div>
-                              </div>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedMerchants((prev) =>
-                                  isAllowed ? prev.filter((d) => d !== m.domain) : [...prev, m.domain]
-                                );
-                              }}
-                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer ${
-                                isAllowed
-                                  ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 hover:bg-rose-500/15 hover:text-rose-600 hover:border-rose-500/30'
-                                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
-                              }`}
-                            >
-                              {isAllowed ? '✓ Allowed' : '+ Allow'}
-                            </button>
-                          </div>
+                            <span className="text-sm shrink-0">{cat.icon}</span>
+                            <span className="truncate">{cat.label}</span>
+                          </button>
                         );
                       })}
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+
+              {/* Section B: Allowed Stores Whitelist (Collapsible / Expandable) */}
+              <div className="rounded-xl border border-indigo-200/80 dark:border-indigo-500/20 bg-white/70 dark:bg-slate-900/40 overflow-hidden transition-all shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setIsStoresExpanded((prev) => !prev)}
+                  className="w-full p-3.5 flex items-center justify-between text-left hover:bg-indigo-50/50 dark:hover:bg-indigo-950/30 transition-colors cursor-pointer"
+                  aria-expanded={isStoresExpanded}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-500/15 text-indigo-600 dark:text-indigo-400 flex items-center justify-center font-bold">
+                      <Store className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                          Allowed Stores Whitelist
+                        </span>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20">
+                          {whitelistMode ? `${selectedMerchants.length} Stores Whitelisted` : 'All Stores Allowed'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {isStoresExpanded
+                          ? 'Configure merchant whitelist to restrict agent spending'
+                          : whitelistMode
+                          ? `${selectedMerchants.length} partner stores authorized (Click to edit)`
+                          : 'Unrestricted partner purchases (Click to configure whitelist)'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400">
+                    <span className="text-xs font-semibold">
+                      {isStoresExpanded ? 'Collapse' : 'Expand'}
+                    </span>
+                    <ChevronDown
+                      className={`w-4 h-4 transition-transform duration-200 ${
+                        isStoresExpanded ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </div>
+                </button>
+
+                {isStoresExpanded && (
+                  <div className="p-4 pt-2 border-t border-indigo-100 dark:border-slate-800/80 space-y-3 animate-fade-in">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Whitelist Policy:
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {whitelistMode ? 'Restricted to Selected Stores' : 'Allow All Stores'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setWhitelistMode((prev) => !prev)}
+                          className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            whitelistMode ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-slate-700'
+                          }`}
+                          role="switch"
+                          aria-checked={whitelistMode}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                              whitelistMode ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {whitelistMode && (
+                      <div className="space-y-3 pt-1">
+                        {/* Selected Store Badges */}
+                        <div className="flex flex-wrap gap-1.5 p-2.5 rounded-xl bg-slate-50 dark:bg-[#070e1a] border border-slate-200 dark:border-slate-800 min-h-[42px] items-center">
+                          {selectedMerchants.length === 0 ? (
+                            <span className="text-xs text-rose-500 italic flex items-center gap-1.5">
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              No stores selected! Add at least one merchant to allow purchases.
+                            </span>
+                          ) : (
+                            selectedMerchants.map((domain) => (
+                              <span
+                                key={domain}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80"
+                              >
+                                <span>{domain}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedMerchants((prev) => prev.filter((d) => d !== domain))}
+                                  className="hover:text-rose-500 cursor-pointer"
+                                  title="Remove from allowed list"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))
+                          )}
+                        </div>
+
+                        {/* Search & Suggestions */}
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            value={merchantSearchQuery}
+                            onChange={(e) => setMerchantSearchQuery(e.target.value)}
+                            placeholder="Search stores from Channel3 catalog (e.g. Best Buy, Amazon, Apple...)"
+                            className="w-full pl-9 pr-8 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-[#070d18] text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                          />
+                          {isSearchingMerchants && (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400 absolute right-3 top-2.5" />
+                          )}
+                        </div>
+
+                        {/* Presets and available stores */}
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between text-[11px] text-slate-500">
+                            <span>Available Partner Stores:</span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const tech = ['bestbuy.com', 'amazon.com', 'apple.com', 'newegg.com'];
+                                  setSelectedMerchants((prev) => Array.from(new Set([...prev, ...tech])));
+                                }}
+                                className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-medium"
+                              >
+                                + Top Tech
+                              </button>
+                              <span>•</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const audioWorkspace = ['audio-gear-direct.com', 'nordic-workspaces.io', 'bhphotovideo.com'];
+                                  setSelectedMerchants((prev) => Array.from(new Set([...prev, ...audioWorkspace])));
+                                }}
+                                className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer font-medium"
+                              >
+                                + Audio &amp; Workspace
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="max-h-44 overflow-y-auto space-y-1.5 pr-1">
+                            {availableMerchants.map((m) => {
+                              const isAllowed = selectedMerchants.includes(m.domain);
+                              return (
+                                <div
+                                  key={m.domain}
+                                  className="flex items-center justify-between p-2 rounded-xl bg-white/70 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 text-xs hover:border-indigo-400 transition-colors"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <img
+                                      src={m.logo_url}
+                                      alt={m.name}
+                                      className="w-6 h-6 rounded-md object-cover bg-slate-100 dark:bg-slate-800 shrink-0"
+                                      onError={(e) => {
+                                        (e.target as HTMLElement).style.display = 'none';
+                                      }}
+                                    />
+                                    <div className="min-w-0">
+                                      <div className="font-semibold text-slate-900 dark:text-white truncate">
+                                        {m.name}
+                                      </div>
+                                      <div className="text-[10px] font-mono text-slate-500 truncate">
+                                        {m.domain}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedMerchants((prev) =>
+                                        isAllowed ? prev.filter((d) => d !== m.domain) : [...prev, m.domain]
+                                      );
+                                    }}
+                                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all cursor-pointer ${
+                                      isAllowed
+                                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 hover:bg-rose-500/15 hover:text-rose-600 hover:border-rose-500/30'
+                                        : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                                    }`}
+                                  >
+                                    {isAllowed ? '✓ Allowed' : '+ Allow'}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* =========================================================================
               AUTHENTICATION TABS & LOGIN ACTIONS
@@ -908,11 +1037,7 @@ export function PayPalRealSandboxAuthModal({
                   ) : (
                     <>
                       <ExternalLink className="w-5 h-5" />
-                      <span>
-                        {enablePreauth
-                          ? `Complete Login & Pre-authorize $${preauthAmount}`
-                          : 'Complete Login ($0 Spend Allowance)'}
-                      </span>
+                      <span>{getButtonLabel()}</span>
                     </>
                   )}
                 </button>
@@ -926,40 +1051,55 @@ export function PayPalRealSandboxAuthModal({
             {/* Tab 2: Direct Sandbox Credentials Login */}
             {activeTab === 'direct_credentials' && (
               <form onSubmit={handleDirectSandboxLogin} className="space-y-4 pt-1">
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      PayPal Sandbox Buyer Email
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="email"
-                        value={emailInput}
-                        onChange={(e) => setEmailInput(e.target.value)}
-                        placeholder="sb-buyer@personal.example.com"
-                        required
-                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070d18] text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono"
-                      />
-                      <User className="absolute right-3.5 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+                {isLoggedIn ? (
+                  <div className="p-4 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-200/60 dark:border-indigo-900/40 text-xs text-slate-600 dark:text-slate-300 space-y-2">
+                    <div className="flex items-center gap-2 font-bold text-indigo-900 dark:text-indigo-300">
+                      <User className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                      <span>Active Sandbox Session: {user?.name || 'PayPal Sandbox Buyer'}</span>
                     </div>
-                    <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 block">
-                      Use any personal sandbox buyer account from your PayPal Developer Dashboard.
-                    </span>
+                    <p className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                      Account: {user?.email || emailInput}
+                    </p>
+                    <p>
+                      Clicking below will authorize a <strong className="text-indigo-600 dark:text-indigo-400">${preauthAmount}</strong> spend allowance locked to your configured categories and stores.
+                    </p>
                   </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        PayPal Sandbox Buyer Email
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          value={emailInput}
+                          onChange={(e) => setEmailInput(e.target.value)}
+                          placeholder="sb-buyer@personal.example.com"
+                          required
+                          className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070d18] text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 font-mono"
+                        />
+                        <User className="absolute right-3.5 top-3 w-4 h-4 text-slate-400 pointer-events-none" />
+                      </div>
+                      <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-1 block">
+                        Use any personal sandbox buyer account from your PayPal Developer Dashboard.
+                      </span>
+                    </div>
 
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      Buyer Display Name (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      value={nameInput}
-                      onChange={(e) => setNameInput(e.target.value)}
-                      placeholder="e.g. Alex Morgan"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070d18] text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                    />
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                        Buyer Display Name (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={nameInput}
+                        onChange={(e) => setNameInput(e.target.value)}
+                        placeholder="e.g. Alex Morgan"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#070d18] text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <button
                   type="submit"
@@ -969,16 +1109,12 @@ export function PayPalRealSandboxAuthModal({
                   {isLoading ? (
                     <>
                       <Loader2 className="w-5 h-5 animate-spin" />
-                      <span>Verifying with PayPal Sandbox...</span>
+                      <span>{isLoggedIn ? 'Authorizing Spend Allowance...' : 'Verifying with PayPal Sandbox...'}</span>
                     </>
                   ) : (
                     <>
                       <ShieldCheck className="w-5 h-5" />
-                      <span>
-                        {enablePreauth
-                          ? `Complete Login & Pre-authorize $${preauthAmount}`
-                          : 'Complete Login ($0 Spend Allowance)'}
-                      </span>
+                      <span>{getButtonLabel()}</span>
                     </>
                   )}
                 </button>

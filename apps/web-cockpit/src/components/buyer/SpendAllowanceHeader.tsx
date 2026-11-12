@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Lock,
   ArrowUpRight,
+  LogIn,
 } from 'lucide-react';
 import { formatCents } from '@/lib/utils';
 import { useUiMode } from '@/context/UiModeContext';
@@ -78,146 +79,50 @@ export function SpendAllowanceHeader({
         </div>
       )}
 
-      {/* Dual-Mode Side-by-Side Connection Cards (Section 4 Specification) */}
+      {/* Sleek, Beautiful PayPal Connection Reminder (Replaces Dual-Card Layout) */}
       {!isPaymentAuthorized && !auth.isTrackingMode && (
-        <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-slate-50/80 dark:bg-[#0c1424]/90 border border-slate-200/80 dark:border-white/10 backdrop-blur-xl shadow-lg">
-          <div className="text-center mb-4">
-            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white flex items-center justify-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-cyan-500" />
-              <span>Login with PayPal Sandbox to Enable Smart Shopping</span>
-            </h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Choose your interaction model: Zero-cost identity sign-in or autonomous agentic purchasing
-            </p>
-          </div>
+        <div className="mb-6 relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-500/10 via-cyan-500/5 to-indigo-500/10 dark:from-[#0a152e]/80 dark:via-[#081122]/90 dark:to-[#091428]/80 border border-cyan-500/20 dark:border-cyan-500/30 backdrop-blur-xl p-4 sm:p-5 shadow-lg shadow-cyan-500/5 transition-all">
+          {/* Top radiant accent border */}
+          <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-500" />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Mode A: 1-Click Sign-In ($0) */}
-            <div className={`p-4 rounded-xl border transition-all flex flex-col justify-between ${
-              isUserLoggedIn && !isPaymentAuthorized
-                ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-400/40 ring-1 ring-blue-500/30'
-                : 'bg-white dark:bg-slate-900/60 border-slate-200 dark:border-slate-800'
-            }`}>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-xs">
-                      A
-                    </div>
-                    <span className="text-xs font-bold text-slate-900 dark:text-white">
-                      1-Click Sign-In ($0)
-                    </span>
-                  </div>
-                  {isUserLoggedIn && !isPaymentAuthorized && (
-                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold">
-                      ACTIVE
-                    </span>
-                  )}
-                </div>
-                <ul className="space-y-1.5 text-[11px] text-slate-600 dark:text-slate-400 mb-4 font-mono">
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-blue-500">•</span> Cost: <strong>$0.00 (Zero charge)</strong>
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-blue-500">•</span> Restores past order history
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-blue-500">•</span> Syncs across Chrome, Edge, Phone
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-blue-500">•</span> Zero autonomous spend rights
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-blue-500">•</span> Safe for casual browsing
-                  </li>
-                </ul>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-cyan-500/25">
+                <ShieldCheck className="w-5 h-5" />
               </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
+                    <span>Login with PayPal Sandbox to Enable Smart Shopping</span>
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20">
+                    {isUserLoggedIn ? 'Authorization Required' : '1-Click Reminder'}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  {isUserLoggedIn
+                    ? `Logged in as ${auth.user?.name || 'PayPal Sandbox Buyer'}. Authorize a spend allowance to enable instant 1-prompt agentic purchases.`
+                    : 'Connect your PayPal Sandbox account to activate smart shopping, personalized savings, and autonomous spend protection.'}
+                </p>
+              </div>
+            </div>
 
+            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
               <button
                 type="button"
                 onClick={async () => {
-                  if (!isUserLoggedIn) {
+                  if (isUserLoggedIn) {
+                    auth.openAuthModal('authorize');
+                  } else {
                     await auth.loginWithPayPal();
                   }
                   if (onSignInPayPalZeroDollar) onSignInPayPalZeroDollar();
                   onConnectPayPal();
                 }}
-                disabled={isUserLoggedIn}
-                className={`w-full py-2 px-3 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 ${
-                  isUserLoggedIn
-                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-default'
-                    : 'bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 shadow-sm cursor-pointer active:scale-95'
-                }`}
+                className="px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-700 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs sm:text-sm shadow-md shadow-cyan-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-95"
               >
-                <span>{isUserLoggedIn ? 'Identity Connected ($0)' : 'Login with PayPal ($0 Sign-In)'}</span>
-              </button>
-            </div>
-
-            {/* Mode B: Agentic Spend Allowance */}
-            <div className="p-4 rounded-xl bg-gradient-to-br from-cyan-500/10 via-blue-500/5 to-transparent border border-cyan-500/30 flex flex-col justify-between shadow-sm">
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-bold text-xs">
-                      B
-                    </div>
-                    <span className="text-xs font-bold text-slate-900 dark:text-white">
-                      Agentic Spend Allowance
-                    </span>
-                  </div>
-                  <span className="px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 text-[10px] font-mono font-bold">
-                    AUTONOMOUS BUY
-                  </span>
-                </div>
-
-                <div className="mb-2.5">
-                  <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-1">
-                    Select Allowance Cap:
-                  </span>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {[10000, 25000, 50000].map((cap) => (
-                      <button
-                        key={cap}
-                        type="button"
-                        onClick={() => setSelectedCapCents(cap)}
-                        className={`py-1 px-2 rounded-lg text-xs font-bold font-mono transition-all cursor-pointer ${
-                          selectedCapCents === cap
-                            ? 'bg-cyan-600 text-white shadow-xs'
-                            : 'bg-white/80 dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10 hover:border-cyan-500/40'
-                        }`}
-                      >
-                        ${cap / 100}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <ul className="space-y-1 text-[11px] text-slate-600 dark:text-slate-400 mb-4 font-mono">
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-cyan-500">•</span> Mints Ed25519 WebCrypto Mandate
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-cyan-500">•</span> Enables 1-Prompt Autonomous Buy
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-cyan-500">•</span> Atomic Redis Lua Spend Shield
-                  </li>
-                  <li className="flex items-center gap-1.5">
-                    <span className="text-cyan-500">•</span> 24-Hour Expiration Protection
-                  </li>
-                </ul>
-              </div>
-
-              <button
-                type="button"
-                onClick={async () => {
-                  await auth.authorizePayment(selectedCapCents);
-                  onConnectPayPal();
-                }}
-                className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-700 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
-              >
-                <CreditCard className="w-3.5 h-3.5" />
-                <span>Authorize Spending Allowance (${selectedCapCents / 100})</span>
+                <LogIn className="w-4 h-4" />
+                <span>{isUserLoggedIn ? 'Authorize Payment' : 'Login with PayPal'}</span>
               </button>
             </div>
           </div>
