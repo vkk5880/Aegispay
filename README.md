@@ -43,7 +43,13 @@ Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atom
 - [6. ☁️ Production Deployment Guide (Render Blueprint & Manual)](#6-️-production-deployment-guide-render-blueprint--manual)
 - [7. 💻 Local Development & Quickstart](#7--local-development--quickstart)
 - [8. 📂 Monorepo Directory Topology](#8--monorepo-directory-topology)
-- [9. 🛡️ Agentic Commerce Protocol (ACP) & MCP Specification](#9-️-agentic-commerce-protocol-acp--mcp-specification)
+- [9. 🔌 Universal LLM & MCP Integration Guide (Connect Any AI Agent)](#9--universal-llm--mcp-integration-guide-connect-any-ai-agent)
+  - [9.1 Autonomous Clearinghouse Gateway Architecture](#91-autonomous-clearinghouse-gateway-architecture)
+  - [9.2 Complete 16-Tool Catalog Exposed to External LLMs](#92-complete-16-tool-catalog-exposed-to-external-llms)
+  - [9.3 Zero-Trust Security & Cryptographic Mandate Enforcement](#93-zero-trust-security--cryptographic-mandate-enforcement)
+  - [9.4 Ready-to-Use IDE & Assistant Configuration Snippets](#94-ready-to-use-ide--assistant-configuration-snippets)
+  - [9.5 Programmatic Integration Guides (Python, TypeScript, cURL)](#95-programmatic-integration-guides-python-typescript-curl)
+  - [9.6 Multi-Provider LLM Switching & Air-Gapped Fallback Reasoner](#96-multi-provider-llm-switching--air-gapped-fallback-reasoner)
 - [10. 📊 Complete PayPal 18+ Endpoint Reference](#10--complete-paypal-18-endpoint-reference)
 - [11. 📚 Documentation & Technical Dossiers](#11--documentation--technical-dossiers)
 - [12. 🤝 Strategic Technology Partners & Ecosystem Acknowledgements](#12--strategic-technology-partners--ecosystem-acknowledgements)
@@ -621,22 +627,346 @@ aegispay/
 
 ---
 
-## 9. 🛡️ Agentic Commerce Protocol (ACP) & MCP Specification
+## 9. 🔌 Universal LLM & MCP Integration Guide (Connect Any AI Agent)
 
-AegisPay natively implements the **Agentic Commerce Protocol (ACP)** specification maintained by OpenAI & Stripe, serving as an autonomous dual-sided clearinghouse.
+AegisPay is engineered as a **universal autonomous commerce clearinghouse and backend engine**. It separates autonomous AI reasoning from financial execution, allowing **any external LLM, autonomous agent, IDE coding assistant, or multi-agent framework** to execute secure, multi-merchant commerce operations without ever handling raw payment credentials or violating spend limits.
 
-### Discovery & Versioning
-- **Discovery Endpoint**: `GET /.well-known/acp.json`
-- **Supported API Versions**: `2025-09-29`, `2025-12-12`, `2026-01-16`, `2026-01-30`, `2026-04-17` (Active Standard)
-- **Advertised Transports**: `rest` (HTTPS REST) and `mcp` (Streamable HTTP JSON-RPC 2.0)
+Whether you are building with:
+- **Desktop AI IDEs & Coding Assistants**: Cursor, Claude Desktop, Windsurf, Claude Code, Cline, Roo-Code.
+- **Agent Frameworks**: LangChain, CrewAI, AutoGen, OpenAI Swarm, Mastra, LlamaIndex, PydanticAI.
+- **Direct LLM APIs**: Anthropic Claude 3.5 Sonnet, OpenAI GPT-4o / o3-mini, Google Gemini 2.5 Flash / 3.5 Flash Lite, DeepSeek R1, or local models via Ollama.
+- **Custom Backends & Microservices**: Python, Go, Node.js, Rust, or any standard HTTP client.
 
-### MCP Checkout Tools
-AegisPay exposes 5 canonical checkout tools over Model Context Protocol (`POST /mcp`):
-1. `create_checkout_session`: Initiates session with tax estimation and shipping calculation.
-2. `get_checkout_session`: Retrieves authoritative cart state and line-item totals.
-3. `update_checkout_session`: Full replacement update of line items or fulfillment data.
-4. `complete_checkout_session`: Finalizes payment via Vault v3 or Ed25519 mandate.
-5. `cancel_checkout_session`: Cancels session with structured `intent_trace` telemetry.
+AegisPay provides standard, turnkey integration interfaces backed by zero-trust cryptographic enforcement.
+
+```mermaid
+flowchart TD
+    subgraph ExternalAgents["🤖 ANY External LLM / AI Agent"]
+        A1["Cursor IDE / Claude Desktop / Windsurf"]
+        A2["LangChain / CrewAI / AutoGen / Mastra"]
+        A3["OpenAI GPT-4o / Claude 3.5 / Gemini / Ollama"]
+        A4["Enterprise ERP / Procurement Bot"]
+    end
+
+    subgraph DualTransports["🔌 AegisPay Universal Connectivity Gateway"]
+        T1["Stdio JSON-RPC Transport<br/>(Desktop IDEs & Local Subprocesses)"]
+        T2["Streamable HTTP JSON-RPC 2.0<br/>(POST /mcp • Remote & Cloud Agents)"]
+        T3["Streaming Agent REST / SSE Gateway<br/>(POST /api/chat • Natural Language)"]
+        T4["ACP Discovery Protocol<br/>(GET /.well-known/acp.json)"]
+    end
+
+    subgraph ZeroTrustEnforcer["🛡️ Zero-Trust Security Gate (@aegispay/mcp-enforcer)"]
+        Z1["1. Ed25519 SessionMandate Verifier"]
+        Z2["2. Atomic Redis Lua Spend Governor (maxmemory: noeviction)"]
+        Z3["3. Merchant Anomaly Gate (Anomaly Score > 0.70 Rejection)"]
+        Z4["4. Category Smuggling & Prohibited Merchant Sentinel"]
+    end
+
+    subgraph CommerceEngines["⚙️ Execution Engines & Partner Rails"]
+        C1["Channel3 Multi-Merchant Catalog & 0/1 Knapsack ILP"]
+        C2["PayPal Orders v2 & Vault v3 Rails"]
+        C3["PayPal Disputes v1 & Invoicing v2 Services"]
+        C4["Bryntum SLA Dispute Arbitration Engine"]
+    end
+
+    ExternalAgents --> DualTransports
+    DualTransports --> ZeroTrustEnforcer
+    ZeroTrustEnforcer --> CommerceEngines
+```
+
+---
+
+### 9.1 Autonomous Clearinghouse Gateway Architecture
+
+AegisPay exposes two production-grade connection modalities:
+
+1. **Model Context Protocol (MCP) v2 (2026-07-28 Specification)**:
+   - **Stdio Transport**: Executable as a local subprocess (`node packages/mcp-enforcer/dist/server.js` or `pnpm mcp:stdio`) for desktop coding assistants and terminal agents.
+   - **Streamable HTTP JSON-RPC 2.0 Transport (`POST /mcp`)**: Stateful and stateless streaming HTTP transport hosted on the Fastify API Orchestrator. Includes DNS rebinding protection (`hostHeaderValidation`), origin security, and continuous SSE response streams conforming to the modern MCP TypeScript SDK v2.
+2. **Conversational Agent REST / SSE Gateway (`POST /api/chat`)**:
+   - High-level conversational commerce endpoint accepting natural language intent (e.g., *"Find Sony WH-1000XM5 under $300 and buy it autonomously"*).
+   - Returns continuous SSE data streams (`0:text`, `9:toolCall`, `a:toolResult`) compatible with the Vercel AI SDK and Mastra engine.
+   - Handles multi-turn memory persistence, preference extraction, watchlist tracking, and 1-prompt autonomous purchase execution.
+
+---
+
+### 9.2 Complete 16-Tool Catalog Exposed to External LLMs
+
+AegisPay registers **16 enterprise tools** grouped into three specialized suites. Every tool is strictly governed by Zod and JSON Schema definitions:
+
+#### Suite A: Agentic Commerce Protocol (ACP) Checkout Tools (5 Tools)
+Standardized autonomous checkout lifecycle maintaining compliance with the Stripe & OpenAI Agentic Commerce Protocol:
+
+| Tool Name | Parameters | Description | Security Enforcement |
+| :--- | :--- | :--- | :--- |
+| `create_checkout_session` | `meta: object`, `payload: object` | Initiates an autonomous checkout session with dynamic multi-merchant tax, shipping, and discount calculation. | Validates currency and schema constraints. |
+| `get_checkout_session` | `meta: object`, `id: string` | Authoritative retrieval of active session state, line items, merchant routing, and amount totals. | Read-only; session ownership verification. |
+| `update_checkout_session` | `meta: object`, `id: string`, `payload: object` | Performs full replacement update of items, quantities, shipping addresses, or delivery tiers with atomic price recalculation. | State lock verification; prevents concurrent cart corruption. |
+| `complete_checkout_session` | `meta: object`, `id: string`, `payload: object` | Finalizes autonomous checkout using vaulted PayPal instruments (`vault_token_id`) or signed Ed25519 payment mandates. | **Hardware-bound Ed25519 signature + Atomic Redis Lua spend reservation.** |
+| `cancel_checkout_session` | `meta: object`, `id: string` | Terminates active checkout session, releases stock holds, and emits structured audit telemetry to the tamper-evident log chain. | Releases uncommitted spend reservations in Redis. |
+
+#### Suite B: Official PayPal Agentic Commerce Toolkit Bridge (5 Tools)
+Enterprise wrapper around `@paypal/agent-toolkit/mcp` providing zero-trust isolation:
+
+| Tool Name | Parameters | Description | Security Enforcement |
+| :--- | :--- | :--- | :--- |
+| `create_order` | `intent: "CAPTURE" \| "AUTHORIZE"`, `purchase_units: array` | Programmatically mints PayPal Orders v2 with custom payee routing and currency specifications. | **Spend-mutating gate**: Requires valid SessionMandate and Lua budget allocation. |
+| `pay_order` | `order_id: string` | Executes capture or escrow authorization against a pre-approved PayPal order. | **Spend-mutating gate**: Validates order amount matches reserved allowance. |
+| `create_invoice` | `detail: object`, `invoicer: object`, `primary_recipients: array`, `items: array` | Generates official itemized B2B/C2C invoices with tax, discount, and payment term breakdowns. | Validates payee identity against verified merchant whitelist. |
+| `send_invoice` | `invoice_id: string`, `send_to_recipient: boolean` | Dispatches digital invoices directly to recipient billing emails with delivery webhook tracking. | Throttled by merchant rate-limiter. |
+| `generate_qr_code` | `invoice_id: string` | Generates instant dynamic QR code image payloads for in-person, cross-device, or POS agent settlement. | Read-only verification of active invoice. |
+
+#### Suite C: Algorithmic Custodian, Escrow & Dispute Tools (6 Tools)
+Algorithmic clearinghouse tools for autonomous multi-merchant optimization and dispute arbitration:
+
+| Tool Name | Parameters | Description | Security Enforcement |
+| :--- | :--- | :--- | :--- |
+| `optimize_channel3_multi_merchant_basket` | `allowance_voucher_id: string`, `search_query?: string`, `category_ids?: string[]`, `items?: array` | Solves multi-merchant basket allocation via 0/1 Knapsack Mixed-Integer Linear Programming, optimizing pricing, shipping, and delivery dates. | Verifies allowance voucher validity before running ILP solver. |
+| `authorize_conditional_escrow_order` | `mandate_id: string`, `merchant_domain: string`, `requested_cents: number`, `category_id: string`, `items: array` | Verifies buyer Ed25519 signature, queries merchant anomaly scores, atomically decrements Redis spend budget, and places conditional escrow hold. | **Full 5-layer purchase gate.** Rejects if anomaly score > 0.70 or category is prohibited. |
+| `broadcast_synthetic_intent_voucher` | `mandate_id: string`, `channel3_product_id: string`, `merchant_domain: string`, `retail_offer_cents: number`, `buyer_bid_cents: number` | Emits cryptographic synthetic intent vouchers across Channel3 merchant networks to solicit competitive counter-bids without upfront charge. | Validates buyer wallet vault status with PayPal Vault v3 ($0 Setup Token). |
+| `void_or_capture_escrow_hold` | `authorization_id: string`, `action: "CAPTURE" \| "VOID"`, `amount_cents?: number` | Algorithmic escrow release upon verified delivery milestone or immediate void upon merchant SLA breach. | Requires carrier tracking confirmation or verified SLA timer expiration. |
+| `submit_dispute_evidence_bundle` | `paypal_dispute_id: string`, `carrier_tracking_number?: string`, `policy_proof_text?: string`, `vision_defect_mask?: number[]` | Assembles tamper-evident forensic PDF dossiers (SHA-256 evidence bundles) and uploads directly to PayPal Disputes API v1. | Cryptographic hash chaining on audit ledger. |
+| `propose_dispute_partial_settlement` | `paypal_dispute_id: string`, `compromise_amount_cents: number` | Proposes algorithmic compromise refund amounts based on Bryntum dispute timelines and merchant SLA terms. | Settlement amount must not exceed original transaction capture total. |
+
+---
+
+### 9.3 Zero-Trust Security & Cryptographic Mandate Enforcement
+
+Unlike traditional AI agent integrations that grant language models raw API keys or unrestricted credit cards, AegisPay enforces **strict zero-trust boundaries** across all tool calls:
+
+1. **Hardware-Signed Ed25519 Mandates**: Every mutating tool (`create_order`, `authorize_conditional_escrow_order`, `complete_checkout_session`) requires a valid `SessionMandate` signed by the user's client keypair. The signature covers `amount_cents`, `merchant_domain`, `category_id`, and `expires_at`. An agent cannot modify parameters without invalidating the signature.
+2. **Sub-1ms Atomic Redis Lua Spend Governor**: Spend reservations are evaluated inside a single-threaded Redis Lua script (`EVALSHA`) configured with `maxmemoryPolicy: noeviction`. If an agent attempts to spend $50.01 against a $50.00 allowance, the transaction is rejected deterministically in sub-millisecond time with zero race conditions.
+3. **Merchant Anomaly Gate**: Queries the real-time merchant risk registry. Any merchant exhibiting an anomaly score > 0.70 (e.g., sudden order volume surges, unverified fulfillment endpoints) is rejected.
+4. **Category Smuggling Sentinel**: Tokenizes item descriptions and matches them against prohibited merchant category codes (MCCs) to prevent agents from being tricked by prompt injection into purchasing prohibited goods.
+
+---
+
+### 9.4 Ready-to-Use IDE & Assistant Configuration Snippets
+
+Connect your favorite coding assistant or desktop agent to AegisPay in seconds:
+
+#### A. Claude Desktop Configuration
+Add AegisPay to your `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Windows: `%APPDATA%\Claude\claude_desktop_config.json`):
+
+**Option 1: Stdio Transport (Local Build)**
+```json
+{
+  "mcpServers": {
+    "aegispay": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/agpay/packages/mcp-enforcer/dist/server.js"
+      ],
+      "env": {
+        "PAYPAL_CLIENT_ID": "your_sandbox_client_id",
+        "PAYPAL_CLIENT_SECRET": "your_sandbox_client_secret",
+        "PAYPAL_ENVIRONMENT": "sandbox",
+        "REDIS_URL": "redis://127.0.0.1:6379"
+      }
+    }
+  }
+}
+```
+
+**Option 2: Streamable HTTP Transport (Live Cloud Deployment / Render)**
+```json
+{
+  "mcpServers": {
+    "aegispay": {
+      "url": "https://agpay.onrender.com/mcp",
+      "headers": {
+        "Content-Type": "application/json"
+      }
+    }
+  }
+}
+```
+
+#### B. Cursor IDE Configuration
+Create or edit `.cursor/mcp.json` in your project root or user settings:
+```json
+{
+  "mcpServers": {
+    "aegispay-enforcer": {
+      "command": "pnpm",
+      "args": ["--filter", "@aegispay/mcp-enforcer", "start"],
+      "env": {
+        "NODE_ENV": "development",
+        "PAYPAL_ENVIRONMENT": "sandbox"
+      }
+    }
+  }
+}
+```
+
+#### C. Windsurf / Codeium Configuration
+Add to `~/.codeium/windsurf/mcp_config.json`:
+```json
+{
+  "mcpServers": {
+    "aegispay": {
+      "command": "node",
+      "args": ["/path/to/agpay/packages/mcp-enforcer/dist/server.js"]
+    }
+  }
+}
+```
+
+---
+
+### 9.5 Programmatic Integration Guides (Python, TypeScript, cURL)
+
+#### A. Python Integration (Official `mcp` SDK)
+Connect any Python-based AI agent (LangChain, CrewAI, AutoGen, LlamaIndex) via Streamable HTTP:
+
+```python
+import asyncio
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+async def main():
+    server_url = "https://agpay.onrender.com/mcp"
+    
+    async with sse_client(server_url) as (read_stream, write_stream):
+        async with ClientSession(read_stream, write_stream) as session:
+            # 1. Initialize MCP Session
+            await session.initialize()
+            
+            # 2. Discover Available Commerce Tools
+            tools = await session.list_tools()
+            print(f"Connected to AegisPay! Discovered {len(tools.tools)} enterprise tools.")
+            
+            # 3. Call Knapsack Basket Optimization
+            optimization_result = await session.call_tool(
+                "optimize_channel3_multi_merchant_basket",
+                arguments={
+                    "allowance_voucher_id": "vch_demo_100",
+                    "search_query": "Sony Noise Cancelling Headphones",
+                    "category_ids": ["electronics"]
+                }
+            )
+            print("Optimization Result:", optimization_result.content[0].text)
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+#### B. TypeScript / Node.js Integration (`@modelcontextprotocol/sdk`)
+```typescript
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+
+async function runAutonomousProcurement() {
+  const transport = new SSEClientTransport(new URL("https://agpay.onrender.com/mcp"));
+  const client = new Client({ name: "ExternalBuyerAgent", version: "1.0.0" }, { capabilities: {} });
+
+  await client.connect(transport);
+  console.log("Connected to AegisPay MCP Gateway.");
+
+  // Execute ACP Autonomous Checkout Session Creation
+  const session = await client.callTool({
+    name: "create_checkout_session",
+    arguments: {
+      meta: { api_version: "2026-04-17", request_id: `req_${Date.now()}` },
+      payload: {
+        currency: "usd",
+        items: [
+          { id: "sony_wh1000xm5", name: "Sony WH-1000XM5", quantity: 1, unit_price_cents: 29800 }
+        ]
+      }
+    }
+  });
+
+  console.log("ACP Checkout Session Initialized:", session);
+}
+
+runAutonomousProcurement();
+```
+
+#### C. Raw HTTP JSON-RPC 2.0 (`POST /mcp`)
+Invoke any tool directly using raw cURL without external dependencies:
+
+```bash
+curl -X POST https://agpay.onrender.com/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 101,
+    "method": "create_checkout_session",
+    "params": {
+      "meta": { "api_version": "2026-04-17", "request_id": "req_curl_001" },
+      "payload": {
+        "currency": "usd",
+        "items": [
+          { "id": "prod_1", "name": "4K Ultra-Wide Monitor", "quantity": 1, "unit_price_cents": 45000 }
+        ]
+      }
+    }
+  }'
+```
+
+#### D. Conversational Agent Streaming (`POST /api/chat`)
+Trigger full conversational multi-merchant shopping with streaming SSE events:
+
+```bash
+curl -N -X POST https://agpay.onrender.com/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Find me high-end wireless headphones under $350 and optimize the cart across Best Buy and Target",
+    "stream": true,
+    "budget_cap_cents": 35000
+  }'
+```
+
+#### E. Autonomous Protocol Discovery (`GET /.well-known/acp.json`)
+Autonomous buyer agents discover supported API versions and endpoint capabilities via standardized ACP discovery:
+
+```bash
+curl -s https://agpay.onrender.com/.well-known/acp.json | jq .
+```
+
+*Response:*
+```json
+{
+  "name": "AegisPay Autonomous Commerce Clearinghouse",
+  "version": "2026-04-17",
+  "transports": ["rest", "mcp"],
+  "endpoints": {
+    "mcp_gateway": "/mcp",
+    "create_checkout_session": "/acp/checkout_sessions",
+    "payment_handler": "/acp/payment_handler"
+  },
+  "capabilities": {
+    "zero_trust_ed25519": true,
+    "atomic_redis_lua_spend_limits": true,
+    "paypal_vault_v3": true,
+    "knapsack_ilp_optimization": true
+  }
+}
+```
+
+---
+
+### 9.6 Multi-Provider LLM Switching & Air-Gapped Fallback Reasoner
+
+The AegisPay API Orchestrator features a pluggable model routing architecture configured via the `COMMERCE_AGENT_MODEL` environment variable:
+
+| Model ID | Provider | Performance & Role in AegisPay |
+| :--- | :--- | :--- |
+| `google/gemini-3.5-flash-lite` *(Default)* | Google Gemini | Ultra-low latency (<250ms TTFT) for high-frequency catalog searching and real-time SSE streaming. |
+| `google/gemini-2.5-flash` | Google Gemini | High-speed multi-modal reasoning and complex basket price optimization. |
+| `openai/gpt-4o` | OpenAI | Advanced instruction following for structured ACP checkout session management. |
+| `anthropic/claude-3-5-sonnet` | Anthropic | Superior reasoning on multi-merchant dispute evidence synthesis and SLA timeline arbitration. |
+| `ollama/llama3.2` | Local / Air-Gapped | Completely offline, on-premise execution with zero external network telemetry. |
+
+#### Bring Your Own Key (BYOK) Dynamic Verification
+Users and evaluators can dynamically inject their personal API keys in the Cockpit UI. The backend verifies keys in real-time (`POST /api/buyer/verify-llm-key`) against Google and OpenAI provider endpoints before saving, ensuring unauthenticated models are never activated.
+
+#### 🛡️ Air-Gapped Deterministic Fallback Reasoner (`local-reasoner.ts`)
+To ensure total reliability during evaluator demos or network outages:
+- If no external API keys are configured, or if provider rate limits (HTTP 429) are encountered, AegisPay **automatically falls back to its internal Deterministic Local Reasoner**.
+- The fallback reasoner parses user intents (DISCOVER, COMPARE, OPTIMIZE, BUY, TRACK, DISPUTE) using deterministic regex state machines, executes Channel3 catalog matching, solves Knapsack basket optimization, and generates valid PayPal orders.
+- **Result:** Evaluators can thoroughly test every capability of AegisPay with **zero external API dependencies and zero token consumption**.
 
 ---
 
