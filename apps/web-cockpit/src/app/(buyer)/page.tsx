@@ -477,7 +477,7 @@ export default function BuyerPortalPage() {
           )}
 
           {/* Fixed Chatbox (fills entire height smoothly, only message content scrolls) */}
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-h-0 h-full flex flex-col overflow-hidden relative">
             <ConversationalAgentChat
               budgetCapCents={showTechnicalDetails && activeMandate ? activeMandate.max_total_spend_cents : externalBudgetCents}
               zipCode={userSettings.zipCode}

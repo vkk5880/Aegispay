@@ -237,8 +237,15 @@ export function ConversationalAgentChat({
 
   // Auto-scroll chat viewport to latest content whenever discovered products, comparisons, or message streaming updates
   useEffect(() => {
-    if (viewportEndRef.current) {
-      viewportEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const el = viewportEndRef.current;
+    if (el) {
+      const scrollContainer = (el.closest('.overflow-y-auto') as HTMLElement | null) || el.parentElement;
+      if (scrollContainer) {
+        scrollContainer.scrollTo({
+          top: scrollContainer.scrollHeight,
+          behavior: 'smooth',
+        });
+      }
     }
   }, [discoveredProducts.length, activeComparison, activeCart, isSubmitting]);
 
@@ -451,10 +458,10 @@ export function ConversationalAgentChat({
         <PrepareCheckoutToolUI />
 
         {/* Responsive Cockpit Container: Split-Screen Desktop & Mobile Drawer */}
-        <div className="flex flex-col lg:flex-row h-full w-full min-h-0 min-w-0 bg-white/70 dark:bg-[#070d1a]/90 overflow-hidden backdrop-blur-md transition-all">
+        <div className="flex-1 flex flex-col lg:flex-row h-full w-full min-h-0 min-w-0 bg-white/70 dark:bg-[#070d1a]/90 overflow-hidden backdrop-blur-md transition-all">
           {/* Main Left Panel: Conversation Thread & Input Bar */}
           <div
-            className={`flex flex-col h-full min-h-0 min-w-0 transition-all duration-300 ${
+            className={`flex-1 flex flex-col h-full min-h-0 min-w-0 transition-all duration-300 ${
               isSidePanelOpen ? 'lg:w-3/5 w-full' : 'w-full'
             }`}
           >
@@ -567,7 +574,7 @@ export function ConversationalAgentChat({
             </div>
 
             {/* assistant-ui Thread Messages Viewport */}
-            <ThreadPrimitive.Root className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+            <ThreadPrimitive.Root className="flex-1 flex flex-col h-full min-h-0 min-w-0 overflow-hidden">
               <ThreadPrimitive.Viewport className="flex-1 min-h-0 min-w-0 overflow-y-auto overscroll-contain px-3 sm:px-5 py-4 space-y-4 scroll-smooth">
                 <ThreadPrimitive.Messages
                   components={{
