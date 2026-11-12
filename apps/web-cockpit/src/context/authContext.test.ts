@@ -9,6 +9,7 @@ import { SpendAllowanceHeader } from '../components/buyer/SpendAllowanceHeader.j
 import { UserSettingsDrawer, DEFAULT_USER_SETTINGS } from '../components/buyer/UserSettingsDrawer.js';
 import { UserProfileSidebar } from '../components/buyer/UserProfileSidebar.js';
 import { DevModeToggle } from '../components/DevModeToggle.js';
+import { PayPalRealSandboxAuthModal } from '../components/buyer/PayPalRealSandboxAuthModal.js';
 
 test('AuthContext & Navbar: Renders "Login with PayPal" button when not logged in', () => {
   const html = renderToStaticMarkup(
@@ -103,4 +104,50 @@ test('DevModeToggle: Renders clean Dev Mode toggle without mock or test toggles'
 test('Strict Sandbox Mode: Ensures test mode and fake mock auth modals are eradicated', () => {
   // Test user and fake auth modal are removed in favor of real PayPal Sandbox OAuth/Vaulting
   assert.ok(true);
+});
+
+test('PayPalRealSandboxAuthModal: Hides categories and stores when budget is unchecked; shows "Login" button', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(
+      UiModeProvider,
+      null,
+      React.createElement(
+        AuthProvider,
+        null,
+        React.createElement(PayPalRealSandboxAuthModal, {
+          isOpen: true,
+          onClose: () => {},
+          defaultMode: 'login',
+        })
+      )
+    )
+  );
+
+  assert.ok(html.includes('Login'), 'Expected modal to render Login header and action');
+  assert.ok(html.includes('Budget Allowance is <strong>Unchecked ($0 Allowance)</strong>'));
+  // When budget is unchecked, categories and stores lists must NOT be rendered
+  assert.ok(!html.includes('Authorized Product Categories'), 'Expected categories list to be hidden');
+  assert.ok(!html.includes('Allowed Stores Whitelist'), 'Expected stores whitelist to be hidden');
+});
+
+test('PayPalRealSandboxAuthModal: Shows collapsible categories and stores when budget is allowed', () => {
+  const html = renderToStaticMarkup(
+    React.createElement(
+      UiModeProvider,
+      null,
+      React.createElement(
+        AuthProvider,
+        null,
+        React.createElement(PayPalRealSandboxAuthModal, {
+          isOpen: true,
+          onClose: () => {},
+          defaultMode: 'authorize',
+        })
+      )
+    )
+  );
+
+  assert.ok(html.includes('Authorized Product Categories'), 'Expected categories accordion when budget is enabled');
+  assert.ok(html.includes('Allowed Stores Whitelist'), 'Expected stores whitelist accordion when budget is enabled');
+  assert.ok(html.includes('Login &amp; Authorize $500') || html.includes('Login & Authorize $500') || html.includes('Authorize $500'));
 });
