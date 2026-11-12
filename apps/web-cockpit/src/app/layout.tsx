@@ -3,8 +3,10 @@ import './globals.css';
 import { ThemeProvider } from '@/components/ThemeProvider';
 import { UiModeProvider } from '@/context/UiModeContext';
 import { AuthProvider } from '@/context/AuthContext';
+import { CartProvider } from '@/context/CartContext';
 import { Navbar } from '@/components/Navbar';
 import { UserProfileSidebar } from '@/components/buyer/UserProfileSidebar';
+import { GlobalCartDrawer } from '@/components/buyer/GlobalCartDrawer';
 
 export const metadata: Metadata = {
   title: 'AegisPay — Smart Shopping Assistant & Savings',
@@ -44,11 +46,14 @@ export default function RootLayout({
         <ThemeProvider>
           <UiModeProvider>
             <AuthProvider>
-              <Navbar />
-              <div className="flex-1 flex flex-col">
-                {children}
-              </div>
-              <UserProfileSidebar />
+              <CartProvider>
+                <Navbar />
+                <div className="flex-1 flex flex-col">
+                  {children}
+                </div>
+                <UserProfileSidebar />
+                <GlobalCartDrawer />
+              </CartProvider>
             </AuthProvider>
           </UiModeProvider>
         </ThemeProvider>

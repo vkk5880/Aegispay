@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import {
   Star,
   ShoppingBag,
@@ -12,10 +13,15 @@ import {
   Scale,
   CheckCircle2,
   Bookmark,
+  ExternalLink,
+  Eye,
 } from 'lucide-react';
 import type { ProductCardData } from '@aegispay/shared-types';
 import { SocialProofPanel } from './SocialProofPanel';
 import { useUiMode } from '@/context/UiModeContext';
+import { useCart } from '@/context/CartContext';
+import { getProductImageUrl } from '@/lib/productImageHelper';
+import { ProductDetailModal } from './ProductDetailModal';
 
 export interface ProductCardProps {
   product: ProductCardData;
@@ -26,6 +32,7 @@ export interface ProductCardProps {
   onAddToCart?: (product: ProductCardData) => void;
   onInstantBuy?: (product: ProductCardData) => void;
   onSaveWatchlist?: (product: ProductCardData) => void;
+  onInspectDetails?: (product: ProductCardData) => void;
   className?: string;
 }
 
@@ -38,12 +45,15 @@ export function ProductCard({
   onAddToCart,
   onInstantBuy,
   onSaveWatchlist,
+  onInspectDetails,
   className = '',
 }: ProductCardProps) {
   const { showTechnicalDetails } = useUiMode();
+  const { addToCart, openCart } = useCart();
   const [added, setAdded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
   // Optional Variant Options (Sizes / Colors / Models)
   const variants: string[] =
@@ -60,10 +70,30 @@ export function ProductCard({
   };
 
   const handleAdd = () => {
+    const itemToAdd = selectedVariant ? { ...product, title: `${product.title} (${selectedVariant})` } : product;
     if (onAddToCart) {
-      onAddToCart(selectedVariant ? { ...product, title: `${product.title} (${selectedVariant})` } : product);
-      setAdded(true);
-      setTimeout(() => setAdded(false), 2000);
+      onAddToCart(itemToAdd);
+    } else {
+      addToCart(itemToAdd, 1);
+    }
+    setAdded(true);
+    setTimeout(() => setAdded(false), 2000);
+  };
+
+  const handleInstant = () => {
+    if (onInstantBuy) {
+      onInstantBuy(product);
+    } else {
+      addToCart(product, 1);
+      openCart();
+    }
+  };
+
+  const handleInspect = () => {
+    if (onInspectDetails) {
+      onInspectDetails(product);
+    } else {
+      setIsDetailModalOpen(true);
     }
   };
 
@@ -120,7 +150,8 @@ export function ProductCard({
       )
     : 0;
 
-  const hasCleanUrl = Boolean(product.cleaned_url && product.cleaned_url.trim().length > 0);
+  const resolvedImgUrl = getProductImageUrl(product);
+  const hasValidImage = Boolean(resolvedImgUrl && resolvedImgUrl.trim().length > 0);
 
   return (
     <div
@@ -153,10 +184,14 @@ export function ProductCard({
 
       <div>
         {/* Product Image & Radial Score Badge - Small Compact Size */}
-        <div className="relative w-full h-22 sm:h-24 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-950 mb-2.5 border border-slate-200/80 dark:border-white/10 flex items-center justify-center">
-          {hasCleanUrl && !imgError ? (
+        <div
+          onClick={handleInspect}
+          className="relative w-full h-22 sm:h-24 rounded-lg overflow-hidden bg-slate-100 dark:bg-slate-950 mb-2.5 border border-slate-200/80 dark:border-white/10 flex items-center justify-center cursor-pointer group/thumb"
+          title="Click to view detailed specs"
+        >
+          {hasValidImage && !imgError ? (
             <img
-              src={product.cleaned_url}
+              src={resolvedImgUrl}
               alt={product.title || 'Product'}
               onError={() => setImgError(true)}
               className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
@@ -172,6 +207,14 @@ export function ProductCard({
               </span>
             </div>
           )}
+
+          {/* Quick View overlay on hover */}
+          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+            <span className="px-2 py-0.5 rounded-full bg-white/95 dark:bg-slate-900/95 text-slate-900 dark:text-white font-mono text-[9px] font-bold flex items-center gap-1 shadow-sm">
+              <Eye className="w-2.5 h-2.5 text-cyan-500" />
+              <span>Specs</span>
+            </span>
+          </div>
 
           {/* AI Score Badge */}
           <div className="absolute top-2 right-2 px-2 py-0.5 rounded-md bg-slate-900/85 dark:bg-black/85 backdrop-blur-md border border-white/20 text-white font-mono font-bold text-[10px] flex items-center gap-1 shadow-xs">
@@ -225,7 +268,10 @@ export function ProductCard({
         )}
 
         {/* Title */}
-        <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white mb-1 leading-snug line-clamp-2">
+        <h3
+          onClick={handleInspect}
+          className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white mb-1 leading-snug line-clamp-2 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors cursor-pointer"
+        >
           {product.title}
         </h3>
 
@@ -331,39 +377,45 @@ export function ProductCard({
         )}
 
         <div className="flex items-center gap-1.5">
-          {onAddToCart && (
-            <button
-              onClick={handleAdd}
-              aria-label={`Add ${product.title || 'item'} to Cart`}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none active:scale-95 ${
-                added
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-cyan-600/20'
-              }`}
-            >
-              {added ? (
-                <>
-                  <Check className="w-3 h-3" />
-                  <span>Added!</span>
-                </>
-              ) : (
-                <>
-                  <ShoppingBag className="w-3 h-3" />
-                  <span>Add to Cart</span>
-                </>
-              )}
-            </button>
-          )}
+          <button
+            onClick={handleAdd}
+            aria-label={`Add ${product.title || 'item'} to Cart`}
+            className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all shadow-xs flex items-center justify-center gap-1 cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none active:scale-95 ${
+              added
+                ? 'bg-emerald-600 text-white'
+                : 'bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-cyan-600/20'
+            }`}
+          >
+            {added ? (
+              <>
+                <Check className="w-3 h-3" />
+                <span>Added!</span>
+              </>
+            ) : (
+              <>
+                <ShoppingBag className="w-3 h-3" />
+                <span>Add to Cart</span>
+              </>
+            )}
+          </button>
 
-          {onInstantBuy && (
-            <button
-              onClick={() => onInstantBuy(product)}
-              aria-label={`Instant buy ${product.title || 'item'}`}
-              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg border border-slate-200 dark:border-white/10 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none active:scale-95 shadow-2xs"
-            >
-              Buy Now
-            </button>
-          )}
+          <button
+            onClick={handleInstant}
+            aria-label={`Instant buy ${product.title || 'item'}`}
+            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-200 text-xs font-bold rounded-lg border border-slate-200 dark:border-white/10 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-400 focus-visible:outline-none active:scale-95 shadow-2xs"
+          >
+            Buy Now
+          </button>
+
+          {/* Dedicated Product Page Link */}
+          <Link
+            href={`/products/${encodeURIComponent(product.product_id)}`}
+            aria-label={`View specs for ${product.title || 'item'}`}
+            title="Open dedicated product page"
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-white/10 bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-500 hover:text-cyan-500 transition-all shadow-2xs"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </Link>
 
           <button
             type="button"
@@ -380,6 +432,14 @@ export function ProductCard({
           </button>
         </div>
       </div>
+
+      {/* Global In-Context Product Detail Modal */}
+      <ProductDetailModal
+        product={product}
+        isOpen={isDetailModalOpen}
+        onClose={() => setIsDetailModalOpen(false)}
+        onInstantBuy={handleInstant}
+      />
     </div>
   );
 }

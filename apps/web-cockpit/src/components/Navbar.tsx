@@ -24,6 +24,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { DevModeToggle } from './DevModeToggle';
 import { useUiMode } from '@/context/UiModeContext';
 import { useAuth } from '@/context/AuthContext';
+import { useCart } from '@/context/CartContext';
 
 export function Navbar() {
   const pathname = usePathname();
@@ -39,6 +40,7 @@ export function Navbar() {
     authorizePayment,
     openProfileSidebar,
   } = useAuth();
+  const { totalItemsCount, openCart } = useCart();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -197,6 +199,23 @@ export function Navbar() {
             </button>
           )}
 
+          {/* Global Cart Button with Live Badge */}
+          <button
+            type="button"
+            onClick={openCart}
+            className="group relative flex items-center justify-center p-2 rounded-xl border border-slate-200/80 dark:border-white/10 bg-slate-100/80 hover:bg-slate-200/80 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-slate-300 transition-all cursor-pointer shadow-xs active:scale-95"
+            aria-label="Open Multi-Store Cart"
+            title="Open Multi-Store Cart"
+          >
+            <ShoppingBag className="w-4 h-4 sm:w-4.5 sm:h-4.5 group-hover:scale-110 transition-transform text-cyan-600 dark:text-cyan-400" />
+            {totalItemsCount > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-mono font-bold text-[10px] flex items-center justify-center shadow-md animate-pulse">
+                {totalItemsCount}
+              </span>
+            )}
+            <span className="sr-only">Shopping Cart ({totalItemsCount} items)</span>
+          </button>
+
           <DevModeToggle />
           <ThemeToggle />
 
@@ -266,6 +285,28 @@ export function Navbar() {
               <span>Login with PayPal</span>
             </button>
           )}
+
+          {/* Mobile Cart Trigger */}
+          <button
+            type="button"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              openCart();
+            }}
+            className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800/80 text-xs font-bold text-slate-800 dark:text-slate-200 transition-all cursor-pointer"
+          >
+            <div className="flex items-center gap-2.5">
+              <ShoppingBag className="w-4 h-4 text-cyan-500" />
+              <span>Smart Multi-Store Cart</span>
+            </div>
+            {totalItemsCount > 0 ? (
+              <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-mono text-[10px] font-bold">
+                {totalItemsCount} item{totalItemsCount > 1 ? 's' : ''}
+              </span>
+            ) : (
+              <span className="text-[10px] text-slate-400 font-mono">Empty</span>
+            )}
+          </button>
 
           {navLinks.map((link) => {
             const Icon = link.icon;
