@@ -28,8 +28,8 @@ Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atom
 - [1. Executive Summary & Problem Space](#1-executive-summary--problem-space)
 - [2. Zero-Trust Security Architecture & 5-Layer Purchase Gate](#2-zero-trust-security-architecture--5-layer-purchase-gate)
 - [3. Core Architectural Innovations & Technical Moats](#3-core-architectural-innovations--technical-moats)
-- [4. Enterprise Platform Architecture & Deep Integrations](#4-enterprise-platform-architecture--deep-integrations)
-  - [4.1 PayPal Developer Platform (Commerce Rails)](#41-paypal-developer-platform-commerce-rails)
+- [4. Enterprise Platform Architecture & Deep Partner Integrations](#4-enterprise-platform-architecture--deep-partner-integrations)
+  - [4.1 PayPal Developer Platform (Commerce Rails & Agent Toolkit)](#41-paypal-developer-platform-commerce-rails--agent-toolkit)
   - [4.2 AG Grid Enterprise v36 & AG Studio 3 (Clearinghouse Workstation)](#42-ag-grid-enterprise-v36--ag-studio-3-clearinghouse-workstation)
   - [4.3 Render Cloud Infrastructure (Multi-Service Native Fabric)](#43-render-cloud-infrastructure-multi-service-native-fabric)
   - [4.4 Channel3 Commerce Intelligence (Catalog & Cart Solver)](#44-channel3-commerce-intelligence-catalog--cart-solver)
@@ -42,7 +42,8 @@ Protected by zero-trust WebCrypto Ed25519 session mandates, sub-millisecond atom
 - [9. 🛡️ Agentic Commerce Protocol (ACP) & MCP Specification](#9-️-agentic-commerce-protocol-acp--mcp-specification)
 - [10. 📊 Complete PayPal 18+ Endpoint Reference](#10--complete-paypal-18-endpoint-reference)
 - [11. 📚 Documentation & Technical Dossiers](#11--documentation--technical-dossiers)
-- [12. 📜 License & Compliance](#12--license--compliance)
+- [12. 🤝 Strategic Technology Partners & Ecosystem Acknowledgements](#12--strategic-technology-partners--ecosystem-acknowledgements)
+- [13. 📜 License & Compliance](#13--license--compliance)
 
 ---
 
@@ -183,7 +184,7 @@ flowchart LR
 
 ---
 
-## 4. Enterprise Platform Architecture & Deep Integrations
+## 4. Enterprise Platform Architecture & Deep Partner Integrations
 
 AegisPay integrates best-in-class commerce, cloud, and analytical infrastructure to deliver a bank-grade production clearinghouse:
 
@@ -202,37 +203,65 @@ AegisPay integrates best-in-class commerce, cloud, and analytical infrastructure
 └───────────────────────┴───────────────────────────┴────────────────────────────────────┘
 ```
 
-### 4.1 PayPal Developer Platform (Commerce Rails)
-- **18+ Live REST Endpoints**: Authoritative execution across Orders v2, Payments v2, Vault v3, Invoicing v2, Disputes v1, Shipment Tracking v1, and Webhooks v1.
-- **Multi-Merchant Clearinghouse**: Dynamically maps knapsack cart items to individual merchant `payee: { merchant_id: "..." }` blocks within a single authorization hold.
-- **Vault v3 Delegated Mandates**: Powers both 1-prompt buyer autonomous purchases and synthetic intent discount bids via Setup Tokens.
-- **Fastlane Accelerated Checkout**: Integrates PayPal JS SDK v6 Web Components for device-authenticated guest conversion.
-- Complete implementation dossier: [`docs/PAYPAL_INTEGRATION.md`](docs/PAYPAL_INTEGRATION.md).
+### 4.1 PayPal Developer Platform (Commerce Rails & Agent Toolkit)
+* **Core Technology:** `@paypal/paypal-server-sdk`, `@paypal/agent-toolkit`, `@paypal/mcp`, PayPal JS SDK v6 Web Components
+* **Integration Highlights:**
+  - **18+ Live REST Endpoints**: Authoritative execution across Orders v2, Payments v2, Vault v3, Invoicing v2, Disputes v1, Shipment Tracking v1, and Webhooks v1.
+  - **Multi-Merchant Clearinghouse**: Dynamically maps knapsack cart items to individual merchant `payee: { merchant_id: "..." }` blocks within a single authorization hold.
+  - **Vault v3 Delegated Mandates**: Powers both 1-prompt buyer autonomous purchases and synthetic intent discount bids via Setup Tokens.
+  - **Fastlane Accelerated Checkout**: Integrates PayPal JS SDK v6 Web Components for device-authenticated guest conversion.
+  - **Live Negative Testing Support**: Handles genuine `PayPal-Mock-Response` headers (`INSTRUMENT_DECLINED`, `COMPLIANCE_VIOLATION`) with compensating ledger rollbacks.
+* **Code References:** [`apps/api-orchestrator/src/services/paypal/`](apps/api-orchestrator/src/services/paypal/), [`packages/mcp-enforcer/src/paypal-toolkit-bridge.ts`](packages/mcp-enforcer/src/paypal-toolkit-bridge.ts)
+* **Dedicated Dossier:** [`docs/PAYPAL_INTEGRATION.md`](docs/PAYPAL_INTEGRATION.md)
 
 ### 4.2 AG Grid Enterprise v36 & AG Studio 3 (Clearinghouse Workstation)
-- **Enterprise Grid Architecture**: Full tree-shakable module registry (`enterpriseModules.ts`), dynamic Quartz theming engine, and 6 custom React cell renderers.
-- **Master/Detail Hierarchical Sub-Grids**: Nested order inspection displaying multi-payee purchase unit splits, Vault setup tokens, and embedded forensic evidence dossiers.
-- **DuckDB-WASM SSRM OLAP Bridge**: High-performance Server-Side Row Model executing parameterized SQL queries over 100K+ records in `< 10ms` in a background Web Worker.
-- **Live AG Studio 3 Canvas**: Active `<LiveStudioCanvas />` with multi-agent harness (`setupStudioHarness`), custom `paypal_arbiter` runner, and natural language dashboard commands.
-- Complete implementation dossier: [`docs/AG_GRID.md`](docs/AG_GRID.md).
+* **Core Technology:** `ag-grid-enterprise` v36.3.0, `@ag-grid-community/react`, `@ag-grid/studio` v3.0.0, `@duckdb/duckdb-wasm`
+* **Integration Highlights:**
+  - **Enterprise Grid Architecture**: Full tree-shakable module registry (`enterpriseModules.ts`), dynamic Quartz theming engine, and 6 custom React cell renderers (HATEOAS hold buttons, SVG radial risk meters, photo diffs, carrier trackers, SLA timers).
+  - **Master/Detail Hierarchical Sub-Grids**: Nested order inspection displaying multi-payee purchase unit splits, Vault setup tokens, and embedded forensic evidence dossiers.
+  - **DuckDB-WASM SSRM OLAP Bridge**: High-performance Server-Side Row Model executing parameterized SQL queries over 100K+ records in `< 10ms` in a background Web Worker.
+  - **Live AG Studio 3 Canvas**: Active `<LiveStudioCanvas />` with multi-agent harness (`setupStudioHarness`), custom `paypal_arbiter` runner, and natural language dashboard commands.
+  - **In-Cell Sparklines & Integrated Charts**: 30-day liquidity area sparklines and column velocity sparklines.
+* **Code References:** [`apps/web-cockpit/src/components/ag-studio/`](apps/web-cockpit/src/components/ag-studio/), [`apps/web-cockpit/src/components/merchant/DataGrid.tsx`](apps/web-cockpit/src/components/merchant/DataGrid.tsx)
+* **Dedicated Dossier:** [`docs/AG_GRID.md`](docs/AG_GRID.md)
 
 ### 4.3 Render Cloud Infrastructure (Multi-Service Native Fabric)
-- **Native Render Workflows (`type: workflow`)**: Built on `@renderinc/sdk` v1.8.0 `flow()` and `ctx.step()` for durable execution of 72h price-drop polling and vision forensics.
-- **Render Key-Value Redis (`type: keyvalue`)**: Private memory engine configured with `maxmemoryPolicy: noeviction` executing single-threaded Lua spend enforcers in $< 1\text{ms}$.
-- **Managed PostgreSQL 16 (`databases`)**: Double-entry ledger with automated `preDeployCommand` migrations and `initialDeployHook` 1,000 sandbox transaction seeder.
-- **Render Cron Reconciler (`type: cron`)**: Scheduled clearing engine (`0 */6 * * *`) reconciling pending holds against carrier telemetry.
-- Complete implementation dossier: [`docs/RENDER.md`](docs/RENDER.md).
+* **Core Technology:** `@renderinc/sdk` v1.8.0, Declarative Blueprint IaC (`render.yaml`), Render Key-Value, Managed PostgreSQL 16
+* **Integration Highlights:**
+  - **Native Render Workflows (`type: workflow`)**: Built on `@renderinc/sdk` v1.8.0 `flow()` and `ctx.step()` for durable execution of 72h price-drop polling and vision forensics with automatic backoff.
+  - **Render Key-Value Redis (`type: keyvalue`)**: Private memory engine configured with `maxmemoryPolicy: noeviction` executing single-threaded Lua spend enforcers in $< 1\text{ms}$.
+  - **Managed PostgreSQL 16 (`databases`)**: Double-entry ledger with automated `preDeployCommand` migrations and `initialDeployHook` 1,000 sandbox transaction seeder.
+  - **Render Cron Reconciler (`type: cron`)**: Scheduled clearing engine (`0 */6 * * *`) reconciling pending holds against carrier telemetry.
+  - **Unified Regional Deployment**: Zero-latency private networking with pinned `region: oregon` and automatic PR previews (`previews.generation: automatic`).
+* **Code References:** [`render.yaml`](render.yaml), [`apps/workflows/src/`](apps/workflows/src/), [`apps/api-orchestrator/src/services/render-workflow-client.ts`](apps/api-orchestrator/src/services/render-workflow-client.ts)
+* **Dedicated Dossier:** [`docs/RENDER.md`](docs/RENDER.md)
 
 ### 4.4 Channel3 Commerce Intelligence (Catalog & Cart Solver)
-- **100M+ Product Discovery**: Multimodal catalog discovery (`/v1/search`) across text queries, scene photos, category IDs, and hex color palettes with promo code `PAYPAL-HACKATHON-2026`.
-- **Two-Phase Commit (2PC) Inventory Pre-Flight**: Pre-authorizes and locks merchant stock before creating PayPal order authorizations.
-- **Algorithmic Knapsack Solver**: Optimizes multi-vendor carts by balancing retail prices, tiered shipping waivers, and passing $\alpha = 0.75$ commission rebates back to the consumer.
+* **Core Technology:** Channel3 REST API (`/v1/search`, `/v1/lookup`), Promo Code `PAYPAL-HACKATHON-2026`
+* **Integration Highlights:**
+  - **100M+ Product Discovery**: Multimodal catalog discovery (`/v1/search`) across text queries, scene photos, category IDs, and hex color palettes with 20,000 active credits.
+  - **Two-Phase Commit (2PC) Inventory Pre-Flight**: Pre-authorizes and locks merchant stock before creating PayPal order authorizations.
+  - **Algorithmic Knapsack Solver**: Optimizes multi-vendor carts by balancing retail prices, tiered shipping waivers, and passing $\alpha = 0.75$ commission rebates back to the consumer.
+  - **72-Hour Price Watcher Integration**: Supplies real-time price delta feeds to durable Render Workflows.
+* **Code References:** [`apps/api-orchestrator/src/services/cart-solver.ts`](apps/api-orchestrator/src/services/cart-solver.ts), [`apps/workflows/src/tasks/price-drop-watcher.ts`](apps/workflows/src/tasks/price-drop-watcher.ts)
 
 ### 4.5 APIMatic Grounded SDK Implementation
-- Grounded initialization of `@paypal/paypal-server-sdk` using APIMatic-validated patterns: strict model deserialization, fault injection headers (`PayPal-Mock-Response`), idempotency keys (`PayPal-Request-Id`), and comprehensive integration documentation in [`docs/APIMATIC.md`](docs/APIMATIC.md).
+* **Core Technology:** APIMatic Context Plugin, `@paypal/paypal-server-sdk`
+* **Integration Highlights:**
+  - **Strict Model Grounding**: APIMatic-validated client initialization with strict type deserialization across complex PayPal domain models.
+  - **Idempotency Token Management**: Enforces client-generated `PayPal-Request-Id` UUIDs across all mutating order and payment calls.
+  - **Fault-Injection & Mock Support**: Injects and handles `PayPal-Mock-Response` negative testing headers to guarantee application resilience against bank declines and compliance violations.
+* **Code References:** [`apps/api-orchestrator/src/services/paypal/paypal-client.ts`](apps/api-orchestrator/src/services/paypal/paypal-client.ts)
+* **Dedicated Dossier:** [`docs/APIMATIC.md`](docs/APIMATIC.md)
 
 ### 4.6 Bryntum SLA Dispute Scheduler
-- Integrates `@bryntum/scheduler-trial` in the Merchant Cockpit with a live **"Unallocated SLA Deadline"** badge, color-coded urgency bands (Red <6h, Yellow vision triage, Green submitted), and a 1-click **"Imminent Breach"** filter to auto-assign dispute resolution shifts.
+* **Core Technology:** `@bryntum/scheduler-trial` v7.3
+* **Integration Highlights:**
+  - **Dispute SLA Timeline Visualization**: High-performance interactive timeline mapping open disputes against strict PayPal seller response deadlines (`seller_response_due_date`).
+  - **"Unallocated SLA Deadline" Alert Badge**: Surfaces pending disputes requiring immediate analyst intervention before default forfeiture.
+  - **Color-Coded Urgency Matrix**: Red (<6h remaining), Yellow (vision triage active), Green (evidence submitted).
+  - **1-Click "Imminent Breach" Filter**: Instantly narrows grid rows to critical SLA items to auto-schedule claims resolution shifts.
+* **Code References:** [`apps/web-cockpit/src/components/bryntum/DisputeSlaScheduler.tsx`](apps/web-cockpit/src/components/bryntum/DisputeSlaScheduler.tsx)
 
 ---
 
@@ -522,7 +551,22 @@ Explore our comprehensive technical guides and architectural dossiers:
 
 ---
 
-## 12. 📜 License & Compliance
+## 12. 🤝 Strategic Technology Partners & Ecosystem Acknowledgements
+
+AegisPay is engineered through deep integration with leading commerce rails, data visualization engines, and cloud platforms:
+
+| Partner / Platform | Subsystem Role | Key Packages & Technology Highlights |
+| :--- | :--- | :--- |
+| **PayPal Developer Platform** | Autonomous Payment Rails & Disputes | Official `@paypal/agent-toolkit`, Orders v2, Payments v2, Vault v3, Fastlane checkout, and 12-action Disputes v1 HATEOAS machine |
+| **AG Grid & AG Studio** | Enterprise Clearinghouse Workstation | `ag-grid-enterprise` v36.3.0, dynamic Quartz theming, DuckDB-WASM SSRM bridge, 6 custom React renderers, and AG Studio 3 live canvas |
+| **Render** | Cloud-Native Workflows & Infrastructure | Multi-service Blueprint (`render.yaml`), `@renderinc/sdk` v1.8.0 native workflows (`type: workflow`), Key-Value Redis Lua firewall, and Managed PostgreSQL 16 |
+| **Channel3** | Multimodal Catalog & Pricing Engine | 100M+ real-time product search (`/v1/search`), Two-Phase Commit stock reservation, and affiliate commission subsidy solver |
+| **APIMatic** | API & SDK Contract Resilience | Code-gen grounding of `@paypal/paypal-server-sdk`, strict model deserialization, idempotency keys, and negative testing headers |
+| **Bryntum** | Dispute SLA Timeline & Resource Scheduler | `@bryntum/scheduler-trial` integration with unallocated SLA deadline alert badges and breach prevention filters |
+
+---
+
+## 13. 📜 License & Compliance
 
 This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
 
