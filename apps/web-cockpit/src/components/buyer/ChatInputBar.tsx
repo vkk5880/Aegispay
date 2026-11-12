@@ -160,7 +160,7 @@ export function ChatInputBar({
         {!isLoggedIn ? (
           <button
             type="button"
-            onClick={loginWithPayPal}
+            onClick={() => { loginWithPayPal(); }}
             className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 via-cyan-600 to-blue-700 hover:from-blue-500 hover:to-cyan-500 text-white font-bold text-xs shadow-md shadow-cyan-600/20 transition-all cursor-pointer active:scale-95"
             title="Login with PayPal"
           >
@@ -170,7 +170,7 @@ export function ChatInputBar({
         ) : !isAuthorized ? (
           <button
             type="button"
-            onClick={authorizePayment}
+            onClick={() => { authorizePayment(); }}
             className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-bold text-xs shadow-md shadow-amber-600/20 transition-all cursor-pointer active:scale-95 animate-pulse"
             title="Authorize Payment"
           >

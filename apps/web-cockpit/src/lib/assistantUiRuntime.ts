@@ -261,10 +261,24 @@ export function createDataStreamChatAdapter(options: ShoppingAssistantRuntimeOpt
 
       if (!response.ok) {
         const errorText = await response.text().catch(() => '');
-        const err = new Error(`Chat API failed with HTTP ${response.status}: ${errorText || response.statusText}`);
+        let userMessage = `Unable to complete chat request (HTTP ${response.status}).`;
+        try {
+          const parsed = JSON.parse(errorText);
+          if (parsed?.error) userMessage = parsed.error;
+          else if (parsed?.message) userMessage = parsed.message;
+        } catch {}
+        const err = new Error(userMessage);
         logger.error('[AssistantUi:Run] HTTP error from chat endpoint', { status: response.status, errorText });
         if (options.onError) options.onError(err);
-        throw err;
+        yield {
+          content: [
+            {
+              type: 'text',
+              text: `⚠️ **Notice:** ${userMessage}\n\n*Please try searching for products or clicking a suggestion below.*`,
+            },
+          ],
+        };
+        return;
       }
 
       if (!response.body) {
@@ -327,7 +341,7 @@ export function createDataStreamChatAdapter(options: ShoppingAssistantRuntimeOpt
           const streamErr = new Error(frame.error);
           logger.error('[AssistantUi:Stream] Protocol error frame received', { error: frame.error });
           if (options.onError) options.onError(streamErr);
-          throw streamErr;
+          accumulatedText += (accumulatedText ? '\n\n' : '') + `⚠️ **Notice:** ${frame.error}`;
         }
 
         // Build composite content parts for assistant-ui
@@ -371,7 +385,12 @@ export function useShoppingAssistantRuntime(options: ShoppingAssistantRuntimeOpt
     return {
       async *run(args) {
         const delegate = createDataStreamChatAdapter(optionsRef.current);
-        yield* delegate.run(args);
+        const result = delegate.run(args);
+        if (result && Symbol.asyncIterator in result) {
+          yield* result as any;
+        } else {
+          yield await (result as any);
+        }
       },
     };
   }, []);

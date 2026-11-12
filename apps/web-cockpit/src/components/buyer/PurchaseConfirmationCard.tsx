@@ -410,7 +410,7 @@ export function PurchaseConfirmationCard({
           </div>
           {isAuthorized && (
             <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 shrink-0">
-              Cap: {formatCents(user?.budgetAllowanceCents || netTotalCents)}
+              Cap: {formatCents(user?.budgetCapCents || (user as any)?.budgetAllowanceCents || netTotalCents)}
             </span>
           )}
         </div>
