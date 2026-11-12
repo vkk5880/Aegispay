@@ -13,6 +13,16 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { createLogger, sanitizeForLogging } from '@aegispay/shared-types';
 
+for (const envPath of [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '../.env'),
+  path.resolve(process.cwd(), '../../.env'),
+]) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    break;
+  }
+}
 dotenv.config();
 
 export const paypalLogger = createLogger('PayPal:APIMatic');
@@ -373,7 +383,7 @@ export class PayPalApimaticClient {
 
   constructor(customConfig?: Partial<PayPalConfig>) {
     this.config = {
-      clientId: customConfig?.clientId || process.env.PAYPAL_CLIENT_ID || '',
+      clientId: customConfig?.clientId || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '',
       clientSecret: customConfig?.clientSecret || process.env.PAYPAL_CLIENT_SECRET || '',
       environment: (customConfig?.environment ||
         (process.env.PAYPAL_ENVIRONMENT === 'production' ? 'production' : 'sandbox')) as 'sandbox' | 'production',
@@ -393,6 +403,26 @@ export class PayPalApimaticClient {
     this.ordersController = new OrdersController(this.client);
     this.paymentsController = new PaymentsController(this.client);
     this.vaultController = new VaultController(this.client);
+  }
+
+  private ensureInitialized(): void {
+    const currentClientId = this.config.clientId || process.env.PAYPAL_CLIENT_ID || process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID || '';
+    const currentSecret = this.config.clientSecret || process.env.PAYPAL_CLIENT_SECRET || '';
+    if ((!this.config.clientId && currentClientId) || (!this.config.clientSecret && currentSecret)) {
+      this.config.clientId = currentClientId;
+      this.config.clientSecret = currentSecret;
+      const env = this.config.environment === 'production' ? Environment.Production : Environment.Sandbox;
+      this.client = new Client({
+        clientCredentialsAuthCredentials: {
+          oAuthClientId: this.config.clientId,
+          oAuthClientSecret: this.config.clientSecret,
+        },
+        environment: env,
+      });
+      this.ordersController = new OrdersController(this.client);
+      this.paymentsController = new PaymentsController(this.client);
+      this.vaultController = new VaultController(this.client);
+    }
   }
 
   private getBaseUrl(): string {
@@ -501,6 +531,7 @@ export class PayPalApimaticClient {
    * and in-flight promise deduplication to prevent thundering herd.
    */
   async getAccessToken(forceRefresh = false): Promise<string> {
+    this.ensureInitialized();
     const now = Date.now();
     // Safety buffer of 120 seconds to guarantee rotation BEFORE actual expiration
     const SAFETY_BUFFER_MS = 120 * 1000;

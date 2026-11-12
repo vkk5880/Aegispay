@@ -32,30 +32,39 @@ export function TransactionsClientView({ initialTransactions }: TransactionsClie
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.transactions)) {
-          const mapped = data.transactions.map((t: any, idx: number) => ({
-            id: t.transaction_id || t.id || `TXN-${idx + 1}`,
-            date: t.transaction_initiation_date || t.date || new Date().toISOString(),
-            status: t.transaction_status || t.status || 'S',
-            amount: parseFloat(t.transaction_amount?.value || t.amount || '0.00'),
-            gross_amount: parseFloat(t.transaction_amount?.value || t.gross_amount || '0.00'),
-            fee: parseFloat(t.fee_amount?.value || t.fee || '0.00'),
-            paypal_fee: parseFloat(t.fee_amount?.value || t.paypal_fee || '0.00'),
-            channel3_rebate: t.channel3_rebate || 0,
-            endingBalance: t.ending_balance?.value ? parseFloat(t.ending_balance.value) : (typeof t.endingBalance === 'number' ? t.endingBalance : 0),
-            currency: t.transaction_amount?.currency_code || t.currency || 'USD',
-            counterparty: t.payer_email || t.counterparty || '',
-            subject: t.transaction_subject || t.subject || 'PayPal Transaction',
-            carrier: t.carrier || (t.trackers?.[0]?.carrier || ''),
-            tracking_number: t.tracking_number || (t.trackers?.[0]?.tracking_number || ''),
-            delivery_status: t.delivery_status || (t.trackers?.[0]?.delivery_status || ''),
-            postal_code: t.postal_code || (t.trackers?.[0]?.postal_code || ''),
-            liability_score_l: t.liability_score_l ?? null,
-            abuse_risk_score_r: t.abuse_risk_score_r ?? null,
-            hateoasAllowedActions: t.hateoasAllowedActions || [],
-            purchase_units: Array.isArray(t.purchase_units) ? t.purchase_units : [],
-            vault_token: t.vault_token || null,
-            trackers: Array.isArray(t.trackers) ? t.trackers : [],
-          }));
+          const mapped = data.transactions.map((t: any, idx: number) => {
+            const info = t.transaction_info || {};
+            const payer = t.payer_info || {};
+            const amountVal = info.transaction_amount?.value ?? t.transaction_amount?.value ?? t.amount ?? '0.00';
+            const feeVal = info.fee_amount?.value ?? t.fee_amount?.value ?? t.fee ?? '0.00';
+            const endingBalVal = info.ending_balance?.value ?? t.ending_balance?.value ?? t.endingBalance ?? '0.00';
+            const currencyVal = info.transaction_amount?.currency_code ?? t.currency ?? 'USD';
+
+            return {
+              id: info.transaction_id || t.transaction_id || t.id || `TXN-${idx + 1}`,
+              date: info.transaction_initiation_date || t.transaction_initiation_date || t.date || new Date().toISOString(),
+              status: info.transaction_status || t.transaction_status || t.status || 'S',
+              amount: parseFloat(String(amountVal)),
+              gross_amount: parseFloat(String(amountVal)),
+              fee: parseFloat(String(feeVal)),
+              paypal_fee: parseFloat(String(feeVal)),
+              channel3_rebate: t.channel3_rebate || 0,
+              endingBalance: parseFloat(String(endingBalVal)),
+              currency: currencyVal,
+              counterparty: payer.email_address || t.payer_email || t.counterparty || 'sb-buyer@personal.example.com',
+              subject: info.transaction_subject || t.transaction_subject || t.subject || 'PayPal Transaction',
+              carrier: t.carrier || (t.trackers?.[0]?.carrier || 'USPS'),
+              tracking_number: t.tracking_number || (t.trackers?.[0]?.tracking_number || ''),
+              delivery_status: t.delivery_status || (t.trackers?.[0]?.delivery_status || 'DELIVERED'),
+              postal_code: t.postal_code || (t.trackers?.[0]?.postal_code || ''),
+              liability_score_l: t.liability_score_l ?? null,
+              abuse_risk_score_r: t.abuse_risk_score_r ?? null,
+              hateoasAllowedActions: t.hateoasAllowedActions || ['track'],
+              purchase_units: Array.isArray(t.purchase_units) ? t.purchase_units : [],
+              vault_token: t.vault_token || null,
+              trackers: Array.isArray(t.trackers) ? t.trackers : [],
+            };
+          });
           setTransactions(mapped);
           logger.info(`[TransactionsClientView] Updated with ${mapped.length} live transactions`);
           return;

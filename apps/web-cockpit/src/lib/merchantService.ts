@@ -424,11 +424,29 @@ export async function fetchMerchantProducts(limit = 50) {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/products?limit=${limit}`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/products?limit=${limit}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.products) && data.products.length > 0) {
-          return data.products;
+          return data.products.map((p: any, idx: number) => ({
+            id: p.id || `PROD-${idx + 1}`,
+            name: p.name || p.id,
+            description: p.description || '',
+            type: p.type || 'PHYSICAL',
+            category: p.category || 'SOFTWARE',
+            create_time: p.create_time || new Date().toISOString(),
+            created: p.create_time || new Date().toISOString(),
+            price_cents: p.price_cents ?? (p.price ? Math.round(parseFloat(p.price) * 100) : 11900),
+            price: p.price ? parseFloat(p.price) : (p.price_cents ? p.price_cents / 100 : 119.0),
+            allow_synthetic_intent: p.allow_synthetic_intent ?? true,
+            max_discount_percentage: p.max_discount_percentage ?? 10,
+            recent_bids_distribution: Array.isArray(p.recent_bids_distribution) && p.recent_bids_distribution.length > 0
+              ? p.recent_bids_distribution
+              : [15, 22, 35, 48, 52, 60, 75],
+          }));
         }
       }
     } catch (e: any) {
@@ -443,47 +461,28 @@ export async function fetchMerchantProducts(limit = 50) {
       const res = await fetch(`${getPayPalBaseUrl()}/v1/catalogs/products?page_size=${encodeURIComponent(limit)}&total_required=true`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data.products) ? data.products : [];
         if (items.length > 0) {
-          // Fetch details for each item
-          const detailed = await Promise.all(
-            items.map(async (p: any) => {
-              try {
-                const itemRes = await fetch(`${getPayPalBaseUrl()}/v1/catalogs/products/${encodeURIComponent(p.id)}`, {
-                  headers: { Authorization: `Bearer ${token}` },
-                  cache: 'no-store',
-                });
-                if (itemRes.ok) {
-                  const it = await itemRes.json();
-                  return {
-                    id: it.id || p.id,
-                    name: it.name || p.name || p.id,
-                    description: it.description || '',
-                    type: it.type || 'PHYSICAL',
-                    category: it.category || 'SOFTWARE',
-                    create_time: it.create_time || new Date().toISOString(),
-                    price_cents: 11900,
-                    allow_synthetic_intent: true,
-                    recent_bids_distribution: [15, 22, 35, 48, 52, 60, 75],
-                  };
-                }
-              } catch {}
-              return {
-                id: p.id,
-                name: p.name || p.id,
-                type: 'PHYSICAL',
-                category: 'SOFTWARE',
-                create_time: new Date().toISOString(),
-                price_cents: 11900,
-                allow_synthetic_intent: true,
-                recent_bids_distribution: [10, 20, 30, 40, 50],
-              };
-            })
-          );
-          return detailed;
+          return items.map((p: any, idx: number) => ({
+            id: p.id || `PROD-${idx + 1}`,
+            name: p.name || p.id,
+            description: p.description || '',
+            type: p.type || 'PHYSICAL',
+            category: p.category || 'SOFTWARE',
+            create_time: p.create_time || new Date().toISOString(),
+            created: p.create_time || new Date().toISOString(),
+            price_cents: p.price_cents ?? (p.price ? Math.round(parseFloat(p.price) * 100) : 11900),
+            price: p.price ? parseFloat(p.price) : (p.price_cents ? p.price_cents / 100 : 119.0),
+            allow_synthetic_intent: p.allow_synthetic_intent ?? true,
+            max_discount_percentage: p.max_discount_percentage ?? 10,
+            recent_bids_distribution: Array.isArray(p.recent_bids_distribution) && p.recent_bids_distribution.length > 0
+              ? p.recent_bids_distribution
+              : [15, 22, 35, 48, 52, 60, 75],
+          }));
         }
       }
     }
@@ -501,11 +500,44 @@ export async function fetchMerchantPlans(limit = 50) {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/plans?limit=${limit}`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/plans?limit=${limit}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.plans) && data.plans.length > 0) {
-          return data.plans;
+          return data.plans.map((pl: any, idx: number) => {
+            const cycle = pl.billing_cycles?.[0];
+            const priceVal = parseFloat(cycle?.pricing_scheme?.fixed_price?.value || (typeof pl.price === 'number' ? String(pl.price) : '49.00'));
+            const intervalUnit = cycle?.frequency?.interval_unit || 'MONTH';
+            const intervalCount = cycle?.frequency?.interval_count || 1;
+            const currency = cycle?.pricing_scheme?.fixed_price?.currency_code || pl.currency || 'USD';
+            return {
+              id: pl.id || `PLAN-${idx + 1}`,
+              product_id: pl.product_id || pl.productId || '',
+              productId: pl.product_id || pl.productId || '',
+              name: pl.name || 'Untitled Plan',
+              status: pl.status || 'ACTIVE',
+              description: pl.description || 'PayPal Subscription Plan',
+              create_time: pl.create_time || new Date().toISOString(),
+              created: pl.create_time || new Date().toISOString(),
+              price: priceVal,
+              billedEvery: pl.billedEvery || `${intervalCount} ${intervalUnit}`,
+              trial: pl.trial || 'None',
+              setupFee: pl.setupFee || 0,
+              currency,
+              billing_cycles: pl.billing_cycles || [
+                {
+                  frequency: { interval_unit: intervalUnit, interval_count: intervalCount },
+                  tenure_type: 'REGULAR',
+                  sequence: 1,
+                  total_cycles: 12,
+                  pricing_scheme: { fixed_price: { value: priceVal.toFixed(2), currency_code: currency } },
+                },
+              ],
+            };
+          });
         }
       }
     } catch (e: any) {
@@ -519,26 +551,43 @@ export async function fetchMerchantPlans(limit = 50) {
       const res = await fetch(`${getPayPalBaseUrl()}/v1/billing/plans?page_size=${encodeURIComponent(limit)}&total_required=true`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data.plans) ? data.plans : [];
         if (items.length > 0) {
-          const detailed = await Promise.all(
-            items.map(async (pl: any) => {
-              try {
-                const itemRes = await fetch(`${getPayPalBaseUrl()}/v1/billing/plans/${encodeURIComponent(pl.id)}`, {
-                  headers: { Authorization: `Bearer ${token}` },
-                  cache: 'no-store',
-                });
-                if (itemRes.ok) {
-                  return await itemRes.json();
-                }
-              } catch {}
-              return pl;
-            })
-          );
-          return detailed;
+          return items.map((pl: any, idx: number) => {
+            const cycle = pl.billing_cycles?.[0];
+            const priceVal = parseFloat(cycle?.pricing_scheme?.fixed_price?.value || (typeof pl.price === 'number' ? String(pl.price) : '49.00'));
+            const intervalUnit = cycle?.frequency?.interval_unit || 'MONTH';
+            const intervalCount = cycle?.frequency?.interval_count || 1;
+            const currency = cycle?.pricing_scheme?.fixed_price?.currency_code || pl.currency || 'USD';
+            return {
+              id: pl.id || `PLAN-${idx + 1}`,
+              product_id: pl.product_id || pl.productId || '',
+              productId: pl.product_id || pl.productId || '',
+              name: pl.name || 'Untitled Plan',
+              status: pl.status || 'ACTIVE',
+              description: pl.description || 'PayPal Subscription Plan',
+              create_time: pl.create_time || new Date().toISOString(),
+              created: pl.create_time || new Date().toISOString(),
+              price: priceVal,
+              billedEvery: pl.billedEvery || `${intervalCount} ${intervalUnit}`,
+              trial: pl.trial || 'None',
+              setupFee: pl.setupFee || 0,
+              currency,
+              billing_cycles: pl.billing_cycles || [
+                {
+                  frequency: { interval_unit: intervalUnit, interval_count: intervalCount },
+                  tenure_type: 'REGULAR',
+                  sequence: 1,
+                  total_cycles: 12,
+                  pricing_scheme: { fixed_price: { value: priceVal.toFixed(2), currency_code: currency } },
+                },
+              ],
+            };
+          });
         }
       }
     }
@@ -556,11 +605,31 @@ export async function fetchMerchantInvoices(limit = 50) {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/invoices?limit=${limit}`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/invoices?limit=${limit}`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.invoices) && data.invoices.length > 0) {
-          return data.invoices;
+          return data.invoices.map((inv: any, idx: number) => ({
+            id: inv.id || `INV-${idx + 1}`,
+            number: inv.detail?.invoice_number || inv.number || inv.id,
+            status: inv.status || 'SENT',
+            recipient:
+              inv.primary_recipients?.[0]?.billing_info?.business_name ||
+              inv.primary_recipients?.[0]?.billing_info?.name?.full_name ||
+              inv.recipient ||
+              'Enterprise Client',
+            email: inv.primary_recipients?.[0]?.billing_info?.email_address || inv.email || 'client@enterprise.com',
+            invoiceDate: inv.detail?.invoice_date || inv.invoiceDate || new Date().toISOString().split('T')[0],
+            dueDate: inv.detail?.payment_term?.due_date || inv.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+            total: parseFloat(inv.amount?.value || (typeof inv.total === 'number' ? String(inv.total) : '0.00')),
+            paid: parseFloat(inv.payments?.paid_amount?.value || (inv.status === 'PAID' ? inv.amount?.value || '0' : (typeof inv.paid === 'number' ? String(inv.paid) : '0'))),
+            due: parseFloat(inv.due_amount?.value || (inv.status === 'PAID' ? '0' : (typeof inv.due === 'number' ? String(inv.due) : inv.amount?.value || '0'))),
+            lineItems: Array.isArray(inv.items) ? inv.items.length : (inv.lineItems || 1),
+            currency: inv.amount?.currency_code || inv.detail?.currency_code || inv.currency || 'USD',
+          }));
         }
       }
     } catch (e: any) {
@@ -574,56 +643,30 @@ export async function fetchMerchantInvoices(limit = 50) {
       const res = await fetch(`${getPayPalBaseUrl()}/v2/invoicing/invoices?page_size=${encodeURIComponent(limit)}&total_required=true`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data.items) ? data.items : [];
         if (items.length > 0) {
-          const detailed = await Promise.all(
-            items.map(async (inv: any) => {
-              try {
-                const itemRes = await fetch(`${getPayPalBaseUrl()}/v2/invoicing/invoices/${encodeURIComponent(inv.id)}`, {
-                  headers: { Authorization: `Bearer ${token}` },
-                  cache: 'no-store',
-                });
-                if (itemRes.ok) {
-                  const it = await itemRes.json();
-                  return {
-                    id: it.id || inv.id,
-                    number: it.detail?.invoice_number || inv.id,
-                    status: it.status || 'SENT',
-                    recipient:
-                      it.primary_recipients?.[0]?.billing_info?.business_name ||
-                      it.primary_recipients?.[0]?.billing_info?.name?.full_name ||
-                      'Enterprise Client',
-                    email: it.primary_recipients?.[0]?.billing_info?.email_address || 'client@enterprise.com',
-                    invoiceDate: it.detail?.invoice_date || new Date().toISOString().split('T')[0],
-                    dueDate: it.detail?.payment_term?.due_date || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-                    total: parseFloat(it.amount?.value || '0.00'),
-                    paid: parseFloat(it.payments?.paid_amount?.value || (it.status === 'PAID' ? it.amount?.value || '0' : '0')),
-                    due: parseFloat(it.due_amount?.value || (it.status === 'PAID' ? '0' : it.amount?.value || '0')),
-                    lineItems: Array.isArray(it.items) ? it.items.length : 1,
-                    currency: it.amount?.currency_code || 'USD',
-                  };
-                }
-              } catch {}
-              return {
-                id: inv.id,
-                number: inv.id,
-                status: 'SENT',
-                recipient: 'Enterprise Client',
-                email: 'client@enterprise.com',
-                invoiceDate: new Date().toISOString().split('T')[0],
-                dueDate: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
-                total: parseFloat(inv.amount?.value || '0.00'),
-                paid: 0.0,
-                due: parseFloat(inv.amount?.value || '0.00'),
-                lineItems: 1,
-                currency: inv.amount?.currency_code || 'USD',
-              };
-            })
-          );
-          return detailed;
+          return items.map((inv: any, idx: number) => ({
+            id: inv.id || `INV-${idx + 1}`,
+            number: inv.detail?.invoice_number || inv.number || inv.id,
+            status: inv.status || 'SENT',
+            recipient:
+              inv.primary_recipients?.[0]?.billing_info?.business_name ||
+              inv.primary_recipients?.[0]?.billing_info?.name?.full_name ||
+              inv.recipient ||
+              'Enterprise Client',
+            email: inv.primary_recipients?.[0]?.billing_info?.email_address || inv.email || 'client@enterprise.com',
+            invoiceDate: inv.detail?.invoice_date || inv.invoiceDate || new Date().toISOString().split('T')[0],
+            dueDate: inv.detail?.payment_term?.due_date || inv.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+            total: parseFloat(inv.amount?.value || (typeof inv.total === 'number' ? String(inv.total) : '0.00')),
+            paid: parseFloat(inv.payments?.paid_amount?.value || (inv.status === 'PAID' ? inv.amount?.value || '0' : (typeof inv.paid === 'number' ? String(inv.paid) : '0'))),
+            due: parseFloat(inv.due_amount?.value || (inv.status === 'PAID' ? '0' : (typeof inv.due === 'number' ? String(inv.due) : inv.amount?.value || '0'))),
+            lineItems: Array.isArray(inv.items) ? inv.items.length : (inv.lineItems || 1),
+            currency: inv.amount?.currency_code || inv.detail?.currency_code || inv.currency || 'USD',
+          }));
         }
       }
     }
@@ -641,11 +684,45 @@ export async function fetchMerchantBalances() {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/balances`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/balances`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.balances) && data.balances.length > 0) {
-          return data;
+          const mapped = data.balances.map((b: any) => {
+            const currency = b.currency || 'USD';
+            const total = typeof b.total === 'number'
+              ? b.total
+              : parseFloat(b.total_balance?.value || b.total?.value || b.total || '0.00');
+            const available = typeof b.available === 'number'
+              ? b.available
+              : parseFloat(b.available_balance?.value || b.available?.value || b.available || '0.00');
+            const withheld = typeof b.withheld === 'number'
+              ? b.withheld
+              : parseFloat(b.withheld_balance?.value || b.withheld?.value || b.withheld || '0.00');
+            const history_30d = Array.isArray(b.history_30d) && b.history_30d.length > 0
+              ? b.history_30d
+              : [
+                  Math.round(available * 0.88),
+                  Math.round(available * 0.92),
+                  Math.round(available * 0.95),
+                  Math.round(available * 0.98),
+                  Math.round(available),
+                ];
+            return {
+              currency,
+              total,
+              available,
+              withheld,
+              history_30d,
+              total_balance: { currency_code: currency, value: total.toFixed(2) },
+              available_balance: { currency_code: currency, value: available.toFixed(2) },
+              withheld_balance: { currency_code: currency, value: withheld.toFixed(2) },
+            };
+          });
+          return { as_of_time: data.as_of_time || new Date().toISOString(), balances: mapped };
         }
       }
     } catch (e: any) {
@@ -659,17 +736,42 @@ export async function fetchMerchantBalances() {
       const res = await fetch(`${getPayPalBaseUrl()}/v1/reporting/balances`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.balances) && data.balances.length > 0) {
-          const mapped = data.balances.map((b: any) => ({
-            currency: b.currency || 'USD',
-            total: typeof b.total_balance?.value === 'string' ? parseFloat(b.total_balance.value) : (b.total || 0),
-            available: typeof b.available_balance?.value === 'string' ? parseFloat(b.available_balance.value) : (b.available || 0),
-            withheld: typeof b.withheld_balance?.value === 'string' ? parseFloat(b.withheld_balance.value) : (b.withheld || 0),
-            history_30d: [11000, 11400, 11800, 12100, 12500],
-          }));
+          const mapped = data.balances.map((b: any) => {
+            const currency = b.currency || 'USD';
+            const total = typeof b.total === 'number'
+              ? b.total
+              : parseFloat(b.total_balance?.value || b.total?.value || b.total || '0.00');
+            const available = typeof b.available === 'number'
+              ? b.available
+              : parseFloat(b.available_balance?.value || b.available?.value || b.available || '0.00');
+            const withheld = typeof b.withheld === 'number'
+              ? b.withheld
+              : parseFloat(b.withheld_balance?.value || b.withheld?.value || b.withheld || '0.00');
+            const history_30d = Array.isArray(b.history_30d) && b.history_30d.length > 0
+              ? b.history_30d
+              : [
+                  Math.round(available * 0.88),
+                  Math.round(available * 0.92),
+                  Math.round(available * 0.95),
+                  Math.round(available * 0.98),
+                  Math.round(available),
+                ];
+            return {
+              currency,
+              total,
+              available,
+              withheld,
+              history_30d,
+              total_balance: { currency_code: currency, value: total.toFixed(2) },
+              available_balance: { currency_code: currency, value: available.toFixed(2) },
+              withheld_balance: { currency_code: currency, value: withheld.toFixed(2) },
+            };
+          });
           return { as_of_time: data.as_of_time || new Date().toISOString(), balances: mapped };
         }
       }
@@ -688,11 +790,43 @@ export async function fetchMerchantTransactions() {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/transactions`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/transactions`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.transactions) && data.transactions.length > 0) {
-          return data.transactions;
+          return data.transactions.map((t: any, idx: number) => {
+            const info = t.transaction_info || {};
+            const payer = t.payer_info || {};
+            const amountVal = info.transaction_amount?.value ?? t.transaction_amount?.value ?? t.amount ?? '0.00';
+            const feeVal = info.fee_amount?.value ?? t.fee_amount?.value ?? t.fee ?? '0.00';
+            const endVal = info.ending_balance?.value ?? t.ending_balance?.value ?? t.endingBalance ?? '0.00';
+            const currency = info.transaction_amount?.currency_code ?? t.currency ?? 'USD';
+
+            return {
+              id: info.transaction_id || t.transaction_id || t.id || `TXN-${idx + 1}`,
+              date: info.transaction_initiation_date || t.transaction_initiation_date || t.date || new Date().toISOString(),
+              status: info.transaction_status || t.transaction_status || t.status || 'S',
+              amount: parseFloat(String(amountVal)),
+              gross_amount: parseFloat(String(amountVal)),
+              fee: parseFloat(String(feeVal)),
+              paypal_fee: parseFloat(String(feeVal)),
+              channel3_rebate: 0,
+              endingBalance: parseFloat(String(endVal)),
+              currency,
+              counterparty: payer.email_address || t.payer_email || t.counterparty || 'sb-buyer@personal.example.com',
+              subject: info.transaction_subject || t.transaction_subject || t.subject || 'PayPal Transaction',
+              carrier: t.carrier || (t.trackers?.[0]?.carrier || 'USPS'),
+              tracking_number: t.tracking_number || (t.trackers?.[0]?.tracking_number || '9400111899220011223344'),
+              delivery_status: t.delivery_status || (t.trackers?.[0]?.delivery_status || 'DELIVERED'),
+              postal_code: t.postal_code || (t.trackers?.[0]?.postal_code || '94016'),
+              liability_score_l: t.liability_score_l ?? 0.1,
+              abuse_risk_score_r: t.abuse_risk_score_r ?? 0.05,
+              hateoasAllowedActions: ['track'],
+            };
+          });
         }
       }
     } catch (e: any) {
@@ -710,32 +844,42 @@ export async function fetchMerchantTransactions() {
         {
           headers: { Authorization: `Bearer ${token}` },
           cache: 'no-store',
+          signal: AbortSignal.timeout(5000),
         }
       );
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.transaction_details) && data.transaction_details.length > 0) {
-          return data.transaction_details.map((t: any) => ({
-            id: t.transaction_info?.transaction_id || `TXN-${Date.now()}`,
-            date: t.transaction_info?.transaction_initiation_date || new Date().toISOString(),
-            status: t.transaction_info?.transaction_status || 'S',
-            amount: parseFloat(t.transaction_info?.transaction_amount?.value || '0.00'),
-            gross_amount: parseFloat(t.transaction_info?.transaction_amount?.value || '0.00'),
-            fee: parseFloat(t.transaction_info?.fee_amount?.value || '0.00'),
-            paypal_fee: parseFloat(t.transaction_info?.fee_amount?.value || '0.00'),
-            channel3_rebate: 0,
-            endingBalance: parseFloat(t.transaction_info?.ending_balance?.value || '0.00'),
-            currency: t.transaction_info?.transaction_amount?.currency_code || 'USD',
-            counterparty: t.payer_info?.email_address || 'buyer@example.com',
-            subject: t.transaction_info?.transaction_subject || 'PayPal Transaction',
-            carrier: 'USPS',
-            tracking_number: '9400111899220011223344',
-            delivery_status: 'IN_TRANSIT',
-            postal_code: '94016',
-            liability_score_l: 0.1,
-            abuse_risk_score_r: 0.05,
-            hateoasAllowedActions: ['track'],
-          }));
+          return data.transaction_details.map((t: any, idx: number) => {
+            const info = t.transaction_info || {};
+            const payer = t.payer_info || {};
+            const amountVal = info.transaction_amount?.value ?? t.transaction_amount?.value ?? t.amount ?? '0.00';
+            const feeVal = info.fee_amount?.value ?? t.fee_amount?.value ?? t.fee ?? '0.00';
+            const endVal = info.ending_balance?.value ?? t.ending_balance?.value ?? t.endingBalance ?? '0.00';
+            const currency = info.transaction_amount?.currency_code ?? t.currency ?? 'USD';
+
+            return {
+              id: info.transaction_id || t.transaction_id || t.id || `TXN-${idx + 1}`,
+              date: info.transaction_initiation_date || t.transaction_initiation_date || t.date || new Date().toISOString(),
+              status: info.transaction_status || t.transaction_status || t.status || 'S',
+              amount: parseFloat(String(amountVal)),
+              gross_amount: parseFloat(String(amountVal)),
+              fee: parseFloat(String(feeVal)),
+              paypal_fee: parseFloat(String(feeVal)),
+              channel3_rebate: 0,
+              endingBalance: parseFloat(String(endVal)),
+              currency,
+              counterparty: payer.email_address || t.payer_email || t.counterparty || 'sb-buyer@personal.example.com',
+              subject: info.transaction_subject || t.transaction_subject || t.subject || 'PayPal Transaction',
+              carrier: t.carrier || (t.trackers?.[0]?.carrier || 'USPS'),
+              tracking_number: t.tracking_number || (t.trackers?.[0]?.tracking_number || '9400111899220011223344'),
+              delivery_status: t.delivery_status || (t.trackers?.[0]?.delivery_status || 'DELIVERED'),
+              postal_code: t.postal_code || (t.trackers?.[0]?.postal_code || '94016'),
+              liability_score_l: t.liability_score_l ?? 0.1,
+              abuse_risk_score_r: t.abuse_risk_score_r ?? 0.05,
+              hateoasAllowedActions: ['track'],
+            };
+          });
         }
       }
     }
@@ -753,7 +897,10 @@ export async function fetchMerchantDisputes() {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/disputes`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.disputes) && data.disputes.length > 0) {
@@ -771,6 +918,7 @@ export async function fetchMerchantDisputes() {
       const res = await fetch(`${getPayPalBaseUrl()}/v1/customer/disputes?page_size=50`, {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
+        signal: AbortSignal.timeout(5000),
       });
       if (res.ok) {
         const data = await res.json();
@@ -804,7 +952,10 @@ export async function fetchOverviewMetrics() {
   const orchestratorUrl = getApiBaseUrl();
   if (orchestratorUrl) {
     try {
-      const res = await fetch(`${orchestratorUrl}/api/merchant/overview-metrics`, { cache: 'no-store' });
+      const res = await fetch(`${orchestratorUrl}/api/merchant/overview-metrics`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(2500),
+      });
       if (res.ok) {
         return await res.json();
       }
@@ -823,7 +974,8 @@ export async function fetchOverviewMetrics() {
   ]);
 
   const usdBal = (balances as any)?.balances?.find((b: any) => b.currency === 'USD') || (balances as any)?.balances?.[0];
-  const usdAvailable = usdBal?.available || 12500.0;
+  const rawAvail = usdBal?.available ?? usdBal?.available_balance?.value ?? 10200.49;
+  const usdAvailable = typeof rawAvail === 'number' ? rawAvail : parseFloat(rawAvail);
 
   return {
     totalProducts: Array.isArray(products) ? products.length : BASELINE_PRODUCTS.length,
